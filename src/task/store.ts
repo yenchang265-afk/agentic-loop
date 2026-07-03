@@ -16,7 +16,7 @@ type Log = (level: "info" | "warn" | "error", message: string) => unknown
 /** Anything with an id + on-disk path can be moved or annotated. */
 type FileRef = { readonly id: string; readonly path: string }
 
-export type TaskStatus = "draft" | "in-planning" | "in-progress" | "completed" | "abandoned"
+export type TaskStatus = "draft" | "in-planning" | "in-progress" | "in-review" | "completed" | "abandoned"
 
 const isMarkdown = (name: string): boolean => name.toLowerCase().endsWith(".md")
 

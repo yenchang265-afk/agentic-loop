@@ -13,16 +13,23 @@ skips straight through:
 | Stage | Does | Pauses? |
 |-------|------|---------|
 | PLAN | Turns the goal into a spec-bounded, ordered plan | **yes — approve & park the plan** |
-| BUILD | Implements task-driven, test-first | no (runs in a `/loop watch` session) |
+| BUILD | Implements task-driven, test-first, on its own `loop/<id>` branch | no (runs in a `/loop watch` session) |
 | VERIFY | Runs tests; FAIL re-plans with the failure | no |
-| REVIEW | Checks the diff; FAIL re-builds with feedback | no |
+| REVIEW | Checks the branch diff; FAIL re-builds with feedback | no |
 
 Approving the plan **parks** it as a task instead of building it in the same
 session — run `/loop watch` in another session (or the same one, later) to
-claim and build it. Re-plan/re-build loops are capped by `maxIterations` in
-config — the loop gives up and reports rather than spinning forever. The
-loop never pushes or opens a PR itself; you always do that last step after a
-REVIEW PASS.
+claim and build it. Execution is isolated on a `loop/<id>` git branch with a
+commit checkpoint per build iteration; VERIFY/REVIEW record their verdicts
+through a `loop_verdict` plugin tool (free-text verdicts are ignored), and
+every gate approval, verdict, and build run is appended to the task file as
+a timestamped, attributed audit note. Re-plan/re-build loops are capped by
+`maxIterations`; a stage that outlives `stageTimeoutMinutes` fails the loop
+instead of hanging it. On a REVIEW PASS the task parks in `in-review/` — the
+loop never pushes or opens a PR itself; you review the branch diff and ship
+it, then move the task to `completed/`. A run that dies mid-build is resumed
+with `/loop recover <id>`. See `docs/design/threat-model.md` for the
+security posture.
 
 ## Commands
 
@@ -33,6 +40,8 @@ REVIEW PASS.
 - `/loop watch` — turn this session into an execution worker: claims and
   builds parked, approved tasks on idle
 - `/loop unwatch` — stop this session from claiming new work
+- `/loop recover <id>` — resume an in-progress task whose run died mid-build
+  (crash, restart), from its persisted plan
 - `/loop stop` — abort, clear state, and exit watch mode
 - `/loop status` — print stage, iteration count, pause state, watch status
 

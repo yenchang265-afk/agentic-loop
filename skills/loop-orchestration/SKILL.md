@@ -71,9 +71,9 @@ human gate (see `task-backlog-management`).
 | Stage | Writes code? | Role |
 |-------|--------------|------|
 | plan | no | reads the code itself; sharpens the raw goal into a bounded problem statement (problem, non-goals, assumptions), then an ordered, review-sized plan + testable acceptance criteria |
-| build | **yes** | implements the approved plan test-first, or applies a REVIEW stage's fix requests on a re-build |
-| verify | no | runs tests, checks acceptance criteria, emits `LOOP_VERIFY: PASS`/`FAIL` |
-| review | no | five-axis code review of the diff, emits `LOOP_REVIEW: PASS`/`FAIL` |
+| build | **yes** | implements the approved plan test-first on the loop's own `loop/<id>` branch, or applies a REVIEW stage's fix requests on a re-build; each iteration is committed as a checkpoint |
+| verify | no | runs tests (bash allowlist), checks acceptance criteria, records `PASS`/`FAIL`/`ERROR` via the `loop_verdict` tool |
+| review | no | five-axis code review of exactly `git diff base...branch` (read-only bash allowlist), records `PASS`/`FAIL`/`ERROR` via the `loop_verdict` tool |
 
 ## Process
 
@@ -93,12 +93,16 @@ human gate (see `task-backlog-management`).
      findings fed back in, same session (the plan is assumed sound).
    - A re-plan gate reached this way (`iteration > 0`) resumes with `/loop go`
      in that same watch session — only the *first* approval parks.
-4. On a REVIEW PASS, the loop is done. Review the diff yourself, then push and
-   open the PR — the loop never does that step for you.
+4. On a REVIEW PASS, the loop is done and the task moves to `in-review/` —
+   the human diff gate. Review `git diff <base>...loop/<id>` yourself, push
+   and open the PR, then move the task to `completed/` when it ships — the
+   loop never does those steps for you.
 5. `/loop stop` aborts, cancels a clarification, and exits watch mode, all at
    once; `/loop unwatch` exits watch mode alone (a build already claimed still
    finishes); `/loop status` shows the current stage, iteration, pause state,
-   and whether this session is watching.
+   and whether this session is watching; `/loop recover <id>` resumes an
+   in-progress task whose run died mid-build (crash/restart) from its
+   persisted plan — plugin startup logs any such interrupted tasks it finds.
 
 ## Planning and execution are separate sessions
 
@@ -133,42 +137,60 @@ a loop, scans `docs/tasks/in-progress/` for tasks where `isClaimable(task)`
 is true — has a persisted plan (`## Implementation Plan`), and has **never**
 had any `> BUILD started` note (not just "the last one is unmatched" — that's
 `wasInterrupted`, a different check used for crash recovery). It picks the
-lowest-priority claimable task (same `selectNext` tie-break as `/loop next`),
-and claims it by doing the same thing `drive()` already does when a build
-starts: appending a `> BUILD started (iteration 1)` note to the task file.
-That append **is** the claim — there's no separate lock.
+lowest-priority claimable task (same `selectNext` tie-break as `/loop next`)
+and claims it **atomically**: a non-recursive `mkdir` of
+`in-progress/.claims/<id>` either succeeds (claim won) or fails because
+another watcher on the same filesystem got there first. The
+`> BUILD started` note remains the human-readable audit record; the marker
+directory is the lock.
 
-**Accepted risk:** two watch sessions polling on the same idle tick can both
-see the same task as claimable before either has appended its claim note.
-There's no lock around this, by design — it matches this codebase's existing
-posture on other best-effort, non-atomic filesystem operations (`mv`/`printf`
-based moves and appends throughout `task/store.ts`). If you're running
-multiple watchers, treat a double-claim as a rare, visible-in-the-diff
-possibility, not an impossibility.
+Within one opencode instance, a per-directory execution lock additionally
+serializes drives — all sessions share one working tree and one checked-out
+branch, so only one loop may run stages in it at a time. **Not covered:**
+separate opencode *processes* sharing one clone. Run additional watchers in
+their own clones or git worktrees.
 
 ## The verdict contracts
 
-VERIFY and REVIEW each end their output with exactly one machine-readable line
-that the driver greps to decide what happens next:
+VERIFY and REVIEW each record their verdict by calling the **`loop_verdict`
+plugin tool** — the loop's only trusted verdict channel. The driver accepts
+a verdict only from the session whose loop is currently sitting in that
+exact check stage; a `LOOP_VERIFY:`/`LOOP_REVIEW:` line in the stage's text
+is a human-readable echo for the transcript and is deliberately **ignored**
+(free text is untrusted — a quoted contract or echoed repo content must
+never flip control flow):
 
 ```
-LOOP_VERIFY: PASS    # every acceptance criterion met, tests green → advance to review
-LOOP_VERIFY: FAIL    # otherwise → re-plan (if iteration budget remains)
-
-LOOP_REVIEW: PASS    # no Critical/Important findings on any axis → loop done
-LOOP_REVIEW: FAIL    # otherwise → re-build (if iteration budget remains)
+PASS     # verify: every criterion met, tests green → review; review: no Critical/Important findings → done
+FAIL     # otherwise → re-plan (verify) / re-build (review), if iteration budget remains
+ERROR    # the check itself could not run (broken environment) → stop for a human, no iteration burned
 ```
 
-A missing or garbled verdict is treated as FAIL, not as a stall — the loop
-still terminates via the iteration cap rather than hanging indefinitely.
+No tool call at all is treated as FAIL, not as a stall — the loop still
+terminates via the iteration cap rather than hanging indefinitely.
 
 ## Termination
 
-- **REVIEW PASS** → loop done. Review the diff, then push/open the PR.
+- **REVIEW PASS** → loop done; the task moves to `in-review/`. Review
+  `git diff <base>...loop/<id>`, push/open the PR, then move the task to
+  `completed/` when it ships.
 - **FAIL** (verify or review) and `iteration + 1 < maxIterations` → loop back
   (re-plan or re-build) with the failure feedback threaded in.
 - **FAIL** and the cap is reached → stop and report. Default `maxIterations`
   is 3, shared across both feedback loops (configurable).
+- **ERROR** (verify or review) → stop immediately for a human; fix the
+  environment, then `/loop recover <id>`.
+- A stage exceeding `stageTimeoutMinutes` fails the loop (partial work is
+  checkpointed on the branch) instead of wedging the driver.
+
+## Audit trail
+
+Every lifecycle event — plan recorded, plan approved (with the approver's
+git identity), build start/finish, each verdict, stop, recovery, completion
+— is appended to the task file as a timestamped note, and each stage's full
+output is written to `<tasksDir>/runs/<id>.md`. Planning-phase backlog
+mutations are committed scoped to the tasks dir; execution-phase notes ride
+the branch checkpoints. See `docs/design/threat-model.md`.
 
 ## Config
 
@@ -179,7 +201,8 @@ Optional `.agentic-loop.json` at the repo root — every field has a default:
   "maxIterations": 3,           // shared cap on verify-FAIL re-plans + review-FAIL re-builds
   "gateBeforeBuild": true,      // pause for plan approval before build edits anything
   "interviewBeforePlan": true,  // allow interview-me on an underspecified free-text goal, before PLAN
-  "tasksDir": "docs/tasks"      // root of the task backlog — see task-backlog-management
+  "tasksDir": "docs/tasks",     // root of the task backlog — see task-backlog-management
+  "stageTimeoutMinutes": 60     // wall-clock cap per stage; exceeding it fails the loop
 }
 ```
 
@@ -199,26 +222,32 @@ Optional `.agentic-loop.json` at the repo root — every field has a default:
   the plugin may have failed to fire (see plugin logs via `client.app.log`).
 - A re-plan (from VERIFY FAIL) that ignores the "Verify failure to address"
   context and repeats the previous plan verbatim.
-- `LOOP_VERIFY`/`LOOP_REVIEW` verdict lines appearing more than once, or not
-  at the very end of a stage's output — the driver takes the last match, but
-  an ambiguous verdict usually means the subagent didn't follow its contract.
+- A check stage that wrote a `LOOP_VERIFY`/`LOOP_REVIEW` text line but never
+  called `loop_verdict` — the loop logs the discrepancy and records FAIL;
+  the subagent didn't follow its contract.
 - A parked task sitting in `in-progress/` indefinitely — nothing is watching
   it. `/loop watch` in some session, or check that a watcher hasn't hit a
   mid-execution re-plan gate waiting on a human `/loop go`.
-- A task claimed by two different sessions at once (both appended `> BUILD
-  started` close together) — the accepted claim-race risk; check `git
-  status`/`git diff` before trusting either one's work.
+- A stale `.claims/<id>` marker for a task with no live loop — the claiming
+  run died; `/loop recover <id>` re-claims and resumes it.
+- A task sitting in `in-review/` — that's not a stall, it's the human diff
+  gate; review the branch and move it to `completed/` when it ships.
 
 ## Verification
 
 - [ ] `/loop status` reflects the actual current stage after each `/loop go`.
-- [ ] Every VERIFY and REVIEW response ends with exactly one verdict line.
-- [ ] No file was edited before the plan gate was approved.
+- [ ] Every VERIFY and REVIEW turn calls `loop_verdict` exactly once, and its
+      text line matches the recorded verdict.
+- [ ] No file was edited before the plan gate was approved, and every build
+      edit landed on the `loop/<id>` branch, never the base branch.
 - [ ] A stopped/failed loop leaves its task (if any) in `in-progress/` with a
-      note — never silently disappears or is left in `completed/`.
+      timestamped note — never silently disappears or is left in `completed/`.
+- [ ] A REVIEW PASS parks the task in `in-review/`; only a human moves it to
+      `completed/`.
 - [ ] The first `/loop go` on a plan parks it (task moved/created in
       `in-progress/`) and does **not** produce a BUILD in the planning session.
 - [ ] A `/loop watch` session only ever claims a task that `isClaimable`
-      would return `true` for — never one with any `> BUILD started` note.
+      would return `true` for, and holds its `.claims/<id>` marker while
+      driving it.
 - [ ] No session builds anything without a human having run `/loop watch` in
       it first.

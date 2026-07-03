@@ -353,10 +353,13 @@ const drive = async (
       await toast(client, action.message, "info")
       return
     case "done": {
+      // "Done" for the loop is not "completed" for the task: a human still
+      // has to look at the diff. The task parks in in-review/; moving it to
+      // completed/ (e.g. when the PR merges) is the human's call.
       if (state.task) {
         try {
-          await appendNote(deps.$, state.task, auditNote("Loop done — review passed", new Date(), actor))
-          await moveTask(deps.$, state.task, "completed")
+          await appendNote(deps.$, state.task, auditNote("Loop done — review passed, awaiting human diff review", new Date(), actor))
+          await moveTask(deps.$, state.task, "in-review")
         } catch (err) {
           await deps.log("warn", `loop done but task move failed: ${(err as Error).message}`)
         }
@@ -364,8 +367,13 @@ const drive = async (
       await checkpoint(deps, state, `loop(${loopId(state)}): done — review passed`)
       await restoreBase(deps, state)
       clearLoop(sessionID)
-      const where = state.git ? ` Work is on branch ${state.git.branch}.` : ""
-      await toast(client, `${action.message}${where}`, "success")
+      const where = state.git ? ` on branch ${state.git.branch}` : ""
+      const next = state.task
+        ? ` Review the diff${where}, then move ${config.tasksDir}/in-review/${state.task.id}.md to completed/ when it ships.`
+        : where
+          ? ` Review the diff${where}.`
+          : ""
+      await toast(client, `${action.message}${next}`, "success")
       return
     }
     case "stop": {
