@@ -91,6 +91,19 @@ export const AgenticLoop: Plugin = async ({ client, directory, $ }) => {
         },
         execute: async (args, ctx) => driver.beginAfterClarification(deps, ctx.sessionID, args.goal),
       }),
+
+      loop_verdict: tool({
+        description:
+          "Record the VERIFY or REVIEW stage's machine-readable verdict for the running loop. This tool " +
+          "call is the loop's ONLY trusted verdict channel — a PASS/FAIL written in plain text is ignored. " +
+          "Call exactly once, at the end of the check stage's turn, after gathering the evidence. Only the " +
+          "stage the loop is currently running may record; calls from any other stage or session are ignored.",
+        args: {
+          stage: tool.schema.enum(["verify", "review"]).describe("Which check stage this verdict belongs to."),
+          verdict: tool.schema.enum(["PASS", "FAIL"]).describe("PASS only on observed evidence; otherwise FAIL."),
+        },
+        execute: async (args, ctx) => driver.recordVerdict(ctx.sessionID, args.stage, args.verdict),
+      }),
     },
   }
 }

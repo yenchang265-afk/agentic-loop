@@ -29,7 +29,11 @@ changed. Verify the change against those criteria using evidence, not assumption
 
 ## Output
 
-End your response with a **machine-readable verdict line**, exactly one of:
+**Record your verdict by calling the `loop_verdict` tool** — stage `verify`,
+verdict `PASS` or `FAIL` — exactly once, at the end of your turn. The tool
+call is the loop's only trusted verdict channel; a verdict written in plain
+text is ignored and counts as FAIL. Also end your response with the matching
+human-readable line for the transcript:
 
 ```
 LOOP_VERIFY: PASS
@@ -46,7 +50,7 @@ Above the verdict, give:
 ## Hard rules
 
 - **Never** edit, create, or delete files; never fix code. Report, don't repair.
-- The verdict line must appear **exactly** as above (the loop driver greps it).
-  Emit exactly one verdict.
+- Call `loop_verdict` exactly once, with the same verdict as your text line.
+  No tool call means the loop records a FAIL.
 - Do not report PASS on unobserved or flaky evidence — if you cannot run the
   tests, that is a FAIL with the reason stated.

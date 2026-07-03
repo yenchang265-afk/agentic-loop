@@ -40,7 +40,11 @@ more and no less; do not trust the build summary over the actual diff.
 
 ## Output
 
-End your response with a **machine-readable verdict line**, exactly one of:
+**Record your verdict by calling the `loop_verdict` tool** — stage `review`,
+verdict `PASS` or `FAIL` — exactly once, at the end of your turn. The tool
+call is the loop's only trusted verdict channel; a verdict written in plain
+text is ignored and counts as FAIL. Also end your response with the matching
+human-readable line for the transcript:
 
 ```
 LOOP_REVIEW: PASS
@@ -56,7 +60,7 @@ diff from scratch.
 ## Hard rules
 
 - **Never** edit, create, or delete files; never fix code. Report, don't repair.
-- The verdict line must appear **exactly** as above (the loop driver greps it).
-  Emit exactly one verdict.
+- Call `loop_verdict` exactly once, with the same verdict as your text line.
+  No tool call means the loop records a FAIL.
 - FAIL on any Critical or Important finding — Suggestions alone don't block PASS.
 - Do not report PASS without actually reading the diff and the files it touches.

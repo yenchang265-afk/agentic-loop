@@ -117,7 +117,7 @@ test("build auto-advances to verify", () => {
 
 test("verify PASS advances to review", () => {
   const s = { ...createState("g"), stage: "verify" as const }
-  const { state, action } = advanceOnIdle(s, config, "all met\nLOOP_VERIFY: PASS")
+  const { state, action } = advanceOnIdle(s, config, "all criteria met", "PASS")
   assert.equal(state.stage, "review")
   assert.equal(action.kind, "fire")
   if (action.kind === "fire") assert.equal(action.stage, "review")
@@ -125,7 +125,7 @@ test("verify PASS advances to review", () => {
 
 test("verify FAIL within budget re-plans with the failure threaded", () => {
   const s = { ...createState("g"), stage: "verify" as const, iteration: 0, artifacts: { plan: "P" } }
-  const { state, action } = advanceOnIdle(s, config, "gap: missing test\nLOOP_VERIFY: FAIL")
+  const { state, action } = advanceOnIdle(s, config, "gap: missing test", "FAIL")
   assert.equal(state.stage, "plan")
   assert.equal(state.iteration, 1)
   if (action.kind === "fire") {
@@ -136,27 +136,33 @@ test("verify FAIL within budget re-plans with the failure threaded", () => {
 
 test("verify FAIL at the iteration cap stops", () => {
   const s = { ...createState("g"), stage: "verify" as const, iteration: 2 }
-  const { action } = advanceOnIdle(s, config, "LOOP_VERIFY: FAIL")
+  const { action } = advanceOnIdle(s, config, "gaps remain", "FAIL")
   assert.equal(action.kind, "stop")
 })
 
-test("an unparseable verify verdict is treated as FAIL", () => {
+test("a missing verify verdict is treated as FAIL", () => {
   const s = { ...createState("g"), stage: "verify" as const, iteration: 2 }
-  const { action } = advanceOnIdle(s, config, "I think it's fine?")
+  const { action } = advanceOnIdle(s, config, "I think it's fine?", null)
   assert.equal(action.kind, "stop")
+})
+
+test("a PASS that appears only in verify's text — not via the verdict tool — is not trusted", () => {
+  const s = { ...createState("g"), stage: "verify" as const, iteration: 0 }
+  const { state } = advanceOnIdle(s, config, "all good\nLOOP_VERIFY: PASS", null)
+  assert.equal(state.stage, "plan") // re-plans as a FAIL instead of advancing
 })
 
 // --- review finishes the loop, and review FAIL loops back to build ---
 
 test("review PASS finishes the loop", () => {
   const s = { ...createState("g"), stage: "review" as const }
-  const { action } = advanceOnIdle(s, config, "five-axis review clean\nLOOP_REVIEW: PASS")
+  const { action } = advanceOnIdle(s, config, "five-axis review clean", "PASS")
   assert.equal(action.kind, "done")
 })
 
 test("review FAIL within budget re-builds (not re-plans) with the feedback threaded", () => {
   const s = { ...createState("g"), stage: "review" as const, iteration: 0, artifacts: { plan: "P" } }
-  const { state, action } = advanceOnIdle(s, config, "gap: missing input validation\nLOOP_REVIEW: FAIL")
+  const { state, action } = advanceOnIdle(s, config, "gap: missing input validation", "FAIL")
   assert.equal(state.stage, "build")
   assert.equal(state.iteration, 1)
   if (action.kind === "fire") {
@@ -167,13 +173,13 @@ test("review FAIL within budget re-builds (not re-plans) with the feedback threa
 
 test("review FAIL at the iteration cap stops", () => {
   const s = { ...createState("g"), stage: "review" as const, iteration: 2 }
-  const { action } = advanceOnIdle(s, config, "LOOP_REVIEW: FAIL")
+  const { action } = advanceOnIdle(s, config, "findings remain", "FAIL")
   assert.equal(action.kind, "stop")
 })
 
-test("an unparseable review verdict is treated as FAIL", () => {
+test("a missing review verdict is treated as FAIL", () => {
   const s = { ...createState("g"), stage: "review" as const, iteration: 2 }
-  const { action } = advanceOnIdle(s, config, "looks okay I guess")
+  const { action } = advanceOnIdle(s, config, "looks okay I guess", null)
   assert.equal(action.kind, "stop")
 })
 

@@ -18,6 +18,7 @@ import {
   writeTask,
 } from "../task/store.ts"
 import { checkoutBranch, commitAll, currentBranch, isDirty, isGitRepo } from "./git.ts"
+import { LOOP_REVIEW_TAG, LOOP_VERIFY_TAG, parseVerdict, type Verdict } from "./verdict.ts"
 import type { Action, Config, LoopState, TaskRef } from "./state.ts"
 import {
   advanceOnIdle,
@@ -125,6 +126,40 @@ const watching = new Set<string>()
  */
 const executingDirs = new Set<string>()
 
+/** A check stage's stage kind — the only stages that carry a verdict. */
+type CheckStage = "verify" | "review"
+
+/**
+ * Verdicts recorded by the `loop_verdict` tool, per session, consumed by the
+ * drive loop right after the check stage that recorded them completes. This
+ * tool call — not the stage's free text — is the authoritative channel;
+ * text is untrusted (quoted contracts, echoed repo content).
+ */
+const recordedVerdicts = new Map<string, { readonly stage: CheckStage; readonly verdict: Verdict }>()
+
+/**
+ * Record a verdict from the `loop_verdict` plugin tool. Only accepted while
+ * this session's live loop is actually sitting in that check stage —
+ * anything else (no loop, wrong stage, e.g. a build agent trying to
+ * pre-empt its own verification) is ignored with an explanatory result.
+ */
+export const recordVerdict = (sessionID: string, stage: CheckStage, verdict: Verdict): string => {
+  const state = getLoop(sessionID)
+  if (!state) return "No active loop in this session — verdict ignored."
+  if (state.stage !== stage) {
+    return `The loop is at ${state.stage}, not ${stage} — verdict ignored. Only the running check stage may record its own verdict.`
+  }
+  recordedVerdicts.set(sessionID, { stage, verdict })
+  return `Recorded ${stage} verdict: ${verdict}.`
+}
+
+/** Consume (read-and-clear) the verdict recorded for a session's check stage, if any. */
+const takeVerdict = (sessionID: string, stage: CheckStage): Verdict | null => {
+  const rec = recordedVerdicts.get(sessionID)
+  recordedVerdicts.delete(sessionID)
+  return rec && rec.stage === stage ? rec.verdict : null
+}
+
 const toast = (client: Client, message: string, variant: "info" | "success" | "warning" | "error") =>
   client.tui.showToast({ body: { message, variant } }).catch(() => {})
 
@@ -226,6 +261,7 @@ const drive = async (
     const { task, iteration } = step.state
     const trackBuild = stage === "build" && task
     if (trackBuild) await appendNote(deps.$, task, `BUILD started (iteration ${iteration + 1})`)
+    recordedVerdicts.delete(sessionID) // no stale verdict may leak into this stage
     const output = await runStage(client, sessionID, stage, args)
     if (trackBuild) await appendNote(deps.$, task, `BUILD finished (iteration ${iteration + 1})`)
     // A /loop stop while the stage ran cleared this session's loop — halt the
@@ -238,7 +274,20 @@ const drive = async (
     if (stage === "build") {
       await checkpoint(deps, step.state, `loop(${loopId(step.state)}): build iteration ${iteration + 1}`)
     }
-    step = advanceOnIdle(step.state, config, output)
+    let verdict: Verdict | null = null
+    if (stage === "verify" || stage === "review") {
+      verdict = takeVerdict(sessionID, stage)
+      if (verdict === null) {
+        // The tool call is the only trusted channel. A text-only verdict is
+        // logged for diagnosis but deliberately not honored.
+        const inText = parseVerdict(output, stage === "verify" ? LOOP_VERIFY_TAG : LOOP_REVIEW_TAG)
+        await deps.log(
+          "warn",
+          `${stage} recorded no verdict via loop_verdict${inText ? ` (text claimed ${inText})` : ""} — treating as FAIL`,
+        )
+      }
+    }
+    step = advanceOnIdle(step.state, config, output, verdict)
   }
 
   const { state, action } = step

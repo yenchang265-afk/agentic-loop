@@ -1,4 +1,4 @@
-import { LOOP_REVIEW_TAG, LOOP_VERIFY_TAG, parseVerdict } from "./verdict.ts"
+import type { Verdict } from "./verdict.ts"
 
 /**
  * Loop state machine for the agentic loop:
@@ -159,11 +159,16 @@ const fire = (state: LoopState, stage: Stage): { state: LoopState; action: Actio
 /**
  * Decide what to do when the session goes idle after `state.stage` completed.
  * `output` is that stage's captured assistant text (stored as its artifact).
+ * `verdict` is the check stage's resolved verdict — recorded via the
+ * `loop_verdict` tool and resolved by the driver, never parsed out of
+ * `output` here (free text is an untrusted channel; see verdict.ts). A
+ * missing verdict is a FAIL, not a stall.
  */
 export const advanceOnIdle = (
   state: LoopState,
   config: Config,
   output: string,
+  verdict: Verdict | null = null,
 ): { state: LoopState; action: Action } => {
   const s = withArtifact(state, state.stage, output)
 
@@ -182,10 +187,10 @@ export const advanceOnIdle = (
       return fire(s, "verify")
 
     case "verify": {
-      if (parseVerdict(output, LOOP_VERIFY_TAG) === "PASS") {
+      if (verdict === "PASS") {
         return fire(s, "review")
       }
-      // FAIL (or unparseable verdict): re-plan if budget remains, else stop.
+      // FAIL (or no recorded verdict): re-plan if budget remains, else stop.
       if (s.iteration + 1 < config.maxIterations) {
         const next = { ...s, iteration: s.iteration + 1 }
         return fire(next, "plan")
@@ -197,13 +202,13 @@ export const advanceOnIdle = (
     }
 
     case "review": {
-      if (parseVerdict(output, LOOP_REVIEW_TAG) === "PASS") {
+      if (verdict === "PASS") {
         return {
           state: s,
           action: { kind: "done", message: "✓ Loop done — review passed. Ship it yourself." },
         }
       }
-      // FAIL (or unparseable verdict): re-build if budget remains, else stop.
+      // FAIL (or no recorded verdict): re-build if budget remains, else stop.
       if (s.iteration + 1 < config.maxIterations) {
         const next = { ...s, iteration: s.iteration + 1 }
         return fire(next, "build")
