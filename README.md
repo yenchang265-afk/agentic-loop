@@ -42,10 +42,15 @@ by name via the `skill` tool.
 git clone <this-repo>
 cd agentic-loop
 npm install
+./install.sh
 ```
 
-Point OpenCode at the plugin directory per your OpenCode plugin loading
-convention.
+`install.sh` symlinks the agents, commands, skills, and references into
+`~/.config/opencode/` (or `$OPENCODE_CONFIG_DIR`) and registers the plugin as
+a local plugin file, so `/loop` and the bundled skills work in every OpenCode
+session. It's idempotent — re-run after `git pull` for updates. Use
+`--copy` instead of symlinks, or pass a directory to install somewhere other
+than the default OpenCode config dir.
 
 ## Layout
 
@@ -57,6 +62,8 @@ convention.
   requests pull from
 - `docs/tasks/` — the filesystem task backlog `/loop next` and `/loop task`
   read from
+- `install.sh` — installs this plugin into an OpenCode config directory
+  (global by default)
 
 ## Develop
 
