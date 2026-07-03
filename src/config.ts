@@ -26,6 +26,8 @@ const ConfigSchema = z.object({
   interviewBeforePlan: z.boolean().default(true),
   /** Repo-relative root of the task backlog; its subfolders are task statuses. */
   tasksDir: z.string().min(1).default("docs/tasks"),
+  /** Wall-clock cap on a single stage; a stage exceeding it fails the loop instead of hanging it. */
+  stageTimeoutMinutes: z.number().int().positive().default(60),
 })
 
 export const DEFAULT_CONFIG: Config = ConfigSchema.parse({})

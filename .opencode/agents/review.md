@@ -41,14 +41,17 @@ more and no less; do not trust the build summary over the actual diff.
 ## Output
 
 **Record your verdict by calling the `loop_verdict` tool** — stage `review`,
-verdict `PASS` or `FAIL` — exactly once, at the end of your turn. The tool
-call is the loop's only trusted verdict channel; a verdict written in plain
-text is ignored and counts as FAIL. Also end your response with the matching
+verdict `PASS`, `FAIL`, or `ERROR` — exactly once, at the end of your turn.
+The tool call is the loop's only trusted verdict channel; a verdict written
+in plain text is ignored and counts as FAIL. Use `ERROR` **only** when the
+review itself could not run (e.g. the diff is unreadable) — findings are
+always `FAIL`, never `ERROR`. Also end your response with the matching
 human-readable line for the transcript:
 
 ```
 LOOP_REVIEW: PASS
 LOOP_REVIEW: FAIL
+LOOP_REVIEW: ERROR
 ```
 
 Above the verdict, give a structured review: findings grouped by axis, each

@@ -30,14 +30,17 @@ changed. Verify the change against those criteria using evidence, not assumption
 ## Output
 
 **Record your verdict by calling the `loop_verdict` tool** — stage `verify`,
-verdict `PASS` or `FAIL` — exactly once, at the end of your turn. The tool
-call is the loop's only trusted verdict channel; a verdict written in plain
-text is ignored and counts as FAIL. Also end your response with the matching
-human-readable line for the transcript:
+verdict `PASS`, `FAIL`, or `ERROR` — exactly once, at the end of your turn.
+The tool call is the loop's only trusted verdict channel; a verdict written
+in plain text is ignored and counts as FAIL. Use `ERROR` **only** when the
+check itself could not run at all (missing test runner, broken environment)
+— failing tests are always `FAIL`, never `ERROR`. Also end your response
+with the matching human-readable line for the transcript:
 
 ```
 LOOP_VERIFY: PASS
 LOOP_VERIFY: FAIL
+LOOP_VERIFY: ERROR
 ```
 
 Above the verdict, give:
@@ -52,5 +55,6 @@ Above the verdict, give:
 - **Never** edit, create, or delete files; never fix code. Report, don't repair.
 - Call `loop_verdict` exactly once, with the same verdict as your text line.
   No tool call means the loop records a FAIL.
-- Do not report PASS on unobserved or flaky evidence — if you cannot run the
-  tests, that is a FAIL with the reason stated.
+- Do not report PASS on unobserved or flaky evidence. Tests that ran and
+  failed are a FAIL; tests that could not run at all are an ERROR with the
+  reason stated.

@@ -15,7 +15,12 @@
  * when none is present.
  */
 
-export type Verdict = "PASS" | "FAIL"
+/**
+ * PASS/FAIL decide the loop's control flow; ERROR means the check itself
+ * could not run (broken environment, missing test runner) — the loop stops
+ * for a human instead of burning a re-plan/re-build iteration on it.
+ */
+export type Verdict = "PASS" | "FAIL" | "ERROR"
 
 /** The verdict tags emitted by the loop's check stages. */
 export const LOOP_VERIFY_TAG = "LOOP_VERIFY"
@@ -23,7 +28,7 @@ export const LOOP_REVIEW_TAG = "LOOP_REVIEW"
 
 export const parseVerdict = (text: string, tag: string): Verdict | null => {
   if (!text) return null
-  const re = new RegExp(`${tag}:\\s*(PASS|FAIL)`, "gi")
+  const re = new RegExp(`${tag}:\\s*(PASS|FAIL|ERROR)`, "gi")
   let last: Verdict | null = null
   for (const match of text.matchAll(re)) {
     const verdict = match[1]

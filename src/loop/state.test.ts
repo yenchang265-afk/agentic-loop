@@ -13,7 +13,7 @@ import {
   setLoop,
 } from "./state.ts"
 
-const config: Config = { maxIterations: 3, gateBeforeBuild: true, tasksDir: "docs/tasks" }
+const config: Config = { maxIterations: 3, gateBeforeBuild: true, tasksDir: "docs/tasks", stageTimeoutMinutes: 60 }
 
 // --- plan → build gate ---
 
@@ -150,6 +150,21 @@ test("a PASS that appears only in verify's text — not via the verdict tool —
   const s = { ...createState("g"), stage: "verify" as const, iteration: 0 }
   const { state } = advanceOnIdle(s, config, "all good\nLOOP_VERIFY: PASS", null)
   assert.equal(state.stage, "plan") // re-plans as a FAIL instead of advancing
+})
+
+test("verify ERROR stops without burning a re-plan iteration", () => {
+  const s = { ...createState("g"), stage: "verify" as const, iteration: 0 }
+  const { state, action } = advanceOnIdle(s, config, "test runner missing", "ERROR")
+  assert.equal(action.kind, "stop")
+  if (action.kind === "stop") assert.match(action.message, /environment|infrastructure/i)
+  assert.equal(state.iteration, 0)
+})
+
+test("review ERROR stops without burning a re-build iteration", () => {
+  const s = { ...createState("g"), stage: "review" as const, iteration: 1 }
+  const { state, action } = advanceOnIdle(s, config, "could not read the diff", "ERROR")
+  assert.equal(action.kind, "stop")
+  assert.equal(state.iteration, 1)
 })
 
 // --- review finishes the loop, and review FAIL loops back to build ---

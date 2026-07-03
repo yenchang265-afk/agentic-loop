@@ -76,6 +76,8 @@ export interface Config {
   readonly gateBeforeBuild: boolean
   /** Repo-relative root of the task backlog (folders are statuses). */
   readonly tasksDir: string
+  /** Wall-clock cap on a single stage before the loop gives up on it. */
+  readonly stageTimeoutMinutes: number
 }
 
 /** Fresh state for a new loop; the driver fires plan right after creating it. */
@@ -190,6 +192,17 @@ export const advanceOnIdle = (
       if (verdict === "PASS") {
         return fire(s, "review")
       }
+      if (verdict === "ERROR") {
+        // The check itself couldn't run — a broken environment, not a bad
+        // plan. Re-planning would burn iterations on something no plan fixes.
+        return {
+          state: s,
+          action: {
+            kind: "stop",
+            message: "✗ Loop stopped — verify could not run (environment/infrastructure error). Fix the environment, then /loop recover the task.",
+          },
+        }
+      }
       // FAIL (or no recorded verdict): re-plan if budget remains, else stop.
       if (s.iteration + 1 < config.maxIterations) {
         const next = { ...s, iteration: s.iteration + 1 }
@@ -206,6 +219,15 @@ export const advanceOnIdle = (
         return {
           state: s,
           action: { kind: "done", message: "✓ Loop done — review passed. Ship it yourself." },
+        }
+      }
+      if (verdict === "ERROR") {
+        return {
+          state: s,
+          action: {
+            kind: "stop",
+            message: "✗ Loop stopped — review could not run (environment/infrastructure error). Fix the environment, then /loop recover the task.",
+          },
         }
       }
       // FAIL (or no recorded verdict): re-build if budget remains, else stop.

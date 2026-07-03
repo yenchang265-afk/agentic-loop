@@ -229,18 +229,41 @@ const restoreBase = async (deps: Deps, state: LoopState): Promise<void> => {
   }
 }
 
-/** Fire a stage command and return the assistant text it produced. */
-const runStage = async (client: Client, sessionID: string, stage: string, args: string): Promise<string> => {
-  const res = await client.session.command({
+/**
+ * Fire a stage command and return the assistant text it produced. Throws when
+ * the stage exceeds the configured wall-clock cap — a hung stage must fail
+ * the loop (and release its locks via onIdle's catch) rather than wedge the
+ * driver forever.
+ */
+const runStage = async (
+  client: Client,
+  sessionID: string,
+  stage: string,
+  args: string,
+  timeoutMinutes: number,
+): Promise<string> => {
+  const command = client.session.command({
     path: { id: sessionID },
     body: { command: stage, arguments: args },
   })
-  const parts = res.data?.parts ?? []
-  return parts
-    .filter((p): p is Extract<typeof p, { type: "text" }> => p.type === "text")
-    .map((p) => p.text)
-    .join("\n")
-    .trim()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${stage} stage timed out after ${timeoutMinutes} minutes`)),
+      timeoutMinutes * 60_000,
+    )
+  })
+  try {
+    const res = await Promise.race([command, timeout])
+    const parts = res.data?.parts ?? []
+    return parts
+      .filter((p): p is Extract<typeof p, { type: "text" }> => p.type === "text")
+      .map((p) => p.text)
+      .join("\n")
+      .trim()
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 /** Run the stage chain from `first` until the pure logic yields a gate/done/stop. */
@@ -265,7 +288,7 @@ const drive = async (
     const trackBuild = stage === "build" && task
     if (trackBuild) await appendNote(deps.$, task, auditNote(`BUILD started (iteration ${iteration + 1})`, new Date(), actor))
     recordedVerdicts.delete(sessionID) // no stale verdict may leak into this stage
-    const output = await runStage(client, sessionID, stage, args)
+    const output = await runStage(client, sessionID, stage, args, config.stageTimeoutMinutes)
     if (trackBuild) await appendNote(deps.$, task, auditNote(`BUILD finished (iteration ${iteration + 1})`, new Date(), actor))
     await appendRunLog(
       deps.$,
@@ -511,7 +534,18 @@ export const onIdle = async (deps: Deps, sessionID: string, config: Config): Pro
   } catch (err) {
     const message = (err as Error).message
     const state = getLoop(sessionID)
-    if (state?.task) await appendNote(deps.$, state.task, `Loop error: ${message}`)
+    if (state?.task) {
+      await appendNote(
+        deps.$,
+        state.task,
+        auditNote(`Loop error: ${message}`, new Date(), await gitActor(deps.$, deps.directory)),
+      )
+    }
+    // Preserve whatever the failed run left behind and put the tree back.
+    if (state) {
+      await checkpoint(deps, state, `loop(${loopId(state)}): incomplete — loop error`)
+      await restoreBase(deps, state)
+    }
     clearLoop(sessionID)
     await toast(deps.client, `Loop error: ${message}`, "error")
   } finally {

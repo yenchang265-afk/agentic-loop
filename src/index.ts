@@ -100,7 +100,12 @@ export const AgenticLoop: Plugin = async ({ client, directory, $ }) => {
           "stage the loop is currently running may record; calls from any other stage or session are ignored.",
         args: {
           stage: tool.schema.enum(["verify", "review"]).describe("Which check stage this verdict belongs to."),
-          verdict: tool.schema.enum(["PASS", "FAIL"]).describe("PASS only on observed evidence; otherwise FAIL."),
+          verdict: tool.schema
+            .enum(["PASS", "FAIL", "ERROR"])
+            .describe(
+              "PASS only on observed evidence; FAIL when criteria are unmet; ERROR only when the check itself " +
+                "could not run at all (broken environment, missing test runner) — never for failing tests.",
+            ),
         },
         execute: async (args, ctx) => driver.recordVerdict(ctx.sessionID, args.stage, args.verdict),
       }),
