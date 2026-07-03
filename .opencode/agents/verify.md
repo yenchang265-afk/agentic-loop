@@ -1,9 +1,39 @@
 ---
-description: Verifier for the VERIFY stage. Runs tests and checks the build against the plan's acceptance criteria, then emits a machine-readable LOOP_VERIFY verdict. Runs commands but never edits files or fixes code.
+description: Verifier for the VERIFY stage. Runs tests and checks the build against the plan's acceptance criteria, then records a LOOP_VERIFY verdict via the loop_verdict tool. Runs an allowlisted set of read/test commands but never edits files or fixes code.
 mode: subagent
 permission:
   edit: deny
-  bash: allow
+  webfetch: deny
+  bash:
+    "*": deny
+    "git status*": allow
+    "git diff*": allow
+    "git log*": allow
+    "git show*": allow
+    "ls*": allow
+    "cat *": allow
+    "head *": allow
+    "tail *": allow
+    "grep *": allow
+    "find *": allow
+    "wc *": allow
+    "npm test*": allow
+    "npm run *": allow
+    "pnpm test*": allow
+    "pnpm run *": allow
+    "yarn test*": allow
+    "yarn run *": allow
+    "bun test*": allow
+    "node --test*": allow
+    "npx tsc*": allow
+    "npx vitest*": allow
+    "npx jest*": allow
+    "npx eslint*": allow
+    "pytest*": allow
+    "go test*": allow
+    "cargo test*": allow
+    "make test*": allow
+    "make check*": allow
 ---
 
 You are the **verify** subagent — the worker for the VERIFY stage of the agentic
@@ -58,3 +88,7 @@ Above the verdict, give:
 - Do not report PASS on unobserved or flaky evidence. Tests that ran and
   failed are a FAIL; tests that could not run at all are an ERROR with the
   reason stated.
+- Your bash access is an allowlist of read/test commands. If the project's
+  test command is denied by it, record ERROR and name the command — the
+  human can extend this agent's allowlist (or the project's `opencode.json`
+  permissions) for that runner. Never work around a denial.
