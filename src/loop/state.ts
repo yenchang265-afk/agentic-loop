@@ -1,18 +1,32 @@
-import { parseVerdict } from "./verdict.ts"
+import { LOOP_REVIEW_TAG, LOOP_VERIFY_TAG, parseVerdict } from "./verdict.ts"
 
 /**
- * Loop state machine for the agentic loop (explore → plan → build → verify).
+ * Loop state machine for the agentic loop:
+ *
+ *   define → plan → [gate] → build → verify → review
  *
  * The transition helpers here are **pure**: given a state (and config) they
  * return a new state plus an `Action` describing what the driver should do, and
  * never touch a client or the store. That keeps the loop logic unit-testable
  * without opencode. The impure orchestration lives in `driver.ts`.
+ *
+ * Two check stages can fail and loop back: a VERIFY FAIL re-plans (the plan
+ * itself may be wrong); a REVIEW FAIL re-builds (the plan was fine, the
+ * implementation wasn't). Both share one iteration counter and cap.
+ *
+ * DEFINE and PLAN are the **planning** phase — approving the plan gate parks
+ * it as a backlog task rather than continuing into BUILD in the same
+ * session (see `driver.ts`'s `parkApprovedPlan`). A `/loop watch` session
+ * later claims a parked task and enters this same state machine directly at
+ * `build` via `resumeAtBuild` — the transition logic below doesn't know or
+ * care whether it got there via `createState`'s "define" start or a claim's
+ * "build" start; `composeArgs`/`advanceOnIdle` are identical either way.
  */
 
-export type Stage = "explore" | "plan" | "build" | "verify"
+export type Stage = "define" | "plan" | "build" | "verify" | "review"
 
 /** The stages in loop order. */
-export const STAGES: readonly Stage[] = ["explore", "plan", "build", "verify"]
+export const STAGES: readonly Stage[] = ["define", "plan", "build", "verify", "review"]
 
 /** Link to the backlog task driving the loop, when started from one. */
 export interface TaskRef {
@@ -21,6 +35,9 @@ export interface TaskRef {
   readonly path: string
   /** Acceptance criteria threaded into the plan/verify prompts. */
   readonly acceptance: readonly string[]
+  /** Linked Azure DevOps work item, if the task has one. Threaded into every stage's context. */
+  readonly azureId?: string
+  readonly azureUrl?: string
 }
 
 export interface LoopState {
@@ -28,9 +45,9 @@ export interface LoopState {
   readonly goal: string
   /** The stage currently running or most recently completed. */
   readonly stage: Stage
-  /** 0-based loop iteration; incremented on a verify FAIL re-plan. */
+  /** 0-based loop iteration; incremented on a verify FAIL re-plan or a review FAIL re-build. */
   readonly iteration: number
-  /** True while paused at the human plan-approval gate. */
+  /** True while paused at the plan→build human gate. */
   readonly paused: boolean
   /** Captured output text per completed stage, used to thread context forward. */
   readonly artifacts: Readonly<Partial<Record<Stage, string>>>
@@ -53,14 +70,37 @@ export interface Config {
   readonly tasksDir: string
 }
 
-/** Fresh state for a new loop; the driver fires explore right after creating it. */
+/** Fresh state for a new loop; the driver fires define right after creating it. */
 export const createState = (goal: string, task?: TaskRef): LoopState => ({
   goal,
-  stage: "explore",
+  stage: "define",
   iteration: 0,
   paused: false,
   artifacts: {},
   ...(task ? { task } : {}),
+})
+
+/** Reconstruct a LoopState paused at the plan gate for an already-planned
+ *  task (e.g. `/loop task <id>` resuming a persisted plan). */
+export const resumeAtPlanGate = (goal: string, task: TaskRef, plan: string): LoopState => ({
+  goal,
+  stage: "plan",
+  iteration: 0,
+  paused: true,
+  artifacts: { plan },
+  task,
+})
+
+/** Reconstruct a LoopState entering execution directly at build, for a
+ *  claimed in-progress task whose plan was already approved in a prior
+ *  (planning) session. */
+export const resumeAtBuild = (goal: string, task: TaskRef, plan: string): LoopState => ({
+  goal,
+  stage: "build",
+  iteration: 0,
+  paused: false,
+  artifacts: { plan },
+  task,
 })
 
 const withArtifact = (state: LoopState, stage: Stage, output: string): LoopState => ({
@@ -74,17 +114,26 @@ export const composeArgs = (state: LoopState, target: Stage): string => {
   const accept = state.task?.acceptance ?? []
   const acceptBlock = (heading: string): string => `${heading}\n${accept.map((c) => `- ${c}`).join("\n")}`
   const parts: string[] = [`Goal: ${state.goal}`]
+  const azureId = state.task?.azureId
+  if (azureId) {
+    const azureUrl = state.task?.azureUrl
+    parts.push(`Linked Azure DevOps work item: #${azureId}${azureUrl ? ` — ${azureUrl}` : ""}`)
+  }
   if (target === "plan") {
-    if (a.explore) parts.push(`Explore findings:\n${a.explore}`)
+    if (a.define) parts.push(`Spec:\n${a.define}`)
     if (a.plan) parts.push(`Previous plan:\n${a.plan}`)
     if (a.verify) parts.push(`Verify failure to address:\n${a.verify}`)
     if (accept.length) parts.push(acceptBlock("Acceptance criteria (the plan must satisfy each):"))
   } else if (target === "build") {
     if (a.plan) parts.push(`Approved plan:\n${a.plan}`)
+    if (a.review) parts.push(`Review feedback to address:\n${a.review}`)
   } else if (target === "verify") {
     if (a.plan) parts.push(`Plan & acceptance criteria:\n${a.plan}`)
     if (a.build) parts.push(`Build summary:\n${a.build}`)
     if (accept.length) parts.push(acceptBlock("Acceptance criteria (the verdict must check each):"))
+  } else if (target === "review") {
+    if (a.plan) parts.push(`Approved plan:\n${a.plan}`)
+    if (a.build) parts.push(`Build summary:\n${a.build}`)
   }
   return parts.join("\n\n")
 }
@@ -106,15 +155,16 @@ export const advanceOnIdle = (
   const s = withArtifact(state, state.stage, output)
 
   switch (s.stage) {
-    case "explore":
+    case "define":
       return fire(s, "plan")
 
     case "plan":
       if (config.gateBeforeBuild) {
-        return {
-          state: { ...s, paused: true },
-          action: { kind: "gate", message: "Plan ready — review it, then run /loop go to build." },
-        }
+        const message =
+          s.iteration === 0
+            ? "Plan ready — review it, then run /loop go to approve and park it for execution."
+            : "Plan ready — review it, then run /loop go to build."
+        return { state: { ...s, paused: true }, action: { kind: "gate", message } }
       }
       return fire(s, "build")
 
@@ -122,11 +172,8 @@ export const advanceOnIdle = (
       return fire(s, "verify")
 
     case "verify": {
-      if (parseVerdict(output) === "PASS") {
-        return {
-          state: s,
-          action: { kind: "done", message: "✓ Loop done — verify passed. Review the diff and open a PR." },
-        }
+      if (parseVerdict(output, LOOP_VERIFY_TAG) === "PASS") {
+        return fire(s, "review")
       }
       // FAIL (or unparseable verdict): re-plan if budget remains, else stop.
       if (s.iteration + 1 < config.maxIterations) {
@@ -138,14 +185,39 @@ export const advanceOnIdle = (
         action: { kind: "stop", message: `✗ Loop stopped — verify failed after ${config.maxIterations} iterations.` },
       }
     }
+
+    case "review": {
+      if (parseVerdict(output, LOOP_REVIEW_TAG) === "PASS") {
+        return {
+          state: s,
+          action: { kind: "done", message: "✓ Loop done — review passed. Ship it yourself." },
+        }
+      }
+      // FAIL (or unparseable verdict): re-build if budget remains, else stop.
+      if (s.iteration + 1 < config.maxIterations) {
+        const next = { ...s, iteration: s.iteration + 1 }
+        return fire(next, "build")
+      }
+      return {
+        state: s,
+        action: { kind: "stop", message: `✗ Loop stopped — review failed after ${config.maxIterations} iterations.` },
+      }
+    }
   }
 }
 
-/** Resume from the plan-approval gate (`/loop go`): proceed to build. */
+/** Resume from a human gate (`/loop go`): proceed to whatever the paused stage gates into. */
 export const resume = (state: LoopState): { state: LoopState; action: Action } => {
   if (!state.paused) return { state, action: { kind: "noop" } }
-  return fire(state, "build")
+  if (state.stage === "plan") return fire(state, "build")
+  return { state, action: { kind: "noop" } }
 }
+
+/** The first step to drive for a freshly-constructed state — fires its own stage. */
+export const firstStep = (state: LoopState): { state: LoopState; action: Action } => ({
+  state,
+  action: { kind: "fire", stage: state.stage, arguments: composeArgs(state, state.stage) },
+})
 
 // --- In-memory store (lost on opencode restart; see README known limitations) ---
 

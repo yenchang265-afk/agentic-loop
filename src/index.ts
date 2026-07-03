@@ -1,4 +1,5 @@
 import type { Plugin } from "@opencode-ai/plugin"
+import { tool } from "@opencode-ai/plugin"
 import { DEFAULT_CONFIG, loadConfig } from "./config.ts"
 import * as driver from "./loop/driver.ts"
 import { hasLoop } from "./loop/state.ts"
@@ -8,12 +9,19 @@ import { hasLoop } from "./loop/state.ts"
  *
  * opencode plugin that drives the engineering workflow as an automatic loop:
  *
- *   explore → plan → build → verify   (repeat)
+ *   define → plan → build → verify → review
  *
- * `/loop <goal>` starts it; the plugin runs explore → plan automatically, pauses
- * for a human plan-approval gate (`/loop go`), then runs build → verify, finishing
- * on a verify PASS or after the iteration cap. The control surface lives in
- * `loop/driver.ts`; the pure state machine in `loop/state.ts`.
+ * `/loop <goal>` starts it; the plugin runs define then plan, pauses for a
+ * human plan-approval gate (`/loop go`), then runs build → verify → review
+ * to completion. A verify FAIL re-plans; a review FAIL re-builds — both
+ * within the iteration cap. The control surface lives in `loop/driver.ts`;
+ * the pure state machine in `loop/state.ts`.
+ *
+ * A free-text `/loop <goal>` doesn't queue that automatic run directly — the
+ * command's own turn first decides (per its prompt) whether the goal needs a
+ * live `interview-me` pass, then calls the `loop_begin` tool below to
+ * actually queue it. That keeps `interview-me`'s live-user requirement out
+ * of the unattended `session.idle`-driven stage loop entirely.
  */
 export const AgenticLoop: Plugin = async ({ client, directory, $ }) => {
   const service = "agentic-loop"
@@ -51,6 +59,21 @@ export const AgenticLoop: Plugin = async ({ client, directory, $ }) => {
       if (hasLoop(input.sessionID)) {
         await log("info", `tool ${input.tool} starting (call ${input.callID})`)
       }
+    },
+
+    tool: {
+      loop_begin: tool({
+        description:
+          "Start the /loop pipeline queued by a /loop <goal> command, once the goal is ready — " +
+          "either judged unambiguous per the interview-me skill's own criteria, or confirmed via a " +
+          "live interview-me exchange with the user. Call exactly once, at the end of that command's " +
+          "own turn, with the final goal text (the confirmed restatement if an interview ran). Never " +
+          "call this from inside the automatic define/plan/build/verify/review stages.",
+        args: {
+          goal: tool.schema.string().min(1).describe("The final goal text to start the loop with."),
+        },
+        execute: async (args, ctx) => driver.beginAfterClarification(deps, ctx.sessionID, args.goal),
+      }),
     },
   }
 }
