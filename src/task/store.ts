@@ -175,6 +175,34 @@ export const appendNote = async ($: Shell, task: FileRef, note: string): Promise
   await $`printf '\n> %s\n' ${note} >> ${task.path}`.quiet().nothrow()
 }
 
+/**
+ * Render an audit event note: the event text with a timestamp-and-actor
+ * suffix. The suffix comes last so marker greps (`> BUILD started`, …) keep
+ * matching. Pure.
+ */
+export const auditNote = (text: string, at: Date, actor?: string | null): string =>
+  `${text} [${at.toISOString()}${actor ? ` by ${actor}` : ""}]`
+
+/**
+ * Append a stage's captured output to the loop's run log,
+ * `<tasksDir>/runs/<id>.md` — the durable record of what each stage actually
+ * said (verdict evidence, review findings), which the in-memory artifacts
+ * are not. Best-effort.
+ */
+export const appendRunLog = async (
+  $: Shell,
+  directory: string,
+  tasksDir: string,
+  id: string,
+  header: string,
+  text: string,
+): Promise<void> => {
+  const dir = path.join(directory, tasksDir, "runs")
+  await $`mkdir -p ${dir}`.quiet().nothrow()
+  const file = path.join(dir, `${id}.md`)
+  await $`printf '\n## %s\n\n%s\n' ${header} ${text} >> ${file}`.quiet().nothrow()
+}
+
 /** Append a plan under `PLAN_HEADING` to a task file in place. Best-effort. */
 export const appendPlan = async ($: Shell, task: FileRef, plan: string): Promise<void> => {
   await $`printf '\n%s\n\n%s\n' ${PLAN_HEADING} ${plan} >> ${task.path}`.quiet().nothrow()

@@ -1,7 +1,16 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import type { Task } from "./schema.ts"
-import { extractPlan, hasPlan, isClaimable, isRecoverable, PLAN_HEADING, selectNext, wasInterrupted } from "./store.ts"
+import {
+  auditNote,
+  extractPlan,
+  hasPlan,
+  isClaimable,
+  isRecoverable,
+  PLAN_HEADING,
+  selectNext,
+  wasInterrupted,
+} from "./store.ts"
 
 const task = (id: string, priority: number, body = ""): Task => ({
   id,
@@ -112,4 +121,25 @@ test("isRecoverable is true once a planned task has any build marker", () => {
 test("isRecoverable stays true after a matched finish (recover is for any stuck started task)", () => {
   const body = `${PLAN_HEADING}\n\n1. Do it.\n\n> BUILD started (iteration 1)\n> BUILD finished (iteration 1)`
   assert.equal(isRecoverable(task("a", 0, body)), true)
+})
+
+test("auditNote suffixes the timestamp and actor", () => {
+  const at = new Date("2026-07-03T05:00:00.000Z")
+  assert.equal(
+    auditNote("BUILD started (iteration 1)", at, "Alice <alice@acme.com>"),
+    "BUILD started (iteration 1) [2026-07-03T05:00:00.000Z by Alice <alice@acme.com>]",
+  )
+})
+
+test("auditNote omits the actor when unknown", () => {
+  const at = new Date("2026-07-03T05:00:00.000Z")
+  assert.equal(auditNote("Loop stopped", at, null), "Loop stopped [2026-07-03T05:00:00.000Z]")
+})
+
+test("audit-suffixed build markers still satisfy the claim/interrupt greps", () => {
+  const at = new Date("2026-07-03T05:00:00.000Z")
+  const started = `> ${auditNote("BUILD started (iteration 1)", at, "w")}`
+  const body = `${PLAN_HEADING}\n\n1. Do it.\n\n${started}`
+  assert.equal(isClaimable(task("a", 0, body)), false)
+  assert.equal(wasInterrupted(task("a", 0, body)), true)
 })

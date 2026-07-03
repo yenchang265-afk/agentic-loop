@@ -3,6 +3,8 @@ import { slugify, type Task } from "../task/schema.ts"
 import {
   appendNote,
   appendPlan,
+  appendRunLog,
+  auditNote,
   claimTask,
   extractPlan,
   findById,
@@ -17,7 +19,7 @@ import {
   wasInterrupted,
   writeTask,
 } from "../task/store.ts"
-import { checkoutBranch, commitAll, currentBranch, isDirty, isGitRepo } from "./git.ts"
+import { checkoutBranch, commitAll, commitPaths, currentBranch, gitActor, isDirty, isGitRepo } from "./git.ts"
 import { LOOP_REVIEW_TAG, LOOP_VERIFY_TAG, parseVerdict, type Verdict } from "./verdict.ts"
 import type { Action, Config, LoopState, TaskRef } from "./state.ts"
 import {
@@ -249,6 +251,7 @@ const drive = async (
   first: { state: LoopState; action: Action },
 ): Promise<void> => {
   const { client } = deps
+  const actor = await gitActor(deps.$, deps.directory)
   let step = first
   while (step.action.kind === "fire") {
     const { stage, arguments: args } = step.action
@@ -260,10 +263,18 @@ const drive = async (
     setLoop(sessionID, step.state)
     const { task, iteration } = step.state
     const trackBuild = stage === "build" && task
-    if (trackBuild) await appendNote(deps.$, task, `BUILD started (iteration ${iteration + 1})`)
+    if (trackBuild) await appendNote(deps.$, task, auditNote(`BUILD started (iteration ${iteration + 1})`, new Date(), actor))
     recordedVerdicts.delete(sessionID) // no stale verdict may leak into this stage
     const output = await runStage(client, sessionID, stage, args)
-    if (trackBuild) await appendNote(deps.$, task, `BUILD finished (iteration ${iteration + 1})`)
+    if (trackBuild) await appendNote(deps.$, task, auditNote(`BUILD finished (iteration ${iteration + 1})`, new Date(), actor))
+    await appendRunLog(
+      deps.$,
+      deps.directory,
+      config.tasksDir,
+      loopId(step.state),
+      `${stage} · iteration ${iteration + 1} · ${new Date().toISOString()}`,
+      output,
+    )
     // A /loop stop while the stage ran cleared this session's loop — halt the
     // chain, preserving whatever the stage did as a checkpoint on the branch.
     if (!getLoop(sessionID)) {
@@ -286,6 +297,14 @@ const drive = async (
           `${stage} recorded no verdict via loop_verdict${inText ? ` (text claimed ${inText})` : ""} — treating as FAIL`,
         )
       }
+      if (task) {
+        const recorded = verdict ?? "none recorded → FAIL"
+        await appendNote(
+          deps.$,
+          task,
+          auditNote(`${stage.toUpperCase()} verdict: ${recorded} (iteration ${iteration + 1})`, new Date(), actor),
+        )
+      }
     }
     step = advanceOnIdle(step.state, config, output, verdict)
   }
@@ -300,6 +319,10 @@ const drive = async (
       if (state.task && state.stage === "plan" && state.iteration === 0) {
         try {
           await appendPlan(deps.$, state.task, state.artifacts.plan ?? "")
+          await appendNote(deps.$, state.task, auditNote("Plan recorded, awaiting approval", new Date(), actor))
+          // Commit the exact plan text that will be approved — the durable
+          // record of what the gate decision was about.
+          await commitPaths(deps.$, deps.directory, [config.tasksDir], `loop(${state.task.id}): plan recorded for approval`)
         } catch (err) {
           await deps.log("warn", `plan gated but persisting it failed: ${(err as Error).message}`)
         }
@@ -309,6 +332,7 @@ const drive = async (
     case "done": {
       if (state.task) {
         try {
+          await appendNote(deps.$, state.task, auditNote("Loop done — review passed", new Date(), actor))
           await moveTask(deps.$, state.task, "completed")
         } catch (err) {
           await deps.log("warn", `loop done but task move failed: ${(err as Error).message}`)
@@ -323,7 +347,7 @@ const drive = async (
     }
     case "stop": {
       // Per design: a failed/stopped task stays in-progress, annotated for a human.
-      if (state.task) await appendNote(deps.$, state.task, action.message)
+      if (state.task) await appendNote(deps.$, state.task, auditNote(action.message, new Date(), actor))
       await checkpoint(deps, state, `loop(${loopId(state)}): incomplete — ${action.message}`)
       await restoreBase(deps, state)
       clearLoop(sessionID)
@@ -360,10 +384,12 @@ const parkApprovedPlan = async (
   config: Config,
 ): Promise<void> => {
   const plan = state.artifacts.plan ?? ""
+  const actor = await gitActor(deps.$, deps.directory)
   let id: string
 
   if (state.task) {
     try {
+      await appendNote(deps.$, state.task, auditNote("Plan approved — parked for execution", new Date(), actor))
       await moveTask(deps.$, state.task, "in-progress")
     } catch (err) {
       await deps.log("warn", `plan approved but parking failed: ${(err as Error).message}`)
@@ -379,6 +405,7 @@ const parkApprovedPlan = async (
         { title, body },
       )
       await appendPlan(deps.$, written, plan)
+      await appendNote(deps.$, written, auditNote("Plan approved — parked for execution", new Date(), actor))
       id = written.id
     } catch (err) {
       const message = (err as Error).message
@@ -389,6 +416,9 @@ const parkApprovedPlan = async (
       return
     }
   }
+
+  // The approval record — who parked what — becomes a commit of its own.
+  await commitPaths(deps.$, deps.directory, [config.tasksDir], `loop(${id}): plan approved — parked for execution`)
 
   clearLoop(sessionID)
   await toast(
@@ -550,7 +580,11 @@ export const handleCommand = async (
       await appendNote(
         deps.$,
         state.task,
-        `Loop stopped by /loop stop — was at ${state.stage} (iteration ${state.iteration + 1}).`,
+        auditNote(
+          `Loop stopped by /loop stop — was at ${state.stage} (iteration ${state.iteration + 1}).`,
+          new Date(),
+          await gitActor(deps.$, deps.directory),
+        ),
       )
     }
     const existed = clearLoop(sessionID)
@@ -608,7 +642,15 @@ export const handleCommand = async (
       return void (await toast(client, `Task "${id}" has no persisted plan — move it back to in-planning and re-run /loop task ${id}.`, "warning"))
     }
     await claimTask(deps.$, task) // re-mark; the marker may already exist from the dead run
-    await appendNote(deps.$, task, "Recovered by /loop recover — resuming BUILD from the persisted plan.")
+    await appendNote(
+      deps.$,
+      task,
+      auditNote(
+        "Recovered by /loop recover — resuming BUILD from the persisted plan.",
+        new Date(),
+        await gitActor(deps.$, deps.directory),
+      ),
+    )
     clearLoop(sessionID)
     pending.set(sessionID, { kind: "recover", task })
     await toast(

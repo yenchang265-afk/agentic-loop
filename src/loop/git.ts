@@ -48,3 +48,22 @@ export const commitAll = async ($: Shell, cwd: string, message: string): Promise
   if (!(await run($, cwd, ["add", "-A"])).ok) return false
   return (await run($, cwd, ["commit", "-m", message])).ok
 }
+
+/**
+ * Stage and commit only the given paths — used to commit backlog mutations
+ * (task moves, persisted plans) without sweeping up unrelated working-tree
+ * changes. Returns false when nothing was committed.
+ */
+export const commitPaths = async ($: Shell, cwd: string, paths: readonly string[], message: string): Promise<boolean> => {
+  if (paths.length === 0) return false
+  if (!(await run($, cwd, ["add", "--", ...paths])).ok) return false
+  return (await run($, cwd, ["commit", "-m", message, "--", ...paths])).ok
+}
+
+/** The committer identity configured for this tree, as `Name <email>`, or null. */
+export const gitActor = async ($: Shell, cwd: string): Promise<string | null> => {
+  const name = (await run($, cwd, ["config", "user.name"])).stdout
+  const email = (await run($, cwd, ["config", "user.email"])).stdout
+  if (!name && !email) return null
+  return name && email ? `${name} <${email}>` : name || email
+}
