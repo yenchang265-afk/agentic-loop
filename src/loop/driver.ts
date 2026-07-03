@@ -39,7 +39,7 @@ import {
  * automatically: → in-progress/ the moment a plan is approved (`/loop go` at
  * the plan gate — that approval already is the decision to start writing
  * code, so the move just records it); → completed/ when the loop finishes
- * (ship stage done, after verify PASS and review PASS). On a stop/failure
+ * (review PASS). On a stop/failure
  * while building it appends a note and leaves the task in-progress. The
  * first time a task's plan gates for approval, it is also persisted onto the
  * task file (`## Implementation Plan`), so `/loop next` can skip
@@ -122,9 +122,9 @@ const drive = async (
   switch (action.kind) {
     case "gate":
       setLoop(sessionID, state)
-      // Only the plan→build gate persists onto the task file, and only the first
+      // The plan→build gate persists onto the task file, only the first
       // time (iteration 0) — re-plans thread the prior plan via the artifact
-      // instead. The review→ship gate has no equivalent on-disk persistence.
+      // instead.
       if (state.task && state.stage === "plan" && state.iteration === 0) {
         try {
           await appendPlan(deps.$, state.task, state.artifacts.plan ?? "")
@@ -179,11 +179,9 @@ export const onIdle = async (deps: Deps, sessionID: string, config: Config): Pro
     } else {
       const state = getLoop(sessionID)
       if (state?.paused) {
-        // Resuming from the plan gate is the only case where a human's /loop go
-        // means "start writing code" — record that by moving the task file
-        // in-planning/ → in-progress/ before firing build. The ship gate (state
-        // .stage === "review") has no equivalent move; the task stays in-progress
-        // through review → ship.
+        // Resuming from the plan gate (the only gate) means "start writing
+        // code" — record that by moving the task file in-planning/ →
+        // in-progress/ before firing build.
         let next = state
         if (state.task && state.stage === "plan") {
           try {

@@ -8,8 +8,8 @@ Guidance for AI coding agents working in this repository.
 
 1. **The automatic agentic loop** (`/loop`) — a real plugin
    (`src/index.ts` → `src/loop/`, agents/commands under `.opencode/`) that
-   drives the full DEFINE→PLAN→BUILD→VERIFY→REVIEW→SHIP lifecycle as one
-   pipeline with two human gates. Use this when a goal should run the whole
+   drives the full DEFINE→PLAN→BUILD→VERIFY→REVIEW lifecycle as one
+   pipeline with a human gate before build. Use this when a goal should run the whole
    lifecycle largely unattended. See the `loop-orchestration` skill for the
    pipeline, gates, and verdict contracts, and `task-backlog-management` for
    driving it from `docs/tasks/`.
@@ -47,7 +47,6 @@ skill invocations instead:
 - BUILD → `incremental-implementation` + `test-driven-development`
 - VERIFY → `debugging-and-error-recovery`
 - REVIEW → `code-review-and-quality`
-- SHIP → `shipping-and-launch`
 
 ### Execution Model (ad-hoc mode)
 
@@ -72,7 +71,7 @@ Correct behavior: always check for and use skills first.
 
 - `src/index.ts`, `src/loop/`, `src/task/`, `src/config.ts` — plugin implementation (state machine, driver, task backlog IO)
 - `.opencode/agents/` — the agent personas backing each `/loop` stage
-- `.opencode/commands/` — the slash commands (`/loop`, `/define`, `/plan`, `/build`, `/verify`, `/review`, `/ship`, `/task`)
+- `.opencode/commands/` — the slash commands (`/loop`, `/define`, `/plan`, `/build`, `/verify`, `/review`, `/task`)
 - `.opencode/skills` — symlink to `skills/`, the skill library the stage agents invoke
 - `skills/` — skill workflows (`SKILL.md` per directory) invoked by name via the `skill` tool
 - `references/` — supplementary checklists (`testing-patterns.md`, `security-checklist.md`, etc.) that skills pull in when needed

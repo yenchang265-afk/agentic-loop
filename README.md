@@ -5,7 +5,7 @@ supervised state machine instead of a chat back-and-forth.
 
 ## What it does
 
-`/loop <goal>` moves a goal through six stages, pausing only where a human
+`/loop <goal>` moves a goal through five stages, pausing only where a human
 decision actually matters:
 
 | Stage | Does | Pauses? |
@@ -15,11 +15,10 @@ decision actually matters:
 | BUILD | Implements task-driven, test-first | no |
 | VERIFY | Runs tests; FAIL re-plans with the failure | no |
 | REVIEW | Checks the diff; FAIL re-builds with feedback | no |
-| SHIP | Drafts PR description + rollback plan | **yes — approve before push** |
 
 Re-plan/re-build loops are capped by `maxIterations` in config — the loop
-gives up and reports rather than spinning forever. SHIP never pushes or opens
-a PR itself; you always do that last step.
+gives up and reports rather than spinning forever. The loop never pushes or
+opens a PR itself; you always do that last step after a REVIEW PASS.
 
 ## Commands
 

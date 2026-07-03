@@ -3,7 +3,7 @@ import { test } from "node:test"
 import type { Config } from "./state.ts"
 import { advanceOnIdle, composeArgs, createState, resume } from "./state.ts"
 
-const config: Config = { maxIterations: 3, gateBeforeBuild: true, gateBeforeShip: true, tasksDir: "docs/tasks" }
+const config: Config = { maxIterations: 3, gateBeforeBuild: true, tasksDir: "docs/tasks" }
 
 // --- define ---
 
@@ -98,38 +98,12 @@ test("an unparseable verify verdict is treated as FAIL", () => {
   assert.equal(action.kind, "stop")
 })
 
-// --- review → ship gate, and review FAIL loops back to build ---
+// --- review finishes the loop, and review FAIL loops back to build ---
 
-test("review PASS gates before ship when gateBeforeShip is on", () => {
+test("review PASS finishes the loop", () => {
   const s = { ...createState("g"), stage: "review" as const }
-  const { state, action } = advanceOnIdle(s, config, "five-axis review clean\nLOOP_REVIEW: PASS")
-  assert.equal(action.kind, "gate")
-  assert.equal(state.paused, true)
-  assert.equal(state.stage, "review")
-})
-
-test("review PASS fires ship directly when gating is off", () => {
-  const s = { ...createState("g"), stage: "review" as const }
-  const { action } = advanceOnIdle(s, { ...config, gateBeforeShip: false }, "LOOP_REVIEW: PASS")
-  assert.equal(action.kind, "fire")
-  if (action.kind === "fire") assert.equal(action.stage, "ship")
-})
-
-test("resume from the ship gate fires ship with build and review threaded", () => {
-  const paused = {
-    ...createState("g"),
-    stage: "review" as const,
-    paused: true,
-    artifacts: { build: "BUILD SUMMARY", review: "REVIEW REPORT" },
-  }
-  const { state, action } = resume(paused)
-  assert.equal(state.stage, "ship")
-  assert.equal(state.paused, false)
-  if (action.kind === "fire") {
-    assert.equal(action.stage, "ship")
-    assert.match(action.arguments, /BUILD SUMMARY/)
-    assert.match(action.arguments, /REVIEW REPORT/)
-  }
+  const { action } = advanceOnIdle(s, config, "five-axis review clean\nLOOP_REVIEW: PASS")
+  assert.equal(action.kind, "done")
 })
 
 test("review FAIL within budget re-builds (not re-plans) with the feedback threaded", () => {
@@ -155,14 +129,6 @@ test("an unparseable review verdict is treated as FAIL", () => {
   assert.equal(action.kind, "stop")
 })
 
-// --- ship ---
-
-test("ship finishes the loop", () => {
-  const s = { ...createState("g"), stage: "ship" as const }
-  const { action } = advanceOnIdle(s, config, "PR description drafted")
-  assert.equal(action.kind, "done")
-})
-
 // --- composeArgs ---
 
 test("composeArgs threads only the relevant prior artifacts", () => {
@@ -173,8 +139,6 @@ test("composeArgs threads only the relevant prior artifacts", () => {
   assert.match(composeArgs(s, "verify"), /Build summary:\nB/)
   assert.match(composeArgs(s, "review"), /Approved plan:\nP/)
   assert.match(composeArgs(s, "review"), /Build summary:\nB/)
-  assert.match(composeArgs(s, "ship"), /Build summary:\nB/)
-  assert.match(composeArgs(s, "ship"), /Review summary:\nR/)
 })
 
 test("createState carries an optional task ref", () => {
@@ -206,7 +170,7 @@ test("composeArgs threads the linked Azure DevOps work item into every stage", (
     azureUrl: "https://dev.azure.com/acme/Platform/_workitems/edit/1234",
   }
   const s = createState("g", task)
-  for (const stage of ["define", "plan", "build", "verify", "review", "ship"] as const) {
+  for (const stage of ["define", "plan", "build", "verify", "review"] as const) {
     const args = composeArgs(s, stage)
     assert.match(args, /Linked Azure DevOps work item: #1234 — https:\/\/dev\.azure\.com/)
   }

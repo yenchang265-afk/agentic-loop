@@ -29,8 +29,8 @@ this backlog instead of a hand-typed goal.
 docs/tasks/
   draft/        # WIP, not ready                ← you write here
   in-planning/  # queued for / undergoing plan   ← you move here (gate 1)
-  in-progress/  # build → verify → review → ship ← the driver moves here (on plan approval)
-  completed/    # loop finished (shipped)        ← the driver moves here
+  in-progress/  # build → verify → review        ← the driver moves here (on plan approval)
+  completed/    # loop finished (review passed)  ← the driver moves here
   abandoned/    # won't do                       ← you move here, from any status
 ```
 
@@ -86,7 +86,7 @@ stage so the verdict checks each criterion.
    `/loop status` or the toast message to see it's waiting.
 4. **Approve the plan** (`/loop go`) — this is the second gate, and the only
    one that's automatic on the folder side: the driver moves the file
-   `in-planning/ → in-progress/` itself, then runs BUILD→VERIFY→REVIEW→SHIP.
+   `in-planning/ → in-progress/` itself, then runs BUILD→VERIFY→REVIEW.
    See `loop-orchestration` for the full pipeline.
 
 ### Linking a task to Azure DevOps
@@ -133,7 +133,7 @@ seem obvious."
 Linking is metadata, not scope — it does not change what the loop plans,
 builds, or verifies. It only threads a `Linked Azure DevOps work item: #<id>`
 line into every stage's context (see `loop-orchestration`) so the eventual
-SHIP-stage PR description can reference the source work item.
+PR description can reference the source work item.
 
 ## Lifecycle — who moves what
 
@@ -141,15 +141,15 @@ SHIP-stage PR description can reference the source work item.
 |------------|-----|------|
 | `draft → in-planning` | **you** | the task is worth planning; this is the first human gate |
 | `in-planning → in-progress` | driver | automatic, the instant a plan is approved (`/loop go` at the plan gate) |
-| `in-progress → completed` | driver | the loop finishes (ship stage runs, after verify PASS and review PASS) |
+| `in-progress → completed` | driver | the loop finishes (verify PASS and review PASS) |
 | stays `in-progress` + note | driver | loop fails (iteration cap) or is stopped while building |
 | `→ abandoned` | **you** | you decide not to do it, from any status |
 
 Only one status transition is manual on the "start" side: `draft →
 in-planning`. Everything past that point — `in-planning → in-progress` on
-plan approval, `in-progress → completed` on ship — is the driver recording a
-decision that already happened (a human ran `/loop go`, or the pipeline
-finished), not a second layer of file-moving bureaucracy.
+plan approval, `in-progress → completed` on a review PASS — is the driver
+recording a decision that already happened (a human ran `/loop go`, or the
+pipeline finished), not a second layer of file-moving bureaucracy.
 
 A failed or stopped task is **left in `in-progress/`** with a note appended, so
 it is visibly stuck for a human rather than silently re-queued. Run `/loop task
@@ -159,8 +159,8 @@ the recovery boundary below: `/loop task <id>` only looks in `in-planning/`.
 The first time a task's plan gates for approval, it is also **persisted onto
 the task file** under a `## Implementation Plan` heading — the on-disk marker
 that the task is planned and awaiting a human. This survives a `/loop stop` or
-an opencode restart, when the in-memory loop state does not. The review→ship
-gate has no equivalent on-disk persistence — only the plan is durable.
+an opencode restart, when the in-memory loop state does not — only the plan
+is durable.
 
 ### Identifying an interrupted loop
 
@@ -179,8 +179,8 @@ itself. What's on the task file tells you what happened:
   waiting for approval, nothing has written code yet.
 
 **Recovery boundary:** `/loop task <id>` only searches `in-planning/`. If a
-session dies while a task is already in `in-progress/` (mid-BUILD, VERIFY,
-REVIEW, or SHIP), `/loop task <id>` won't find it there — the loop has no way
+session dies while a task is already in `in-progress/` (mid-BUILD, VERIFY, or
+REVIEW), `/loop task <id>` won't find it there — the loop has no way
 to resume exactly where it left off past the plan gate. The recovery is
 manual: check `git status`/`git diff` against the BUILD markers above, then
 move the file back to `in-planning/` and run `/loop task <id>` again to
@@ -190,9 +190,8 @@ re-plan and restart it cleanly (or finish/fix it up by hand).
 
 - The backlog path defaults to `docs/tasks` and is configurable via `tasksDir`
   in `.agentic-loop.json`.
-- The loop edits the current working tree; after it finishes, review the diff
-  and the SHIP stage's PR draft, then open the PR yourself. There is no
-  per-task branch/worktree.
+- The loop edits the current working tree; after it finishes, review the diff,
+  then open the PR yourself. There is no per-task branch/worktree.
 - Promotion (`draft → in-planning`, `→ abandoned`) is a manual file move —
   there is no approve command. `in-planning → in-progress` is the one
   automatic move on the "start" side, driven by `/loop go`.
@@ -207,9 +206,9 @@ re-plan and restart it cleanly (or finish/fix it up by hand).
 | "I'll add a status: field, it's clearer" | The whole point is that the folder *is* the status — a separate field can drift from the folder and lie about the task's real state. |
 | "This task failed once, just delete the note and retry silently" | The note is the audit trail for why a human needs to look before retrying (especially an unmatched BUILD-started marker, which can mean a half-finished diff). Deleting it hides that signal from the next person. |
 | "Skip in-planning/, edit the task straight in draft/ to 'run' it" | `/loop next` and `/loop task <id>` only look in `in-planning/` — moving it there isn't bureaucracy, it's the actual trigger and the human gate. |
-| "The MCP server's connected, just create the Azure work item without asking" | Creating a work item is a write to a real, shared Azure DevOps project — always confirm title/project/description first, same as every other external-write gate in this repo (plan gate, ship gate). |
+| "The MCP server's connected, just create the Azure work item without asking" | Creating a work item is a write to a real, shared Azure DevOps project — always confirm title/project/description first, same as every other external-write gate in this repo (plan gate). |
 | "The fetched Azure work item is obviously right, skip showing the draft" | The draft-then-confirm checkpoint exists precisely because ADO fields don't map 1:1 onto acceptance criteria — a human needs to see what got inferred before it becomes the loop's goal. |
-| "Add a 6th status for 'plan ready, waiting on /loop go'" | That moment is already visible via `hasPlan()`/the toast message inside `in-planning/` — a dedicated status would be asymmetric with the (also un-folder-ed) review→ship gate. Five statuses, not six. |
+| "Add a 6th status for 'plan ready, waiting on /loop go'" | That moment is already visible via `hasPlan()`/the toast message inside `in-planning/`. Five statuses, not six. |
 
 ## Red Flags
 

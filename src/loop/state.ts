@@ -3,7 +3,7 @@ import { LOOP_REVIEW_TAG, LOOP_VERIFY_TAG, parseVerdict } from "./verdict.ts"
 /**
  * Loop state machine for the agentic loop:
  *
- *   define → plan → [gate] → build → verify → review → [gate] → ship
+ *   define → plan → [gate] → build → verify → review
  *
  * The transition helpers here are **pure**: given a state (and config) they
  * return a new state plus an `Action` describing what the driver should do, and
@@ -15,10 +15,10 @@ import { LOOP_REVIEW_TAG, LOOP_VERIFY_TAG, parseVerdict } from "./verdict.ts"
  * implementation wasn't). Both share one iteration counter and cap.
  */
 
-export type Stage = "define" | "plan" | "build" | "verify" | "review" | "ship"
+export type Stage = "define" | "plan" | "build" | "verify" | "review"
 
 /** The stages in loop order. */
-export const STAGES: readonly Stage[] = ["define", "plan", "build", "verify", "review", "ship"]
+export const STAGES: readonly Stage[] = ["define", "plan", "build", "verify", "review"]
 
 /** Link to the backlog task driving the loop, when started from one. */
 export interface TaskRef {
@@ -39,7 +39,7 @@ export interface LoopState {
   readonly stage: Stage
   /** 0-based loop iteration; incremented on a verify FAIL re-plan or a review FAIL re-build. */
   readonly iteration: number
-  /** True while paused at a human gate (plan→build or review→ship). */
+  /** True while paused at the plan→build human gate. */
   readonly paused: boolean
   /** Captured output text per completed stage, used to thread context forward. */
   readonly artifacts: Readonly<Partial<Record<Stage, string>>>
@@ -58,7 +58,6 @@ export type Action =
 export interface Config {
   readonly maxIterations: number
   readonly gateBeforeBuild: boolean
-  readonly gateBeforeShip: boolean
   /** Repo-relative root of the task backlog (folders are statuses). */
   readonly tasksDir: string
 }
@@ -104,9 +103,6 @@ export const composeArgs = (state: LoopState, target: Stage): string => {
   } else if (target === "review") {
     if (a.plan) parts.push(`Approved plan:\n${a.plan}`)
     if (a.build) parts.push(`Build summary:\n${a.build}`)
-  } else if (target === "ship") {
-    if (a.build) parts.push(`Build summary:\n${a.build}`)
-    if (a.review) parts.push(`Review summary:\n${a.review}`)
   }
   return parts.join("\n\n")
 }
@@ -160,13 +156,10 @@ export const advanceOnIdle = (
 
     case "review": {
       if (parseVerdict(output, LOOP_REVIEW_TAG) === "PASS") {
-        if (config.gateBeforeShip) {
-          return {
-            state: { ...s, paused: true },
-            action: { kind: "gate", message: "Review passed — review the findings, then run /loop go to ship." },
-          }
+        return {
+          state: s,
+          action: { kind: "done", message: "✓ Loop done — review passed. Ship it yourself." },
         }
-        return fire(s, "ship")
       }
       // FAIL (or unparseable verdict): re-build if budget remains, else stop.
       if (s.iteration + 1 < config.maxIterations) {
@@ -178,12 +171,6 @@ export const advanceOnIdle = (
         action: { kind: "stop", message: `✗ Loop stopped — review failed after ${config.maxIterations} iterations.` },
       }
     }
-
-    case "ship":
-      return {
-        state: s,
-        action: { kind: "done", message: "✓ Loop done — shipped. Review the PR draft/checklist and push it yourself." },
-      }
   }
 }
 
@@ -191,7 +178,6 @@ export const advanceOnIdle = (
 export const resume = (state: LoopState): { state: LoopState; action: Action } => {
   if (!state.paused) return { state, action: { kind: "noop" } }
   if (state.stage === "plan") return fire(state, "build")
-  if (state.stage === "review") return fire(state, "ship")
   return { state, action: { kind: "noop" } }
 }
 

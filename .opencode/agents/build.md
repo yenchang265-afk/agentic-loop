@@ -50,5 +50,5 @@ Return:
   scope creep, no drive-by reformatting.
 - **Tests first.** No production code without a failing test that demands it.
 - Immutable patterns; small focused files; comprehensive error handling.
-- Never commit or push, and never create a PR — the human reviews the diff after
-  ship prepares it. Do not weaken or delete a test just to make it pass.
+- Never commit or push, and never create a PR — the human reviews the diff
+  after the loop finishes. Do not weaken or delete a test just to make it pass.
