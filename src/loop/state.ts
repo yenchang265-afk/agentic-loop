@@ -40,6 +40,12 @@ export interface TaskRef {
   readonly azureUrl?: string
 }
 
+/** The git isolation for one loop's execution: work happens on `branch`, cut from `base`. */
+export interface GitRef {
+  readonly base: string
+  readonly branch: string
+}
+
 export interface LoopState {
   /** The goal the loop is driving toward. */
   readonly goal: string
@@ -53,6 +59,8 @@ export interface LoopState {
   readonly artifacts: Readonly<Partial<Record<Stage, string>>>
   /** Set when the loop was started from a backlog task; absent for free-text loops. */
   readonly task?: TaskRef
+  /** Set by the driver once execution is isolated on its own git branch. */
+  readonly git?: GitRef
 }
 
 /** What the driver should do next. All state changes are returned, not applied. */
@@ -133,6 +141,12 @@ export const composeArgs = (state: LoopState, target: Stage): string => {
   } else if (target === "review") {
     if (a.plan) parts.push(`Approved plan:\n${a.plan}`)
     if (a.build) parts.push(`Build summary:\n${a.build}`)
+    if (state.git) {
+      parts.push(
+        `Diff boundary: this loop's work is the commits on branch ${state.git.branch} since ${state.git.base} — ` +
+          `review exactly \`git diff ${state.git.base}...${state.git.branch}\`, nothing outside it.`,
+      )
+    }
   }
   return parts.join("\n\n")
 }

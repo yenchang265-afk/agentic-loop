@@ -1,5 +1,5 @@
 import type { PluginInput } from "@opencode-ai/plugin"
-import type { Task } from "../task/schema.ts"
+import { slugify, type Task } from "../task/schema.ts"
 import {
   appendNote,
   appendPlan,
@@ -17,6 +17,7 @@ import {
   wasInterrupted,
   writeTask,
 } from "../task/store.ts"
+import { checkoutBranch, commitAll, currentBranch, isDirty, isGitRepo } from "./git.ts"
 import type { Action, Config, LoopState, TaskRef } from "./state.ts"
 import {
   advanceOnIdle,
@@ -115,6 +116,14 @@ const driving = new Set<string>()
 /** Sessions in `/loop watch` mode — a standing flag, not a one-shot `Pending`,
  *  since it must survive many no-op idle ticks between claims. */
 const watching = new Set<string>()
+/**
+ * Working directories with a drive in flight. All sessions of one opencode
+ * instance share a single working tree and checked-out branch, so at most one
+ * loop may drive stages in it at a time — a second would switch branches out
+ * from under the first. (Separate opencode processes on the same clone are
+ * NOT covered — run extra watchers in their own clones/worktrees.)
+ */
+const executingDirs = new Set<string>()
 
 const toast = (client: Client, message: string, variant: "info" | "success" | "warning" | "error") =>
   client.tui.showToast({ body: { message, variant } }).catch(() => {})
@@ -129,6 +138,59 @@ const taskRef = (task: Task, path: string): TaskRef => ({
   ...(task.azureId !== undefined ? { azureId: task.azureId } : {}),
   ...(task.azureUrl !== undefined ? { azureUrl: task.azureUrl } : {}),
 })
+
+/** A short stable id for branch names and checkpoint messages. */
+const loopId = (state: LoopState): string => state.task?.id ?? (slugify(titleAndBody(state.goal).title) || "goal")
+
+/**
+ * Isolate execution on its own `loop/<id>` branch, cut from whatever branch
+ * the session is on (recorded as `base`). Degrades to no isolation — with a
+ * warning — outside a git repo, on a detached HEAD, or when checkout fails;
+ * an existing branch (e.g. a recovered run's) is reused, never reset.
+ */
+const ensureBranch = async (deps: Deps, state: LoopState): Promise<LoopState> => {
+  if (state.git) {
+    // Already isolated — just make sure the tree is back on this loop's branch
+    // (something else may have moved it while the loop was gated).
+    const cur = await currentBranch(deps.$, deps.directory)
+    if (cur !== state.git.branch && !(await checkoutBranch(deps.$, deps.directory, state.git.branch))) {
+      await deps.log("warn", `loop: could not return to ${state.git.branch} — building on ${cur ?? "detached HEAD"}`)
+    }
+    return state
+  }
+  if (!(await isGitRepo(deps.$, deps.directory))) return state
+  const base = await currentBranch(deps.$, deps.directory)
+  if (!base) {
+    await deps.log("warn", "loop: detached HEAD — building without branch isolation")
+    return state
+  }
+  if (await isDirty(deps.$, deps.directory)) {
+    await deps.log(
+      "warn",
+      "loop: working tree dirty at build start — pre-existing changes will land in this loop's checkpoints",
+    )
+  }
+  const branch = `loop/${loopId(state)}`
+  if (!(await checkoutBranch(deps.$, deps.directory, branch))) {
+    await deps.log("warn", `loop: could not check out ${branch} — building without branch isolation`)
+    return state
+  }
+  return { ...state, git: { base, branch } }
+}
+
+/** Commit everything as a checkpoint on the loop branch. No-op without isolation. */
+const checkpoint = async (deps: Deps, state: LoopState, message: string): Promise<void> => {
+  if (!state.git) return
+  await commitAll(deps.$, deps.directory, message)
+}
+
+/** Return the session to the branch it was on before the loop branched off. */
+const restoreBase = async (deps: Deps, state: LoopState): Promise<void> => {
+  if (!state.git) return
+  if (!(await checkoutBranch(deps.$, deps.directory, state.git.base))) {
+    await deps.log("warn", `loop: could not return to ${state.git.base} — still on ${state.git.branch}`)
+  }
+}
 
 /** Fire a stage command and return the assistant text it produced. */
 const runStage = async (client: Client, sessionID: string, stage: string, args: string): Promise<string> => {
@@ -154,13 +216,28 @@ const drive = async (
   const { client } = deps
   let step = first
   while (step.action.kind === "fire") {
-    setLoop(sessionID, step.state)
     const { stage, arguments: args } = step.action
+    // Build runs isolated on its own loop/<id> branch (created on the first
+    // build; re-checked-out on later ones in case the tree moved meanwhile).
+    if (stage === "build") {
+      step = { ...step, state: await ensureBranch(deps, step.state) }
+    }
+    setLoop(sessionID, step.state)
     const { task, iteration } = step.state
     const trackBuild = stage === "build" && task
     if (trackBuild) await appendNote(deps.$, task, `BUILD started (iteration ${iteration + 1})`)
     const output = await runStage(client, sessionID, stage, args)
     if (trackBuild) await appendNote(deps.$, task, `BUILD finished (iteration ${iteration + 1})`)
+    // A /loop stop while the stage ran cleared this session's loop — halt the
+    // chain, preserving whatever the stage did as a checkpoint on the branch.
+    if (!getLoop(sessionID)) {
+      await checkpoint(deps, step.state, `loop(${loopId(step.state)}): incomplete — stopped during ${stage}`)
+      await restoreBase(deps, step.state)
+      return
+    }
+    if (stage === "build") {
+      await checkpoint(deps, step.state, `loop(${loopId(step.state)}): build iteration ${iteration + 1}`)
+    }
     step = advanceOnIdle(step.state, config, output)
   }
 
@@ -180,7 +257,7 @@ const drive = async (
       }
       await toast(client, action.message, "info")
       return
-    case "done":
+    case "done": {
       if (state.task) {
         try {
           await moveTask(deps.$, state.task, "completed")
@@ -188,15 +265,23 @@ const drive = async (
           await deps.log("warn", `loop done but task move failed: ${(err as Error).message}`)
         }
       }
+      await checkpoint(deps, state, `loop(${loopId(state)}): done — review passed`)
+      await restoreBase(deps, state)
       clearLoop(sessionID)
-      await toast(client, action.message, "success")
+      const where = state.git ? ` Work is on branch ${state.git.branch}.` : ""
+      await toast(client, `${action.message}${where}`, "success")
       return
-    case "stop":
+    }
+    case "stop": {
       // Per design: a failed/stopped task stays in-progress, annotated for a human.
       if (state.task) await appendNote(deps.$, state.task, action.message)
+      await checkpoint(deps, state, `loop(${loopId(state)}): incomplete — ${action.message}`)
+      await restoreBase(deps, state)
       clearLoop(sessionID)
-      await toast(client, action.message, "warning")
+      const where = state.git ? ` Partial work is preserved on branch ${state.git.branch}.` : ""
+      await toast(client, `${action.message}${where}`, "warning")
       return
+    }
     case "noop":
       return
   }
@@ -297,8 +382,12 @@ export const onIdle = async (deps: Deps, sessionID: string, config: Config): Pro
   // watch session with no loop of its own currently running.
   const shouldWatch = watching.has(sessionID) && !getLoop(sessionID)
   if (!work && !shouldWatch) return
+  // One drive per working tree: while another session's loop holds this
+  // directory, leave the pending work queued and retry on a later idle tick.
+  if (executingDirs.has(deps.directory)) return
   if (work) pending.delete(sessionID)
   driving.add(sessionID)
+  executingDirs.add(deps.directory)
   try {
     if (work?.kind === "start") {
       await drive(deps, sessionID, config, firstStep(createState(work.goal)))
@@ -348,6 +437,7 @@ export const onIdle = async (deps: Deps, sessionID: string, config: Config): Pro
     await toast(deps.client, `Loop error: ${message}`, "error")
   } finally {
     driving.delete(sessionID)
+    executingDirs.delete(deps.directory)
   }
 }
 

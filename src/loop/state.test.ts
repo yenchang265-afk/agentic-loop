@@ -234,6 +234,24 @@ test("composeArgs omits the Azure line entirely when the task has no azureId", (
   assert.doesNotMatch(composeArgs(createState("g", task), "plan"), /Azure DevOps/)
 })
 
+// --- git isolation (branch-per-task) ---
+
+test("composeArgs threads the diff boundary into review when a git ref is set", () => {
+  const s = { ...createState("g"), git: { base: "main", branch: "loop/add-foo" } }
+  const args = composeArgs(s, "review")
+  assert.match(args, /git diff main\.\.\.loop\/add-foo/)
+})
+
+test("composeArgs omits the diff boundary when no git ref is set", () => {
+  assert.doesNotMatch(composeArgs(createState("g"), "review"), /Diff boundary/)
+})
+
+test("composeArgs does not thread the diff boundary into build or verify", () => {
+  const s = { ...createState("g"), git: { base: "main", branch: "loop/add-foo" } }
+  assert.doesNotMatch(composeArgs(s, "build"), /Diff boundary/)
+  assert.doesNotMatch(composeArgs(s, "verify"), /Diff boundary/)
+})
+
 // --- findSessionDriving (recover's live-loop guard) ---
 
 test("findSessionDriving locates the session whose loop drives a task id", () => {

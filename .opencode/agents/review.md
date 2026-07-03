@@ -22,6 +22,9 @@ paths, loops over unbounded data, or queries.
 
 A goal, the approved plan, and the build's summary of what changed (VERIFY has
 already confirmed the change works — this stage checks whether it's *good*).
+When a `Diff boundary:` line is present, the loop ran the build isolated on
+its own branch — review exactly that `git diff <base>...<branch>` range, no
+more and no less; do not trust the build summary over the actual diff.
 
 ## Your job
 
