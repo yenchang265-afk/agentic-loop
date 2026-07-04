@@ -167,29 +167,40 @@ type CheckStage = "verify" | "review"
  * tool call — not the stage's free text — is the authoritative channel;
  * text is untrusted (quoted contracts, echoed repo content).
  */
-const recordedVerdicts = new Map<string, { readonly stage: CheckStage; readonly verdict: Verdict }>()
+const recordedVerdicts = new Map<string, { readonly stage: CheckStage; readonly record: VerdictRecord }>()
+
+/** Per-session run metrics, accumulated across a drive and rendered on termination. */
+const runSamples = new Map<string, StageSample[]>()
+
+/** Append a stage sample to this session's run metrics. */
+const addSample = (sessionID: string, sample: StageSample): void => {
+  const list = runSamples.get(sessionID) ?? []
+  list.push(sample)
+  runSamples.set(sessionID, list)
+}
 
 /**
  * Record a verdict from the `loop_verdict` plugin tool. Only accepted while
  * this session's live loop is actually sitting in that check stage —
  * anything else (no loop, wrong stage, e.g. a build agent trying to
  * pre-empt its own verification) is ignored with an explanatory result.
+ * The optional `reason`/`criteria` steer the next iteration's prompt only.
  */
-export const recordVerdict = (sessionID: string, stage: CheckStage, verdict: Verdict): string => {
+export const recordVerdict = (sessionID: string, stage: CheckStage, record: VerdictRecord): string => {
   const state = getLoop(sessionID)
   if (!state) return "No active loop in this session — verdict ignored."
   if (state.stage !== stage) {
     return `The loop is at ${state.stage}, not ${stage} — verdict ignored. Only the running check stage may record its own verdict.`
   }
-  recordedVerdicts.set(sessionID, { stage, verdict })
-  return `Recorded ${stage} verdict: ${verdict}.`
+  recordedVerdicts.set(sessionID, { stage, record })
+  return `Recorded ${stage} verdict: ${record.verdict}.`
 }
 
-/** Consume (read-and-clear) the verdict recorded for a session's check stage, if any. */
-const takeVerdict = (sessionID: string, stage: CheckStage): Verdict | null => {
+/** Consume (read-and-clear) the verdict record for a session's check stage, if any. */
+const takeVerdictRecord = (sessionID: string, stage: CheckStage): VerdictRecord | null => {
   const rec = recordedVerdicts.get(sessionID)
   recordedVerdicts.delete(sessionID)
-  return rec && rec.stage === stage ? rec.verdict : null
+  return rec && rec.stage === stage ? rec.record : null
 }
 
 const toast = (client: Client, message: string, variant: "info" | "success" | "warning" | "error") =>
@@ -378,6 +389,122 @@ const runStage = async (
   }
 }
 
+/**
+ * Combine the verdict records of several review-lens passes into one: the worst
+ * verdict wins, and the reasons/failed-criteria of every non-PASS pass are
+ * merged so the re-build prompt sees all objections. Pure.
+ */
+const combineRecords = (records: readonly (VerdictRecord | null)[], lenses: readonly string[]): VerdictRecord => {
+  const verdict = worstOf(records.map((r) => r?.verdict ?? null))
+  const reasons: string[] = []
+  const criteria: { criterion: string; pass: boolean }[] = []
+  records.forEach((r, i) => {
+    if (!r || r.verdict === "PASS") return
+    const lens = lenses[i]
+    if (r.reason) reasons.push(lens ? `[${lens}] ${r.reason}` : r.reason)
+    for (const c of r.criteria ?? []) criteria.push(c)
+  })
+  return {
+    verdict,
+    ...(reasons.length ? { reason: reasons.join(" · ") } : {}),
+    ...(criteria.length ? { criteria } : {}),
+  }
+}
+
+/**
+ * Fire a stage, log its output to the run log, and (for check stages) capture
+ * its verdict record. REVIEW expands into one pass per configured lens — the
+ * verdicts are combined worst-wins and non-PASS pass outputs concatenated, so
+ * a single injected reviewer can't flip the outcome (threat model T1). All
+ * other stages run exactly once. Stops firing further lens passes if a
+ * `/loop stop` clears the loop mid-pass.
+ */
+const runStageWithLenses = async (
+  deps: Deps,
+  sessionID: string,
+  config: Config,
+  state: LoopState,
+  stage: Stage,
+  baseArgs: string,
+  iteration: number,
+): Promise<{ output: string; verdict: Verdict | null; record: VerdictRecord | null }> => {
+  const isCheck = stage === "verify" || stage === "review"
+  const lenses = stage === "review" ? config.reviewLenses : []
+  const passes: (string | null)[] = lenses.length ? [...lenses] : [null]
+  const outputs: string[] = []
+  const records: (VerdictRecord | null)[] = []
+  const { client } = deps
+
+  for (let i = 0; i < passes.length; i++) {
+    const lens = passes[i]
+    const args = lens
+      ? `${baseArgs}\n\nReview lens ${i + 1}/${passes.length}: focus exclusively on ${lens}. The other lenses ` +
+        `run as separate passes — don't repeat them. Record this pass's verdict via loop_verdict as usual.`
+      : baseArgs
+    recordedVerdicts.delete(sessionID) // no stale verdict may leak into this pass
+    const t0 = Date.now()
+    const out = await runStage(client, sessionID, stage, args, config.stageTimeoutMinutes)
+    const ms = Date.now() - t0
+    const stamp = new Date().toISOString()
+    const header = lens
+      ? `${stage} (lens: ${lens}) · iteration ${iteration + 1} · ${stamp}`
+      : `${stage} · iteration ${iteration + 1} · ${stamp}`
+    await appendRunLog(deps.$, deps.directory, config.tasksDir, loopId(state), header, out, deps.log)
+    outputs.push(lens ? `### Review lens: ${lens}\n${out}` : out)
+    const passRecord = isCheck ? takeVerdictRecord(sessionID, stage as CheckStage) : null
+    records.push(passRecord)
+    addSample(sessionID, {
+      stage,
+      iteration,
+      ms,
+      ...(isCheck ? { verdict: passRecord?.verdict ?? "none" } : {}),
+      ...(lens ? { lens } : {}),
+    })
+    if (!getLoop(sessionID)) break // /loop stop mid-pass — don't fire the rest
+  }
+
+  if (!isCheck) return { output: outputs[0] ?? "", verdict: null, record: null }
+
+  const record = lenses.length ? combineRecords(records, lenses) : (records[0] ?? null)
+  const verdict = record?.verdict ?? null
+  if (verdict === null) {
+    const inText = parseVerdict(outputs.join("\n"), stage === "verify" ? LOOP_VERIFY_TAG : LOOP_REVIEW_TAG)
+    await deps.log(
+      "warn",
+      `${stage} recorded no verdict via loop_verdict${inText ? ` (text claimed ${inText})` : ""} — treating as FAIL`,
+    )
+  }
+  return { output: outputs.join("\n\n"), verdict, record }
+}
+
+/**
+ * Persist a task-driven loop's state after a transition, so a crash/restart can
+ * resume at the exact stage. No-op for free-text loops (no durable id yet).
+ */
+const snapshot = async (deps: Deps, config: Config, state: LoopState): Promise<void> => {
+  if (!state.task) return
+  await saveState(deps.$, deps.directory, config.tasksDir, state.task.id, state)
+}
+
+/**
+ * Render this session's accumulated run metrics into the run log and clear the
+ * accumulator. Called once per terminal event (done/stop/error). Best-effort —
+ * never let telemetry failure disrupt the terminal handling.
+ */
+const renderMetrics = async (
+  deps: Deps,
+  sessionID: string,
+  config: Config,
+  state: LoopState,
+  outcome: Outcome,
+  detail: string,
+): Promise<void> => {
+  const samples = runSamples.get(sessionID) ?? []
+  runSamples.delete(sessionID)
+  const summary = renderRunSummary(samples, outcome, detail, config.maxIterations, new Date().toISOString())
+  await appendRunLog(deps.$, deps.directory, config.tasksDir, loopId(state), `run · ${outcome}`, summary, deps.log)
+}
+
 /** Run the stage chain from `first` until the pure logic yields a gate/done/stop. */
 const drive = async (
   deps: Deps,
@@ -390,64 +517,71 @@ const drive = async (
   let step = first
   while (step.action.kind === "fire") {
     const { stage, arguments: args } = step.action
-    // Build runs isolated on its own loop/<id> branch (created on the first
-    // build; re-checked-out on later ones in case the tree moved meanwhile).
-    if (stage === "build") {
-      step = { ...step, state: await ensureBranch(deps, step.state) }
+    // Execution stages run isolated: their own worktree (worktree mode) or the
+    // loop/<id> branch in the shared tree (default). Created on the first build;
+    // reconciled before every non-plan stage in case the tree/worktree moved —
+    // including a snapshot-based `/loop recover` that re-enters directly at
+    // verify/review, where isolation must be re-established, not assumed. PLAN
+    // is read-only against the main tree and needs no isolation.
+    if (stage !== "plan") {
+      step = { ...step, state: await ensureIsolation(deps, config, step.state) }
     }
     setLoop(sessionID, step.state)
+    await snapshot(deps, config, step.state)
     const { task, iteration } = step.state
     const trackBuild = stage === "build" && task
-    if (trackBuild) await appendNote(deps.$, task, auditNote(`BUILD started (iteration ${iteration + 1})`, new Date(), actor))
-    recordedVerdicts.delete(sessionID) // no stale verdict may leak into this stage
-    const output = await runStage(client, sessionID, stage, args, config.stageTimeoutMinutes)
-    if (trackBuild) await appendNote(deps.$, task, auditNote(`BUILD finished (iteration ${iteration + 1})`, new Date(), actor))
-    await appendRunLog(
-      deps.$,
-      deps.directory,
-      config.tasksDir,
-      loopId(step.state),
-      `${stage} · iteration ${iteration + 1} · ${new Date().toISOString()}`,
-      output,
+    if (trackBuild) await appendNote(deps.$, task, auditNote(`BUILD started (iteration ${iteration + 1})`, new Date(), actor), deps.log)
+    const { output, verdict, record } = await runStageWithLenses(
+      deps,
+      sessionID,
+      config,
+      step.state,
+      stage,
+      args,
+      iteration,
     )
+    if (trackBuild) await appendNote(deps.$, task, auditNote(`BUILD finished (iteration ${iteration + 1})`, new Date(), actor), deps.log)
     // A /loop stop while the stage ran cleared this session's loop — halt the
     // chain, preserving whatever the stage did as a checkpoint on the branch.
     if (!getLoop(sessionID)) {
+      await renderMetrics(deps, sessionID, config, step.state, "stopped", `stopped during ${stage}`)
       await checkpoint(deps, step.state, `loop(${loopId(step.state)}): incomplete — stopped during ${stage}`)
-      await restoreBase(deps, step.state)
+      await teardownIsolation(deps, step.state)
+      // A deliberate /loop stop ends the run — drop the snapshot so a later
+      // /loop recover doesn't silently resurrect it from stale state.
+      if (step.state.task) await clearState(deps.$, deps.directory, config.tasksDir, step.state.task.id)
       return
     }
     if (stage === "build") {
       await checkpoint(deps, step.state, `loop(${loopId(step.state)}): build iteration ${iteration + 1}`)
     }
-    let verdict: Verdict | null = null
-    if (stage === "verify" || stage === "review") {
-      verdict = takeVerdict(sessionID, stage)
-      if (verdict === null) {
-        // The tool call is the only trusted channel. A text-only verdict is
-        // logged for diagnosis but deliberately not honored.
-        const inText = parseVerdict(output, stage === "verify" ? LOOP_VERIFY_TAG : LOOP_REVIEW_TAG)
-        await deps.log(
-          "warn",
-          `${stage} recorded no verdict via loop_verdict${inText ? ` (text claimed ${inText})` : ""} — treating as FAIL`,
-        )
-      }
-      if (task) {
-        const recorded = verdict ?? "none recorded → FAIL"
-        await appendNote(
-          deps.$,
-          task,
-          auditNote(`${stage.toUpperCase()} verdict: ${recorded} (iteration ${iteration + 1})`, new Date(), actor),
-        )
-      }
+    if ((stage === "verify" || stage === "review") && task) {
+      const failed = record?.criteria?.filter((c) => !c.pass).length ?? 0
+      const detail = record?.reason ? ` — ${record.reason}` : ""
+      const criteriaNote = failed ? ` (${failed} criteria unmet)` : ""
+      await appendNote(
+        deps.$,
+        task,
+        auditNote(
+          `${stage.toUpperCase()} verdict: ${verdict ?? "none recorded → FAIL"}${criteriaNote}${detail} (iteration ${iteration + 1})`,
+          new Date(),
+          actor,
+        ),
+        deps.log,
+      )
     }
-    step = advanceOnIdle(step.state, config, output, verdict)
+    // Thread the machine-recorded failure reasons ahead of the stage's prose so
+    // the next PLAN/BUILD iteration leads with what actually failed.
+    const block = failedCriteriaBlock(record)
+    const threaded = block ? `${block}\n\n${output}` : output
+    step = advanceOnIdle(step.state, config, threaded, verdict)
   }
 
   const { state, action } = step
   switch (action.kind) {
     case "gate":
       setLoop(sessionID, state)
+      await snapshot(deps, config, state)
       // The plan→build gate persists onto the task file, only the first
       // time (iteration 0) — re-plans thread the prior plan via the artifact
       // instead.

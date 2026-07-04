@@ -22,6 +22,47 @@
  */
 export type Verdict = "PASS" | "FAIL" | "ERROR"
 
+/** Per-acceptance-criterion result carried alongside a verdict (optional). */
+export interface CriterionResult {
+  readonly criterion: string
+  readonly pass: boolean
+}
+
+/**
+ * A verdict plus the optional structured reasons the check stage recorded via
+ * the `loop_verdict` tool. `reason`/`criteria` steer the *next iteration's
+ * prompt* — never control flow, which remains `verdict` alone (same trust
+ * level as the verdict itself, since they arrive through the same tool call).
+ */
+export interface VerdictRecord {
+  readonly verdict: Verdict
+  readonly reason?: string
+  readonly criteria?: readonly CriterionResult[]
+}
+
+/**
+ * Combine several review-lens verdicts into one: any ERROR wins (the check
+ * couldn't run), else any FAIL/missing wins, else PASS. A missing verdict
+ * (null) counts as FAIL — never a stall. Pure.
+ */
+export const worstOf = (verdicts: readonly (Verdict | null)[]): Verdict => {
+  if (verdicts.some((v) => v === "ERROR")) return "ERROR"
+  if (verdicts.some((v) => v !== "PASS")) return "FAIL"
+  return "PASS"
+}
+
+/** Render the failed criteria as a prompt block for the next iteration, or "". Pure. */
+export const failedCriteriaBlock = (record: VerdictRecord | null): string => {
+  const failed = record?.criteria?.filter((c) => !c.pass) ?? []
+  const lines: string[] = []
+  if (record?.reason) lines.push(`Verdict reason: ${record.reason}`)
+  if (failed.length) {
+    lines.push("Failed criteria (from loop_verdict):")
+    for (const c of failed) lines.push(`- ${c.criterion}`)
+  }
+  return lines.join("\n")
+}
+
 /** The verdict tags emitted by the loop's check stages. */
 export const LOOP_VERIFY_TAG = "LOOP_VERIFY"
 export const LOOP_REVIEW_TAG = "LOOP_REVIEW"

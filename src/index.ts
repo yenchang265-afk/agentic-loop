@@ -155,8 +155,27 @@ export const AgenticLoop: Plugin = async ({ client, directory, $ }) => {
               "PASS only on observed evidence; FAIL when criteria are unmet; ERROR only when the check itself " +
                 "could not run at all (broken environment, missing test runner) — never for failing tests.",
             ),
+          reason: tool.schema
+            .string()
+            .max(500)
+            .optional()
+            .describe("One-sentence summary of why. Give it on every FAIL or ERROR so the next iteration knows what to fix."),
+          criteria: tool.schema
+            .array(
+              tool.schema.object({
+                criterion: tool.schema.string().describe("The acceptance criterion text, as given to you."),
+                pass: tool.schema.boolean().describe("Whether this criterion is met, on observed evidence."),
+              }),
+            )
+            .optional()
+            .describe("Per-acceptance-criterion results, mirroring the criteria threaded into your stage prompt."),
         },
-        execute: async (args, ctx) => driver.recordVerdict(ctx.sessionID, args.stage, args.verdict),
+        execute: async (args, ctx) =>
+          driver.recordVerdict(ctx.sessionID, args.stage, {
+            verdict: args.verdict,
+            ...(args.reason !== undefined ? { reason: args.reason } : {}),
+            ...(args.criteria !== undefined ? { criteria: args.criteria } : {}),
+          }),
       }),
     },
   }
