@@ -41,8 +41,10 @@ pushes or opens a PR itself; you review the branch diff, then run
 `/loop ship <id>` to move it to `completed/`. A run that dies mid-build is
 resumed with `/loop recover <id>` — loop state is snapshotted after every
 stage, so recovery resumes at the exact stage it reached. See
-`docs/design/threat-model.md` for the security posture, and
-`docs/design/improvements/` for the design of the hardening features below.
+`docs/design/threat-model.md` for the security posture,
+`docs/design/improvements/` for the design record of the hardening features
+below, and `docs/design/enterprise-adoption.md` for the enterprise gap
+analysis and forward roadmap.
 
 ### Optional hardening (config in `.agentic-loop.json`)
 
