@@ -114,7 +114,7 @@ install_opencode() {
   fi
 
   echo
-  echo "OpenCode: /loop and the bundled skills are available in every OpenCode session."
+  echo "OpenCode: /agent-loop and the bundled skills are available in every OpenCode session."
 }
 
 install_claude() {

@@ -8,23 +8,23 @@ git isolation, trusted verdicts, backlog, and audit trail.
 
 ## What it does
 
-Planning and execution are two commands. **`/loop-plan`** interviews you into
+Planning and execution are two commands. **`/agent-loop-plan`** interviews you into
 a draft task (`new <idea>` — always, so the goal and testable acceptance
 criteria come from you, not a guess), plans it as a separate step after you
 review the draft (`task <id>`), and `approve <id>` is the explicit human gate
-that parks it in the approved queue. **`/loop`** is a pure executor over that
+that parks it in the approved queue. **`/agent-loop`** is a pure executor over that
 queue:
 
 | Stage | Does | Pauses? |
 |-------|------|---------|
-| *(plan — in `/loop-plan`, before the loop)* | Interviews → draft; plans on request; `approve` parks it | **yes — draft review and the approval are the gates** |
+| *(plan — in `/agent-loop-plan`, before the loop)* | Interviews → draft; plans on request; `approve` parks it | **yes — draft review and the approval are the gates** |
 | BUILD | Implements the approved plan test-first, on its own `loop/<id>` branch | no |
 | VERIFY | Runs tests; FAIL re-builds with the failure | no |
 | REVIEW | Checks the branch diff; FAIL re-builds with feedback | no |
 
 Execution is isolated on a `loop/<id>` git branch, verdicts are only trusted
 through a plugin tool, every transition is audited, and the loop never pushes
-or opens a PR itself — you review and `/loop ship`. Full execution model
+or opens a PR itself — you review and `/agent-loop ship`. Full execution model
 (watch mode, iteration caps, recovery): [docs/opencode.md](docs/opencode.md).
 
 ## Install
@@ -47,13 +47,13 @@ Idempotent — re-run after `git pull` for updates.
 
 ## Commands
 
-- `/loop-plan new <idea>` · `task <id>` · `approve <id>` — interview → draft →
+- `/agent-loop-plan new <idea>` · `task <id>` · `approve <id>` — interview → draft →
   plan → human approval
-- `/loop task <id>` · `watch` · `ship <id>` · `recover <id>` · `stop` · `status` —
+- `/agent-loop task <id>` · `watch` · `ship <id>` · `recover <id>` · `stop` · `status` —
   execute the approved queue
 
 Full command reference: [docs/opencode.md](docs/opencode.md) (OpenCode) ·
-[`claude-plugin/README.md`](claude-plugin/README.md) (Claude Code — `/loop claim`
+[`claude-plugin/README.md`](claude-plugin/README.md) (Claude Code — `/agent-loop claim`
 instead of `watch`). Ad-hoc, outside-the-loop requests map to the bundled
 skills library via [AGENTS.md](AGENTS.md).
 
@@ -82,7 +82,7 @@ skills library via [AGENTS.md](AGENTS.md).
   bundled MCP server that drives the loop
 - `skills/`, `references/` — the workflow library the stage agents and ad-hoc
   requests pull from (shared by both plugins)
-- `docs/tasks/` — the filesystem task backlog `/loop-plan` and `/loop task`
+- `docs/tasks/` — the filesystem task backlog `/agent-loop-plan` and `/agent-loop task`
   read from
 - `install.sh` — installs either or both plugins
 
