@@ -14,20 +14,16 @@ type Client = PluginInput["client"]
 const ConfigSchema = z.object({
   /** Max loop iterations before stopping on repeated verify/review failures. */
   maxIterations: z.number().int().positive().default(3),
-  /** Pause for human approval after plan, before build edits anything. */
-  gateBeforeBuild: z.boolean().default(true),
-  /**
-   * Whether a free-text `/loop <goal>` may run a live `interview-me` pass on
-   * an underspecified goal before queuing the automatic pipeline. Read by
-   * the `/loop` command's own prompt (`.opencode/commands/loop.md`), not
-   * branched on in plugin code — validated here so a typo'd value fails
-   * fast like every other knob.
-   */
-  interviewBeforePlan: z.boolean().default(true),
   /** Repo-relative root of the task backlog; its subfolders are task statuses. */
   tasksDir: z.string().min(1).default("docs/tasks"),
   /** Wall-clock cap on a single stage; a stage exceeding it fails the loop instead of hanging it. */
   stageTimeoutMinutes: z.number().int().positive().default(60),
+  /**
+   * Default polling cadence for `/loop watch`: a timer at this interval scans
+   * `in-progress/` for claimable approved tasks while the session is idle.
+   * Overridable per-session via `/loop watch <interval>` (e.g. `30s`, `2h`).
+   */
+  watchIntervalMinutes: z.number().positive().max(1440).default(5),
   /**
    * Repo-relative (or absolute) directory for per-task git worktrees. When set,
    * each loop's BUILD/VERIFY/REVIEW runs against its own worktree instead of

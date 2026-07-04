@@ -13,6 +13,10 @@ import { STAGES, type LoopState } from "./state.ts"
  * The snapshot lives in the repo working tree, so `load` **validates and fails
  * closed**: a garbled or tampered file returns null (→ plan-based recovery),
  * never injects arbitrary state.
+ *
+ * Snapshots written before the PLAN stage was removed (stage "plan", or with a
+ * `paused` flag) are deliberately invalidated by the schema below — they fail
+ * closed and `/loop recover` falls back to the plan persisted on the task file.
  */
 
 type Client = PluginInput["client"]
@@ -36,7 +40,6 @@ const LoopStateSchema = z.object({
   goal: z.string(),
   stage: z.enum(STAGES as unknown as [string, ...string[]]),
   iteration: z.number().int().min(0),
-  paused: z.boolean(),
   // Partial map of stage → captured output. String keys (not an enum) because
   // this zod version treats an enum-keyed record as exhaustive; the state
   // machine only ever reads known stage keys, so extra keys are inert.
