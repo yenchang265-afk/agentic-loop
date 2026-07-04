@@ -807,8 +807,11 @@ export const parsePlanArgs = (args: string): PlanArgs => {
  *   planning attempted, `in-planning/` means planning started or done. The
  *   agent then writes the `## Implementation Plan` onto the file in place.
  *   Failures never block the turn — the agent also looks in `draft/`.
- * - `approve <id>` — deterministic backlog surgery: validate the plan exists
- *   and park the task in `in-progress/` (the approved queue).
+ * - `approve <id>` — deterministic backlog surgery: validate the task is in
+ *   `in-planning/` with a plan already written, and park it in `in-progress/`
+ *   (the approved queue). A task still in `draft/` is never approved directly
+ *   — even one with a hand-written plan heading — it must go through
+ *   `task <id>` first so no stage is ever skipped.
  */
 export const handlePlanCommand = async (deps: Deps, _sessionID: string, args: string, config: Config): Promise<void> => {
   const { client } = deps
@@ -834,14 +837,19 @@ export const handlePlanCommand = async (deps: Deps, _sessionID: string, args: st
     return
   }
   if (!id) return void (await toast(client, "Usage: /agent-loop-plan approve <id>.", "warning"))
-  const task =
-    (await findByIdIn(client, deps.directory, config.tasksDir, "in-planning", id)) ??
-    (await findByIdIn(client, deps.directory, config.tasksDir, "draft", id))
+  const task = await findByIdIn(client, deps.directory, config.tasksDir, "in-planning", id)
   if (!task) {
+    if (await findByIdIn(client, deps.directory, config.tasksDir, "draft", id)) {
+      return void (
+        await toast(
+          client,
+          `Task "${id}" is still in draft — run /agent-loop-plan task ${id} first to move it into planning.`,
+          "warning",
+        )
+      )
+    }
     const elsewhere = await findAnyStatus(deps, config, id)
-    const detail = elsewhere
-      ? `it's in ${elsewhere} — only draft/in-planning tasks can be approved`
-      : `no task "${id}" found`
+    const detail = elsewhere ? `it's in ${elsewhere} — only in-planning tasks can be approved` : `no task "${id}" found`
     return void (await toast(client, `Can't approve "${id}": ${detail}.`, "warning"))
   }
   if (!hasPlan(task)) {
