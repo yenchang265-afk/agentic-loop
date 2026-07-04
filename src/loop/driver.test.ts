@@ -1,6 +1,9 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { parsePlanArgs, parseWatchArgs } from "./driver.ts"
+import { PLAN_HEADING } from "../task/store.ts"
+import { serializeTask } from "../task/schema.ts"
+import type { Config } from "./state.ts"
+import { handlePlanCommand, parsePlanArgs, parseWatchArgs, type Deps } from "./driver.ts"
 
 /**
  * The watch-mode plumbing (timers, idle queries, claiming) is exercised
@@ -67,4 +70,94 @@ test("new and free text pass through", () => {
   assert.deepEqual(parsePlanArgs("new add rate limiting"), { mode: "passthrough" })
   assert.deepEqual(parsePlanArgs(""), { mode: "passthrough" })
   assert.deepEqual(parsePlanArgs("tasky thing"), { mode: "passthrough" })
+})
+
+/**
+ * `handlePlanCommand("approve …")` must never skip the in-planning stage —
+ * not even for a draft task someone hand-edited a plan heading onto. Fakes
+ * `client.file.read`/`client.tui.showToast`; `$` throws if invoked at all,
+ * proving no move is attempted.
+ */
+
+const explodingShell = ((..._args: unknown[]) => {
+  throw new Error("$ should not be called")
+}) as unknown as Deps["$"]
+
+const makeClient = (files: Record<string, string>) => {
+  const toasts: { message: string; variant: string }[] = []
+  const client = {
+    file: {
+      read: async ({ query }: { query: { path: string } }) => {
+        const content = files[query.path]
+        return { data: content !== undefined ? { content } : undefined }
+      },
+    },
+    tui: {
+      showToast: async ({ body }: { body: { message: string; variant: string } }) => {
+        toasts.push(body)
+        return { data: undefined }
+      },
+    },
+  } as unknown as Deps["client"]
+  return { client, toasts }
+}
+
+const testConfig: Config = {
+  maxIterations: 1,
+  tasksDir: "docs/tasks",
+  stageTimeoutMinutes: 10,
+  watchIntervalMinutes: 5,
+  reviewLenses: [],
+}
+
+test("approve refuses a draft task even when it already has a plan heading", async () => {
+  const draftBody = serializeTask({ title: "Do the thing", body: `${PLAN_HEADING}\n\n1. Step.` })
+  const { client, toasts } = makeClient({ "docs/tasks/draft/my-task.md": draftBody })
+  const deps: Deps = { client, $: explodingShell, directory: "/repo", log: () => {} }
+
+  await handlePlanCommand(deps, "sess", "approve my-task", testConfig)
+
+  assert.equal(toasts.length, 1)
+  assert.match(toasts[0]?.message ?? "", /still in draft/)
+  assert.match(toasts[0]?.message ?? "", /agent-loop-plan task my-task/)
+})
+
+/** Mirrors the fake shell in `../task/store.test.ts` / `git.test.ts` — always succeeds, records commands. */
+const makeSucceedingShell = (log: string[]) => {
+  const build = (strings: TemplateStringsArray, exprs: unknown[]) => {
+    let cmd = ""
+    strings.forEach((s, i) => {
+      cmd += s
+      if (i < exprs.length) {
+        const e = exprs[i]
+        cmd += Array.isArray(e) ? e.join(" ") : String(e)
+      }
+    })
+    log.push(cmd.trim().replace(/\s+/g, " "))
+    const chain = {
+      quiet: () => chain,
+      nothrow: () => chain,
+      cwd: () => chain,
+      then: (resolve: (v: unknown) => unknown) =>
+        Promise.resolve({ exitCode: 0, stdout: { toString: () => "" }, stderr: { toString: () => "" } }).then(
+          resolve,
+        ),
+    }
+    return chain
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return ((strings: TemplateStringsArray, ...exprs: unknown[]) => build(strings, exprs)) as any
+}
+
+test("approve succeeds for a task already in in-planning with a plan", async () => {
+  const planned = serializeTask({ title: "Do the thing", body: `${PLAN_HEADING}\n\n1. Step.` })
+  const { client, toasts } = makeClient({ "docs/tasks/in-planning/my-task.md": planned })
+  const log: string[] = []
+  const deps: Deps = { client, $: makeSucceedingShell(log), directory: "/repo", log: () => {} }
+
+  await handlePlanCommand(deps, "sess", "approve my-task", testConfig)
+
+  assert.equal(toasts.length, 1)
+  assert.equal(toasts[0]?.variant, "success")
+  assert.ok(log.some((cmd) => cmd.includes("mv") && cmd.includes("in-progress")))
 })
