@@ -1,5 +1,6 @@
 import type { PluginInput } from "@opencode-ai/plugin"
 import path from "node:path"
+import { redact } from "./redact.ts"
 import { buildTaskFile, parseTask, type Task, type TaskInput } from "./schema.ts"
 
 /**
@@ -208,9 +209,18 @@ export const moveTask = async ($: Shell, task: FileRef, toStatus: TaskStatus): P
   return dest
 }
 
-/** Append a blockquote note to a task file in place. Best-effort. */
-export const appendNote = async ($: Shell, task: FileRef, note: string): Promise<void> => {
-  await $`printf '\n> %s\n' ${note} >> ${task.path}`.quiet().nothrow()
+/** Warn about redaction hits without ever echoing the secret (names only). */
+const warnRedaction = (hits: readonly { pattern: string; count: number }[], where: string, log?: Log): void => {
+  if (!hits.length || !log) return
+  const summary = hits.map((h) => `${h.pattern} ×${h.count}`).join(", ")
+  log("warn", `redacted secret-shaped strings from ${where}: ${summary}`)
+}
+
+/** Append a blockquote note to a task file in place. Secrets redacted. Best-effort. */
+export const appendNote = async ($: Shell, task: FileRef, note: string, log?: Log): Promise<void> => {
+  const { text, hits } = redact(note)
+  warnRedaction(hits, `note on ${task.id}`, log)
+  await $`printf '\n> %s\n' ${text} >> ${task.path}`.quiet().nothrow()
 }
 
 /**
@@ -234,16 +244,21 @@ export const appendRunLog = async (
   id: string,
   header: string,
   text: string,
+  log?: Log,
 ): Promise<void> => {
   const dir = path.join(directory, tasksDir, "runs")
   await $`mkdir -p ${dir}`.quiet().nothrow()
   const file = path.join(dir, `${id}.md`)
-  await $`printf '\n## %s\n\n%s\n' ${header} ${text} >> ${file}`.quiet().nothrow()
+  const clean = redact(text)
+  warnRedaction(clean.hits, `run log ${id}.md`, log)
+  await $`printf '\n## %s\n\n%s\n' ${header} ${clean.text} >> ${file}`.quiet().nothrow()
 }
 
-/** Append a plan under `PLAN_HEADING` to a task file in place. Best-effort. */
-export const appendPlan = async ($: Shell, task: FileRef, plan: string): Promise<void> => {
-  await $`printf '\n%s\n\n%s\n' ${PLAN_HEADING} ${plan} >> ${task.path}`.quiet().nothrow()
+/** Append a plan under `PLAN_HEADING` to a task file in place. Secrets redacted. Best-effort. */
+export const appendPlan = async ($: Shell, task: FileRef, plan: string, log?: Log): Promise<void> => {
+  const { text, hits } = redact(plan)
+  warnRedaction(hits, `plan on ${task.id}`, log)
+  await $`printf '\n%s\n\n%s\n' ${PLAN_HEADING} ${text} >> ${task.path}`.quiet().nothrow()
 }
 
 /** Existing task ids (filenames without `.md`) in a status folder; `[]` if absent. */
