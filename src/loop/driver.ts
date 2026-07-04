@@ -705,6 +705,9 @@ const parkApprovedPlan = async (
   // The approval record — who parked what — becomes a commit of its own.
   await commitPaths(deps.$, deps.directory, [config.tasksDir], `loop(${id}): plan approved — parked for execution`)
 
+  // Parking ends this session's run — drop its accumulated PLAN metrics so they
+  // don't leak into the next loop this session drives.
+  runSamples.delete(sessionID)
   clearLoop(sessionID)
   await toast(
     deps.client,
