@@ -15,21 +15,17 @@ const EDIT_TOOLS = new Set(["edit", "write", "patch", "multiedit"])
 /**
  * agentic-loop
  *
- * opencode plugin that drives the engineering workflow as an automatic loop:
+ * opencode plugin that executes approved plans as an automatic loop:
  *
- *   plan → build → verify → review
+ *   build → verify → review
  *
- * `/loop <goal>` starts it; the plugin runs plan, pauses for a human
- * plan-approval gate (`/loop go`), then runs build → verify → review
- * to completion. A verify FAIL re-plans; a review FAIL re-builds — both
- * within the iteration cap. The control surface lives in `loop/driver.ts`;
- * the pure state machine in `loop/state.ts`.
- *
- * A free-text `/loop <goal>` doesn't queue that automatic run directly — the
- * command's own turn first decides (per its prompt) whether the goal needs a
- * live `interview-me` pass, then calls the `loop_begin` tool below to
- * actually queue it. That keeps `interview-me`'s live-user requirement out
- * of the unattended `session.idle`-driven stage loop entirely.
+ * Planning lives in the `/loop-plan` command: its agent authors a task file
+ * with an `## Implementation Plan`, and `/loop-plan approve <id>` (handled
+ * deterministically below) parks it in `in-progress/`. `/loop task <id>`
+ * executes one approved task; `/loop watch [interval]` polls for them — on
+ * every `session.idle` event plus a per-session interval timer. A verify or
+ * review FAIL re-builds within the iteration cap. The control surface lives
+ * in `loop/driver.ts`; the pure state machine in `loop/state.ts`.
  */
 export const AgenticLoop: Plugin = async ({ client, directory, $ }) => {
   const service = "agentic-loop"
@@ -109,6 +105,12 @@ export const AgenticLoop: Plugin = async ({ client, directory, $ }) => {
   }
 
   return {
+    // Clear watch polling timers on plugin teardown so a reload doesn't leak
+    // intervals firing into a dead instance.
+    dispose: async () => {
+      driver.disposeWatch()
+    },
+
     event: async ({ event }) => {
       if (event.type !== "session.idle") return
       await reconcileOnce()
@@ -117,9 +119,15 @@ export const AgenticLoop: Plugin = async ({ client, directory, $ }) => {
     },
 
     "command.execute.before": async (input) => {
-      if (input.command !== "loop") return
-      await reconcileOnce()
-      await driver.handleCommand(deps, input.sessionID, input.arguments, await getConfig())
+      if (input.command === "loop") {
+        await reconcileOnce()
+        await driver.handleCommand(deps, input.sessionID, input.arguments, await getConfig())
+        return
+      }
+      if (input.command === "loop-plan") {
+        await reconcileOnce()
+        await driver.handlePlanCommand(deps, input.sessionID, input.arguments, await getConfig())
+      }
     },
 
     "tool.execute.before": async (input, output) => {
@@ -145,19 +153,6 @@ export const AgenticLoop: Plugin = async ({ client, directory, $ }) => {
     },
 
     tool: {
-      loop_begin: tool({
-        description:
-          "Start the /loop pipeline queued by a /loop <goal> command, once the goal is ready — " +
-          "either judged unambiguous per the interview-me skill's own criteria, or confirmed via a " +
-          "live interview-me exchange with the user. Call exactly once, at the end of that command's " +
-          "own turn, with the final goal text (the confirmed restatement if an interview ran). Never " +
-          "call this from inside the automatic plan/build/verify/review stages.",
-        args: {
-          goal: tool.schema.string().min(1).describe("The final goal text to start the loop with."),
-        },
-        execute: async (args, ctx) => driver.beginAfterClarification(deps, ctx.sessionID, args.goal),
-      }),
-
       loop_verdict: tool({
         description:
           "Record the VERIFY or REVIEW stage's machine-readable verdict for the running loop. This tool " +
