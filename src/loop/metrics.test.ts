@@ -10,7 +10,6 @@ test("formatDuration renders sub-minute, minute, and hour scales", () => {
 })
 
 const clean: StageSample[] = [
-  { stage: "plan", iteration: 0, ms: 161_000 },
   { stage: "build", iteration: 0, ms: 665_000 },
   { stage: "verify", iteration: 0, ms: 181_000, verdict: "PASS" },
   { stage: "review", iteration: 0, ms: 259_000, verdict: "PASS" },
@@ -19,16 +18,15 @@ const clean: StageSample[] = [
 test("renderRunSummary tabulates stages and reports iterations used", () => {
   const out = renderRunSummary(clean, "done", "review passed", 3, "2026-07-04T10:00:00.000Z")
   assert.match(out, /## Run summary · done: review passed · 2026-07-04T10:00:00\.000Z/)
-  assert.match(out, /\| 1 \| plan \| 1 \| — \| 2m 41s \|/)
-  assert.match(out, /\| 3 \| verify \| 1 \| PASS \| 3m 01s \|/)
+  assert.match(out, /\| 1 \| build \| 1 \| — \| 11m 05s \|/)
+  assert.match(out, /\| 2 \| verify \| 1 \| PASS \| 3m 01s \|/)
   assert.match(out, /iterations used: 1\/3/)
-  assert.match(out, /total: 21m 06s · outcome: done/)
+  assert.match(out, /total: 18m 25s · outcome: done/)
 })
 
-test("renderRunSummary counts the highest iteration reached across a re-plan run", () => {
+test("renderRunSummary counts the highest iteration reached across a re-build run", () => {
   const reran: StageSample[] = [
     { stage: "verify", iteration: 0, ms: 1000, verdict: "FAIL" },
-    { stage: "plan", iteration: 1, ms: 1000 },
     { stage: "build", iteration: 1, ms: 1000 },
     { stage: "verify", iteration: 1, ms: 1000, verdict: "PASS" },
   ]

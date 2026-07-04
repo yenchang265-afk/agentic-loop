@@ -55,7 +55,6 @@ const sampleState: LoopState = {
   goal: "add rate limiting",
   stage: "verify",
   iteration: 1,
-  paused: false,
   artifacts: { plan: "the plan", build: "built it" },
   task: { id: "add-rl", path: "/repo/docs/tasks/in-progress/add-rl.md", acceptance: ["429 over limit"] },
   git: { base: "main", branch: "loop/add-rl", worktree: "/repo/.wt/add-rl" },
@@ -94,6 +93,27 @@ test("loadState fails closed on a schema violation (unknown stage)", async () =>
     JSON.stringify({ ...sampleState, stage: "deploy" }),
   )
   assert.equal(await loadState(fakeClient(dir), dir, "docs/tasks", "bad"), null)
+})
+
+test("loadState fails closed on a pre-refactor snapshot at the removed PLAN stage", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "loop-persist-"))
+  fs.mkdirSync(path.join(dir, "docs/tasks/runs"), { recursive: true })
+  fs.writeFileSync(
+    path.join(dir, "docs/tasks/runs/old.state.json"),
+    JSON.stringify({ ...sampleState, stage: "plan", paused: true }),
+  )
+  assert.equal(await loadState(fakeClient(dir), dir, "docs/tasks", "old"), null)
+})
+
+test("loadState tolerates a legacy paused flag on an otherwise valid snapshot", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "loop-persist-"))
+  fs.mkdirSync(path.join(dir, "docs/tasks/runs"), { recursive: true })
+  fs.writeFileSync(
+    path.join(dir, "docs/tasks/runs/legacy.state.json"),
+    JSON.stringify({ ...sampleState, paused: false }),
+  )
+  const loaded = await loadState(fakeClient(dir), dir, "docs/tasks", "legacy")
+  assert.deepEqual(loaded, sampleState)
 })
 
 test("clearState removes the snapshot and is idempotent", async () => {

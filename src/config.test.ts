@@ -36,8 +36,20 @@ test("parseConfig rejects an empty lens string", () => {
 
 test("existing knobs keep their defaults and validation", () => {
   assert.equal(DEFAULT_CONFIG.maxIterations, 3)
-  assert.equal(DEFAULT_CONFIG.gateBeforeBuild, true)
   assert.equal(DEFAULT_CONFIG.tasksDir, "docs/tasks")
   assert.equal(DEFAULT_CONFIG.stageTimeoutMinutes, 60)
   assert.throws(() => parseConfig({ maxIterations: 0 }), /Invalid/)
+})
+
+test("watchIntervalMinutes defaults to 5 and rejects nonsense", () => {
+  assert.equal(DEFAULT_CONFIG.watchIntervalMinutes, 5)
+  assert.equal(parseConfig({ watchIntervalMinutes: 0.5 }).watchIntervalMinutes, 0.5)
+  assert.throws(() => parseConfig({ watchIntervalMinutes: 0 }), /Invalid .*watchIntervalMinutes/)
+  assert.throws(() => parseConfig({ watchIntervalMinutes: 2000 }), /Invalid .*watchIntervalMinutes/)
+})
+
+test("a config still carrying removed keys parses (silent deprecation)", () => {
+  const c = parseConfig({ gateBeforeBuild: false, interviewBeforePlan: false })
+  assert.equal(c.maxIterations, 3)
+  assert.ok(!("gateBeforeBuild" in c))
 })
