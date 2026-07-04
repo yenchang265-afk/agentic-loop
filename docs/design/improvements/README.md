@@ -1,29 +1,30 @@
 # Agentic loop — engineering workflow improvement plans
 
-Implementation plans for the next round of improvements to the `/loop`
-pipeline, written to be executed later (each is sized to be one `/loop` task
-or one PR, and is self-contained — no conversation context required).
+**Status: all six plans below are implemented and tested** in the OpenCode
+plugin (`src/`). They are kept as the design record for those features, not
+as a pending backlog. The forward roadmap now lives in
+[`../enterprise-adoption.md`](../enterprise-adoption.md) — the enterprise
+gap analysis and phased improvement plan.
 
-Sourced from: the current code on `enterprise-hardening` (all cited paths and
-function names verified against source), the residual risks in
+Sourced from: the current code (all cited paths and function names verified
+against source at time of writing), the residual risks in
 [`../threat-model.md`](../threat-model.md), and the documented limitations in
 `README.md` / `skills/loop-orchestration/SKILL.md`.
 
-## The plans, in recommended execution order
+## The plans (all shipped)
 
-| # | Plan | What it buys | Attacks |
-|---|------|--------------|---------|
-| 01 | [Worktree isolation](./01-worktree-isolation.md) | Human's checkout never touched; safe concurrent watch sessions in one instance | Threat model T3 residual; `executingDirs` serialization |
-| 02 | [State persistence](./02-state-persistence.md) | Crash/restart resumes at the exact stage with artifacts, not a re-plan | In-memory-only `LoopState` limitation |
-| 03 | [Ship + status commands](./03-ship-and-status-commands.md) | Audited `in-review → completed` move; backlog dashboard | Unaudited manual `mv`; no backlog overview |
-| 04 | [Verdict quality](./04-verdict-quality.md) | Structured failure reasons feed re-plans; optional multi-lens review | Prose-blob feedback loops; threat model T1 residual |
-| 05 | [Secret redaction](./05-secret-redaction.md) | Secrets scrubbed from durable artifacts before write | Threat model T6 (currently only partial) |
-| 06 | [Run metrics](./06-run-metrics.md) | Per-run stage timings + verdict history in the run log | No convergence visibility |
+| # | Plan | What it bought | Where it lives now |
+|---|------|----------------|--------------------|
+| 01 | [Worktree isolation](./01-worktree-isolation.md) | Human's checkout never touched; safe concurrent watch sessions in one instance | `src/loop/git.ts`, `ensureIsolation` in `src/loop/driver.ts`, edit-guard in `src/index.ts`; `git.test.ts` |
+| 02 | [State persistence](./02-state-persistence.md) | Crash/restart resumes at the exact stage with artifacts, not a re-plan | `src/loop/persist.ts`; `persist.test.ts` |
+| 03 | [Ship + status commands](./03-ship-and-status-commands.md) | Audited `in-review → completed` move; backlog dashboard | `/loop ship` + status in `src/loop/driver.ts`, `summarizeBacklog` in `src/task/store.ts`; `store.test.ts` |
+| 04 | [Verdict quality](./04-verdict-quality.md) | Structured failure reasons feed re-builds; optional multi-lens review | `src/loop/verdict.ts`, `runStageWithLenses` in `src/loop/driver.ts`; `verdict.test.ts` |
+| 05 | [Secret redaction](./05-secret-redaction.md) | Secrets scrubbed from durable artifacts before write | `src/loop/redact.ts`, wired in `src/task/store.ts`; `redact.test.ts` |
+| 06 | [Run metrics](./06-run-metrics.md) | Per-run stage timings + verdict history in the run log | `src/loop/metrics.ts`; `metrics.test.ts` |
 
-Order rationale: 01 first — everything else compounds on safe parallelism, and
-02's snapshot format wants 01's `GitRef.worktree` field to exist. 03 is
-independent and cheap (can be done any time). 04–06 are independent of each
-other.
+Residuals each plan explicitly deferred (bash worktree pinning, cross-process
+`index.lock` races, metrics export, redaction knobs) are carried forward as
+phase-3 items in [`../enterprise-adoption.md`](../enterprise-adoption.md).
 
 ## Conventions every plan follows
 
