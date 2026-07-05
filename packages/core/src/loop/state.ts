@@ -27,9 +27,11 @@ import type { Verdict } from "./verdict.js"
  * sends the task back to the PLAN stage via `/agent-loop-task replan <id>`.
  */
 
-export type Stage = "plan" | "build" | "verify" | "review"
+/** A stage name. Loop kinds define their own stage sets in their manifests;
+ *  the engineering loop's are `plan | build | verify | review`. */
+export type Stage = string
 
-/** The stages in loop order. `plan` terminates with a park, not an advance. */
+/** The engineering loop's stages in order. `plan` terminates with a park, not an advance. */
 export const STAGES: readonly Stage[] = ["plan", "build", "verify", "review"]
 
 /** Link to the backlog task driving the loop, when started from one. */
@@ -54,15 +56,17 @@ export interface GitRef {
 }
 
 export interface LoopState {
+  /** The loop kind driving this state (a manifest's `kind`); absent ⇒ `engineering`. */
+  readonly kind?: string
   /** The goal the loop is driving toward. */
   readonly goal: string
   /** The stage currently running or most recently completed. */
   readonly stage: Stage
-  /** 0-based loop iteration; incremented on a verify-FAIL or review-FAIL re-build. */
+  /** 0-based loop iteration; incremented on a counted re-fire (e.g. a verify-FAIL re-build). */
   readonly iteration: number
   /** Captured output text per completed stage, used to thread context forward.
    *  Also carries the approved plan under the `plan` key. */
-  readonly artifacts: Readonly<Partial<Record<Stage | "plan", string>>>
+  readonly artifacts: Readonly<Record<string, string>>
   /** Set when the loop was started from a backlog task; absent only for defensive fallbacks. */
   readonly task?: TaskRef
   /** Set by the driver once execution is isolated on its own git branch. */
@@ -72,9 +76,9 @@ export interface LoopState {
 /** What the driver should do next. All state changes are returned, not applied. */
 export type Action =
   | { readonly kind: "fire"; readonly stage: Stage; readonly arguments: string }
-  | { readonly kind: "done"; readonly message: string }
-  /** PLAN finished: the driver validates the written plan, moves the task to `plan-review/`, and the loop exits. */
-  | { readonly kind: "park"; readonly message: string }
+  | { readonly kind: "done"; readonly message: string; readonly toStatus?: string }
+  /** A gate stage finished: the driver validates its output, moves the item to `toStatus`, and the loop exits. */
+  | { readonly kind: "park"; readonly message: string; readonly toStatus?: string }
   | { readonly kind: "stop"; readonly message: string }
   | { readonly kind: "noop" }
 
@@ -273,6 +277,14 @@ export const advanceOnIdle = (
         },
       }
     }
+
+    default:
+      // Non-engineering stage names never reach this legacy engineering-only
+      // transition fn — they are driven by the manifest engine (engine.ts).
+      return {
+        state: s,
+        action: { kind: "stop", message: `✗ Loop stopped — unknown stage "${s.stage}".` },
+      }
   }
 }
 
