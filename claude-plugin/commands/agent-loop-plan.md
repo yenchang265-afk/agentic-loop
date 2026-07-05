@@ -23,7 +23,31 @@ Dispatch:
   3. Spawn the **`loop-plan-author`** subagent (Task tool) with the
      confirmed details to write the single draft file. Drafting and planning
      are two steps by design — the human reviews the draft before plan
-     effort is spent. The next step is `/agent-loop-plan task <id>`.
+     effort is spent.
+  4. **Offer to continue** — ask the user whether to advance now (use
+     AskUserQuestion when available, otherwise a plain question ending your
+     turn): "Draft `<id>` is written. Continue to planning now, or stop
+     here?"
+     - **Yes** → call `mcp__agentic-loop__loop_plan_task({id})`, then spawn
+       **`loop-plan-author`** (Task tool) in `task` mode to write the
+       `## Implementation Plan` onto the file in place. Show the user the
+       plan (or a faithful summary) and ask the second gate: "Approve this
+       plan and start the build now?"
+     - **Yes again** → call `mcp__agentic-loop__loop_plan_approve({id})`,
+       then continue straight into execution in this same session: read the
+       `loop-orchestration` skill and drive exactly as `/agent-loop task <id>`
+       would — `loop_start({id})`, then `loop_stage` before spawning each
+       stage subagent (`loop-build` / `loop-verify` / `loop-review`) and
+       `loop_advance` after each returns, until a terminal action. If
+       `loop_start` reports a loop is already driving, surface its message
+       and stop — point at `/agent-loop status` and `loop_stop`.
+     - **No at either gate, or any tool error** → stop cleanly and name the
+       manual command that resumes from exactly there
+       (`/agent-loop-plan task <id>` / `/agent-loop-plan approve <id>` /
+       `/agent-loop task <id>`).
+     Never call these tools without the explicit in-chat yes for that gate —
+     one yes covers one gate only. Never skip a stage: the server enforces
+     draft → in-planning → in-progress one move at a time.
 - **`task <id>`** — plan a task. Call
   `mcp__agentic-loop__loop_plan_task({id})` **first** — it deterministically
   moves a `draft/` task to `docs/tasks/in-planning/` (audited + committed)
@@ -40,4 +64,8 @@ Dispatch:
 
 The flow is two-step by design: `new` (interview → draft) → human reviews →
 `task <id>` (plan written) → human reviews the plan → `approve <id>` → then
-`/agent-loop task <id>` or `/agent-loop claim` executes it.
+`/agent-loop task <id>` or `/agent-loop claim` executes it. The gates are
+unchanged — each still needs its own explicit human yes — but after `new`
+every gate can be taken conversationally in the same session (step 4 above)
+instead of by re-invoking the command; the manual commands remain the
+fallback and re-entry points.

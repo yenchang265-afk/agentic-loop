@@ -22,8 +22,26 @@ Dispatch:
      explicit "looks right" from the user.
   3. Invoke the **`loop-plan-author`** subagent with the confirmed details to
      write the single draft file. Drafting and planning are two steps by
-     design — the human reviews the draft before plan effort is spent. The
-     next step is `/agent-loop-plan task <id>`.
+     design — the human reviews the draft before plan effort is spent.
+  4. **Offer to continue** — ask the user one plain question: "Draft `<id>`
+     is written. Continue to planning now, or stop here?"
+     - **Yes** → call the `loop_plan_task` tool with the id, then invoke
+       **`loop-plan-author`** in `task` mode to write the
+       `## Implementation Plan` onto the file in place. Show the user the
+       plan (or a faithful summary) and ask the second gate: "Approve this
+       plan and start the build now?"
+     - **Yes again** → call `loop_plan_approve`, then `loop_start` with the
+       same id, report each tool's message, and **end your turn** — the
+       plugin drives BUILD → VERIFY → REVIEW once the turn settles. If
+       `loop_start` says the task was just claimed by another watcher,
+       report that as success by other means — do not retry.
+     - **No at either gate, or any tool error** → stop cleanly and name the
+       manual command that resumes from exactly there
+       (`/agent-loop-plan task <id>` / `/agent-loop-plan approve <id>` /
+       `/agent-loop task <id>`).
+     Never call these tools without the explicit in-chat yes for that gate —
+     one yes covers one gate only. Never skip a stage: the tools enforce
+     draft → in-planning → in-progress one move at a time.
 - **`task <id>`** — plan a task (`<id>` = filename without `.md`). The plugin
   first moves a `docs/tasks/draft/` task to `docs/tasks/in-planning/`
   (audited + committed) **before** this turn; then invoke **`loop-plan-author`**
@@ -40,4 +58,8 @@ Dispatch:
 
 The flow is two-step by design: `new` (interview → draft) → human reviews →
 `task <id>` (plan written) → human reviews the plan → `approve <id>` → then
-`/agent-loop task <id>` or `/agent-loop watch` executes it.
+`/agent-loop task <id>` or `/agent-loop watch` executes it. The gates are
+unchanged — each still needs its own explicit human yes — but after `new`
+every gate can be taken conversationally in the same session (step 4 above)
+instead of by re-invoking the command; the manual commands remain the
+fallback and re-entry points.
