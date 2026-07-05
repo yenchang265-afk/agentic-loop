@@ -795,77 +795,165 @@ export const parsePlanArgs = (args: string): PlanArgs => {
 }
 
 /**
- * Handle a `/agent-loop-plan ...` command. Two subcommands get deterministic plugin
- * work before the agent turn; `new <idea>` passes through untouched (its
- * authoring — interview, draft — is the agent's job, see
- * `.opencode/commands/agent-loop-plan.md`):
- *
- * - `task <id>` — if the task sits in `draft/`, move it to `in-planning/`
- *   (audited + committed) so folder semantics stay honest: `draft/` means no
- *   planning attempted, `in-planning/` means planning started or done. The
- *   agent then writes the `## Implementation Plan` onto the file in place.
- *   Failures never block the turn — the agent also looks in `draft/`.
- * - `approve <id>` — deterministic backlog surgery: validate the task is in
- *   `in-planning/` with a plan already written, and park it in `in-progress/`
- *   (the approved queue). A task still in `draft/` is never approved directly
- *   — even one with a hand-written plan heading — it must go through
- *   `task <id>` first so no stage is ever skipped.
+ * Outcome of a deterministic plan/loop action. The command intercepts toast
+ * it; the agent-callable plugin tools return its message verbatim, so both
+ * entry points share one implementation and one set of guards.
  */
-export const handlePlanCommand = async (deps: Deps, _sessionID: string, args: string, config: Config): Promise<void> => {
-  const { client } = deps
-  const parsed = parsePlanArgs(args)
-  if (parsed.mode === "passthrough") return
-  const { id } = parsed
-  if (parsed.mode === "task") {
-    if (!id) return void (await toast(client, "Usage: /agent-loop-plan task <id>.", "warning"))
-    if (await findByIdIn(client, deps.directory, config.tasksDir, "in-planning", id)) return
-    const draft = await findByIdIn(client, deps.directory, config.tasksDir, "draft", id)
-    if (!draft) {
-      return void (await toast(client, `No draft/in-planning task "${id}" found — the agent will report what it sees.`, "warning"))
+export type ActionResult = {
+  readonly ok: boolean
+  readonly message: string
+  readonly variant: "success" | "warning" | "error" | "info"
+  /** The command path suppresses this toast (an idempotent no-op); tool callers still get the message. */
+  readonly silent?: boolean
+}
+
+/**
+ * Move a `draft/` task to `in-planning/` (audited + committed) so folder
+ * semantics stay honest: `draft/` means no planning attempted, `in-planning/`
+ * means planning started or done. The agent then writes the
+ * `## Implementation Plan` onto the file in place. The deterministic half of
+ * `/agent-loop-plan task <id>`, shared by the command intercept and the
+ * `loop_plan_task` plugin tool. Failures never block planning — the agent
+ * also looks in `draft/`.
+ */
+export const planTask = async (deps: Deps, config: Config, id: string): Promise<ActionResult> => {
+  if (!id) return { ok: false, message: "Usage: /agent-loop-plan task <id>.", variant: "warning" }
+  if (await findByIdIn(deps.client, deps.directory, config.tasksDir, "in-planning", id)) {
+    return {
+      ok: true,
+      message: `"${id}" is already in ${config.tasksDir}/in-planning/ — write the ## Implementation Plan onto it in place.`,
+      variant: "info",
+      silent: true,
     }
-    try {
-      const actor = await gitActor(deps.$, deps.directory)
-      await appendNote(deps.$, draft, auditNote("Planning started — moved to in-planning", new Date(), actor))
-      await moveTask(deps.$, draft, "in-planning")
-      await commitPaths(deps.$, deps.directory, [config.tasksDir], `loop(${id}): planning started`)
-      await toast(client, `"${draft.title}" moved to ${config.tasksDir}/in-planning/ — the plan will be written there.`, "success")
-    } catch (err) {
-      await toast(client, `Couldn't move "${id}" to in-planning: ${(err as Error).message} — planning continues in draft/.`, "error")
-    }
-    return
   }
-  if (!id) return void (await toast(client, "Usage: /agent-loop-plan approve <id>.", "warning"))
-  const task = await findByIdIn(client, deps.directory, config.tasksDir, "in-planning", id)
+  const draft = await findByIdIn(deps.client, deps.directory, config.tasksDir, "draft", id)
+  if (!draft) {
+    return { ok: false, message: `No draft/in-planning task "${id}" found — the agent will report what it sees.`, variant: "warning" }
+  }
+  try {
+    const actor = await gitActor(deps.$, deps.directory)
+    await appendNote(deps.$, draft, auditNote("Planning started — moved to in-planning", new Date(), actor))
+    await moveTask(deps.$, draft, "in-planning")
+    await commitPaths(deps.$, deps.directory, [config.tasksDir], `loop(${id}): planning started`)
+    return {
+      ok: true,
+      message: `"${draft.title}" moved to ${config.tasksDir}/in-planning/ — the plan will be written there.`,
+      variant: "success",
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      message: `Couldn't move "${id}" to in-planning: ${(err as Error).message} — planning continues in draft/.`,
+      variant: "error",
+    }
+  }
+}
+
+/**
+ * Deterministic backlog surgery shared by `/agent-loop-plan approve <id>` and
+ * the `loop_plan_approve` plugin tool: validate the task is in `in-planning/`
+ * with a plan already written, and park it in `in-progress/` (the approved
+ * queue). A task still in `draft/` is never approved directly — even one
+ * with a hand-written plan heading — it must go through `task <id>` first so
+ * no stage is ever skipped.
+ */
+export const planApprove = async (deps: Deps, config: Config, id: string): Promise<ActionResult> => {
+  if (!id) return { ok: false, message: "Usage: /agent-loop-plan approve <id>.", variant: "warning" }
+  const task = await findByIdIn(deps.client, deps.directory, config.tasksDir, "in-planning", id)
   if (!task) {
-    if (await findByIdIn(client, deps.directory, config.tasksDir, "draft", id)) {
-      return void (
-        await toast(
-          client,
-          `Task "${id}" is still in draft — run /agent-loop-plan task ${id} first to move it into planning.`,
-          "warning",
-        )
-      )
+    if (await findByIdIn(deps.client, deps.directory, config.tasksDir, "draft", id)) {
+      return {
+        ok: false,
+        message: `Task "${id}" is still in draft — run /agent-loop-plan task ${id} first to move it into planning.`,
+        variant: "warning",
+      }
     }
     const elsewhere = await findAnyStatus(deps, config, id)
     const detail = elsewhere ? `it's in ${elsewhere} — only in-planning tasks can be approved` : `no task "${id}" found`
-    return void (await toast(client, `Can't approve "${id}": ${detail}.`, "warning"))
+    return { ok: false, message: `Can't approve "${id}": ${detail}.`, variant: "warning" }
   }
   if (!hasPlan(task)) {
-    return void (await toast(client, `Task "${id}" has no Implementation Plan yet — run /agent-loop-plan task ${id} first.`, "warning"))
+    return { ok: false, message: `Task "${id}" has no Implementation Plan yet — run /agent-loop-plan task ${id} first.`, variant: "warning" }
   }
   try {
     const actor = await gitActor(deps.$, deps.directory)
     await appendNote(deps.$, task, auditNote("Plan approved — parked for execution", new Date(), actor))
     await moveTask(deps.$, task, "in-progress")
     await commitPaths(deps.$, deps.directory, [config.tasksDir], `loop(${id}): plan approved — parked for execution`)
-    await toast(
-      client,
-      `Plan approved — "${task.title}" parked in ${config.tasksDir}/in-progress/. /agent-loop watch (or /agent-loop task ${id}) will build it.`,
-      "success",
-    )
+    return {
+      ok: true,
+      message: `Plan approved — "${task.title}" parked in ${config.tasksDir}/in-progress/. /agent-loop watch (or /agent-loop task ${id}) will build it.`,
+      variant: "success",
+    }
   } catch (err) {
-    await toast(client, `Approve failed for "${id}": ${(err as Error).message}`, "error")
+    return { ok: false, message: `Approve failed for "${id}": ${(err as Error).message}`, variant: "error" }
   }
+}
+
+/**
+ * Handle a `/agent-loop-plan ...` command. Two subcommands get deterministic plugin
+ * work before the agent turn; `new <idea>` passes through untouched (its
+ * authoring — interview, draft — is the agent's job, see
+ * `.opencode/commands/agent-loop-plan.md`). The work itself lives in
+ * `planTask`/`planApprove`, shared with the agent-callable plugin tools.
+ */
+export const handlePlanCommand = async (deps: Deps, _sessionID: string, args: string, config: Config): Promise<void> => {
+  const parsed = parsePlanArgs(args)
+  if (parsed.mode === "passthrough") return
+  const res = parsed.mode === "task" ? await planTask(deps, config, parsed.id) : await planApprove(deps, config, parsed.id)
+  if (!res.silent) await toast(deps.client, res.message, res.variant)
+}
+
+/**
+ * Claim one approved `in-progress/` task and queue its BUILD → VERIFY → REVIEW
+ * drive for this session — the drive begins on the next `session.idle`, i.e.
+ * when the current turn ends. The deterministic half of `/agent-loop task <id>`,
+ * shared by the command intercept and the `loop_start` plugin tool. The
+ * command path keeps its historical clear-and-replace of any live loop; tool
+ * callers (`fromTool`) are refused instead, so an agent can never clobber a
+ * drive already running in its own session.
+ */
+export const startTaskLoop = async (
+  deps: Deps,
+  sessionID: string,
+  config: Config,
+  id: string,
+  fromTool = false,
+): Promise<ActionResult> => {
+  if (!id) return { ok: false, message: "Usage: /agent-loop task <id>.", variant: "warning" }
+  const task = await findByIdIn(deps.client, deps.directory, config.tasksDir, "in-progress", id)
+  if (!task) {
+    const elsewhere = await findAnyStatus(deps, config, id)
+    const detail =
+      elsewhere === "in-planning" || elsewhere === "draft"
+        ? `it's in ${elsewhere} — approve its plan first with /agent-loop-plan approve ${id}`
+        : elsewhere
+          ? `it's in ${elsewhere}`
+          : `no task "${id}" found`
+    return { ok: false, message: `Can't start "${id}": ${detail}.`, variant: "warning" }
+  }
+  if (findSessionDriving(id)) {
+    return { ok: false, message: `Task "${id}" is already being driven by a live loop.`, variant: "warning" }
+  }
+  if (fromTool && getLoop(sessionID)) {
+    return {
+      ok: false,
+      message: "This session already has an active loop — finish it or /agent-loop stop it first.",
+      variant: "warning",
+    }
+  }
+  if (!isClaimable(task)) {
+    const detail = isRecoverable(task)
+      ? `was already started — resume it with /agent-loop recover ${id}`
+      : `has no persisted plan — run /agent-loop-plan task ${id}, then /agent-loop-plan approve ${id}`
+    return { ok: false, message: `Task "${id}" ${detail}.`, variant: "warning" }
+  }
+  if (!(await claimTask(deps.$, task))) {
+    return { ok: false, message: `Task "${id}" was just claimed by another watcher.`, variant: "warning" }
+  }
+  clearLoop(sessionID)
+  pending.set(sessionID, { kind: "start-task", task, goal: taskGoal(task) })
+  return { ok: true, message: `Loop started on "${task.title}" — building…`, variant: "info" }
 }
 
 /** Parse and handle a `/agent-loop ...` command. */
@@ -1014,34 +1102,8 @@ export const handleCommand = async (
   }
 
   if (lower === "task" || lower.startsWith(TASK_PREFIX)) {
-    const id = arg.slice("task".length).trim()
-    if (!id) return void (await toast(client, "Usage: /agent-loop task <id>.", "warning"))
-    const task = await findByIdIn(client, deps.directory, config.tasksDir, "in-progress", id)
-    if (!task) {
-      const elsewhere = await findAnyStatus(deps, config, id)
-      const detail =
-        elsewhere === "in-planning" || elsewhere === "draft"
-          ? `it's in ${elsewhere} — approve its plan first with /agent-loop-plan approve ${id}`
-          : elsewhere
-            ? `it's in ${elsewhere}`
-            : `no task "${id}" found`
-      return void (await toast(client, `Can't start "${id}": ${detail}.`, "warning"))
-    }
-    if (findSessionDriving(id)) {
-      return void (await toast(client, `Task "${id}" is already being driven by a live loop.`, "warning"))
-    }
-    if (!isClaimable(task)) {
-      const detail = isRecoverable(task)
-        ? `was already started — resume it with /agent-loop recover ${id}`
-        : `has no persisted plan — run /agent-loop-plan task ${id}, then /agent-loop-plan approve ${id}`
-      return void (await toast(client, `Task "${id}" ${detail}.`, "warning"))
-    }
-    if (!(await claimTask(deps.$, task))) {
-      return void (await toast(client, `Task "${id}" was just claimed by another watcher.`, "warning"))
-    }
-    clearLoop(sessionID)
-    pending.set(sessionID, { kind: "start-task", task, goal: taskGoal(task) })
-    await toast(client, `Loop started on "${task.title}" — building…`, "info")
+    const res = await startTaskLoop(deps, sessionID, config, arg.slice("task".length).trim())
+    await toast(client, res.message, res.variant)
     return
   }
 

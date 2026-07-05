@@ -3,7 +3,8 @@ import { test } from "node:test"
 import { PLAN_HEADING } from "../task/store.ts"
 import { serializeTask } from "../task/schema.ts"
 import type { Config } from "./state.ts"
-import { handlePlanCommand, parsePlanArgs, parseWatchArgs, type Deps } from "./driver.ts"
+import { handlePlanCommand, parsePlanArgs, parseWatchArgs, planApprove, planTask, startTaskLoop, type Deps } from "./driver.ts"
+import { clearLoop, resumeAtBuild, setLoop } from "./state.ts"
 
 /**
  * The watch-mode plumbing (timers, idle queries, claiming) is exercised
@@ -160,4 +161,148 @@ test("approve succeeds for a task already in in-planning with a plan", async () 
   assert.equal(toasts.length, 1)
   assert.equal(toasts[0]?.variant, "success")
   assert.ok(log.some((cmd) => cmd.includes("mv") && cmd.includes("in-progress")))
+})
+
+/**
+ * `planTask`/`planApprove`/`startTaskLoop` — the deterministic actions the
+ * command intercepts and the agent-callable plugin tools share. The tool path
+ * must enforce exactly the same stage sequencing as the commands.
+ */
+
+test("planTask moves a draft to in-planning and commits", async () => {
+  const draft = serializeTask({ title: "Do the thing", body: "A body." })
+  const { client } = makeClient({ "docs/tasks/draft/my-task.md": draft })
+  const log: string[] = []
+  const deps: Deps = { client, $: makeSucceedingShell(log), directory: "/repo", log: () => {} }
+
+  const res = await planTask(deps, testConfig, "my-task")
+
+  assert.equal(res.ok, true)
+  assert.equal(res.variant, "success")
+  assert.match(res.message, /in-planning/)
+  assert.ok(log.some((cmd) => cmd.includes("mv") && cmd.includes("in-planning")))
+  assert.ok(log.some((cmd) => cmd.startsWith("git") && cmd.includes("commit")))
+})
+
+test("planTask is a silent idempotent no-op for a task already in in-planning", async () => {
+  const planned = serializeTask({ title: "Do the thing", body: "A body." })
+  const { client } = makeClient({ "docs/tasks/in-planning/my-task.md": planned })
+  const deps: Deps = { client, $: explodingShell, directory: "/repo", log: () => {} }
+
+  const res = await planTask(deps, testConfig, "my-task")
+
+  assert.equal(res.ok, true)
+  assert.equal(res.silent, true)
+  assert.match(res.message, /already in/)
+})
+
+test("planTask warns on an unknown id without touching the shell", async () => {
+  const { client } = makeClient({})
+  const deps: Deps = { client, $: explodingShell, directory: "/repo", log: () => {} }
+
+  const res = await planTask(deps, testConfig, "nope")
+
+  assert.equal(res.ok, false)
+  assert.equal(res.variant, "warning")
+  assert.match(res.message, /No draft\/in-planning task/)
+})
+
+test("planApprove refuses a draft even with a hand-written plan heading, shell untouched", async () => {
+  const draftBody = serializeTask({ title: "Do the thing", body: `${PLAN_HEADING}\n\n1. Step.` })
+  const { client } = makeClient({ "docs/tasks/draft/my-task.md": draftBody })
+  const deps: Deps = { client, $: explodingShell, directory: "/repo", log: () => {} }
+
+  const res = await planApprove(deps, testConfig, "my-task")
+
+  assert.equal(res.ok, false)
+  assert.match(res.message, /still in draft/)
+})
+
+test("planApprove refuses an in-planning task with no plan", async () => {
+  const planless = serializeTask({ title: "Do the thing", body: "A body." })
+  const { client } = makeClient({ "docs/tasks/in-planning/my-task.md": planless })
+  const deps: Deps = { client, $: explodingShell, directory: "/repo", log: () => {} }
+
+  const res = await planApprove(deps, testConfig, "my-task")
+
+  assert.equal(res.ok, false)
+  assert.match(res.message, /no Implementation Plan yet/)
+})
+
+test("startTaskLoop refuses an unapproved (in-planning) task", async () => {
+  const planned = serializeTask({ title: "Do the thing", body: `${PLAN_HEADING}\n\n1. Step.` })
+  const { client } = makeClient({ "docs/tasks/in-planning/my-task.md": planned })
+  const deps: Deps = { client, $: explodingShell, directory: "/repo", log: () => {} }
+
+  const res = await startTaskLoop(deps, "sess-start-1", testConfig, "my-task")
+
+  assert.equal(res.ok, false)
+  assert.match(res.message, /approve its plan first/)
+})
+
+test("startTaskLoop from the tool path refuses when the session already has a live loop", async () => {
+  const approved = serializeTask({ title: "Do the thing", body: `${PLAN_HEADING}\n\n1. Step.` })
+  const { client } = makeClient({ "docs/tasks/in-progress/my-task.md": approved })
+  const deps: Deps = { client, $: explodingShell, directory: "/repo", log: () => {} }
+  setLoop("sess-start-2", resumeAtBuild("goal", { id: "other", path: "/repo/docs/tasks/in-progress/other.md", acceptance: [] }, "plan"))
+
+  try {
+    const res = await startTaskLoop(deps, "sess-start-2", testConfig, "my-task", true)
+    assert.equal(res.ok, false)
+    assert.match(res.message, /already has an active loop/)
+  } finally {
+    clearLoop("sess-start-2")
+  }
+})
+
+test("startTaskLoop claims an approved task and queues the drive", async () => {
+  const approved = serializeTask({ title: "Do the thing", body: `${PLAN_HEADING}\n\n1. Step.` })
+  const { client } = makeClient({ "docs/tasks/in-progress/my-task.md": approved })
+  const log: string[] = []
+  const deps: Deps = { client, $: makeSucceedingShell(log), directory: "/repo", log: () => {} }
+
+  const res = await startTaskLoop(deps, "sess-start-3", testConfig, "my-task", true)
+
+  assert.equal(res.ok, true)
+  assert.match(res.message, /Loop started/)
+  assert.ok(log.some((cmd) => cmd.startsWith("mkdir ") && !cmd.startsWith("mkdir -p") && cmd.includes(".claims")))
+})
+
+/** Like `makeSucceedingShell`, but a plain (non `-p`) mkdir fails — the lost claim race. */
+const makeClaimLosingShell = (log: string[]) => {
+  const build = (strings: TemplateStringsArray, exprs: unknown[]) => {
+    let cmd = ""
+    strings.forEach((s, i) => {
+      cmd += s
+      if (i < exprs.length) {
+        const e = exprs[i]
+        cmd += Array.isArray(e) ? e.join(" ") : String(e)
+      }
+    })
+    const clean = cmd.trim().replace(/\s+/g, " ")
+    log.push(clean)
+    const exitCode = clean.startsWith("mkdir ") && !clean.startsWith("mkdir -p") ? 1 : 0
+    const chain = {
+      quiet: () => chain,
+      nothrow: () => chain,
+      cwd: () => chain,
+      then: (resolve: (v: unknown) => unknown) =>
+        Promise.resolve({ exitCode, stdout: { toString: () => "" }, stderr: { toString: () => "" } }).then(resolve),
+    }
+    return chain
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return ((strings: TemplateStringsArray, ...exprs: unknown[]) => build(strings, exprs)) as any
+}
+
+test("startTaskLoop reports a lost claim race instead of starting", async () => {
+  const approved = serializeTask({ title: "Do the thing", body: `${PLAN_HEADING}\n\n1. Step.` })
+  const { client } = makeClient({ "docs/tasks/in-progress/my-task.md": approved })
+  const log: string[] = []
+  const deps: Deps = { client, $: makeClaimLosingShell(log), directory: "/repo", log: () => {} }
+
+  const res = await startTaskLoop(deps, "sess-start-4", testConfig, "my-task", true)
+
+  assert.equal(res.ok, false)
+  assert.match(res.message, /just claimed by another watcher/)
 })
