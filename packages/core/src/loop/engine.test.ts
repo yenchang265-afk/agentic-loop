@@ -265,3 +265,63 @@ test("the engineering manifest names commands, agents, and check-stage allowlist
   assert.equal(verify?.kind, "check")
   assert.ok((verify?.bashAllowlist.length ?? 0) > 0)
 })
+
+// --- the pr-sitter manifest walks end-to-end through the same engine ---
+
+const sitter = loadManifest(LOOPS_DIR, "pr-sitter")
+const prState = (stage: string, artifacts: Record<string, string> = {}, iteration = 0): LoopState => ({
+  kind: "pr-sitter",
+  goal: 'PR #7 "Add rate limiting" — failing checks: ci/test',
+  stage,
+  iteration,
+  artifacts,
+  git: { base: "main", branch: "feat/rate-limit" },
+})
+
+test("pr-sitter: triage PASS fires fix with the findings threaded; FAIL is done without pushing", () => {
+  const pass = advance(sitter, prState("triage"), config, "1. ci/test fails: assertion X", "PASS")
+  assert.equal(pass.action.kind, "fire")
+  if (pass.action.kind === "fire") {
+    assert.equal(pass.action.stage, "fix")
+    assert.match(pass.action.arguments, /Triage findings to address/)
+    assert.match(pass.action.arguments, /assertion X/)
+    assert.match(pass.action.arguments, /do NOT push/)
+  }
+  const idle = advance(sitter, prState("triage"), config, "all green, nothing to do", "FAIL")
+  assert.equal(idle.action.kind, "done")
+  if (idle.action.kind === "done") {
+    assert.match(idle.action.message, /nothing actionable/)
+    assert.equal(idle.action.toStatus, undefined)
+  }
+})
+
+test("pr-sitter: fix → verify → publish → done; verify FAIL re-fires fix until the cap", () => {
+  const afterFix = advance(sitter, prState("fix", { triage: "F1" }), config, "fixed the assertion")
+  assert.equal(afterFix.action.kind, "fire")
+  if (afterFix.action.kind === "fire") assert.equal(afterFix.action.stage, "verify")
+
+  const pass = advance(sitter, prState("verify", { triage: "F1", fix: "S" }), config, "all findings addressed", "PASS")
+  assert.equal(pass.action.kind, "fire")
+  if (pass.action.kind === "fire") {
+    assert.equal(pass.action.stage, "publish")
+    assert.match(pass.action.arguments, /git push origin feat\/rate-limit/)
+    assert.match(pass.action.arguments, /NEVER merge/)
+  }
+
+  const refix = advance(sitter, prState("verify", { triage: "F1" }), config, "test still red", "FAIL")
+  assert.equal(refix.action.kind, "fire")
+  if (refix.action.kind === "fire") assert.equal(refix.action.stage, "fix")
+  assert.equal(refix.state.iteration, 1)
+
+  const capped = advance(sitter, prState("verify", { triage: "F1" }, 2), config, "still red", "FAIL")
+  assert.equal(capped.action.kind, "stop")
+  if (capped.action.kind === "stop") assert.match(capped.action.message, /after 3 iterations.*parks until a human/s)
+
+  const published = advance(sitter, prState("publish", { triage: "F1", fix: "S", verify: "OK" }), config, "pushed + replied")
+  assert.equal(published.action.kind, "done")
+})
+
+test("pr-sitter: a missing triage verdict reads as FAIL (nothing to do), never as PASS", () => {
+  const { action } = advance(sitter, prState("triage"), config, "LOOP_TRIAGE: PASS in prose only", null)
+  assert.equal(action.kind, "done")
+})

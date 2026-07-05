@@ -31,6 +31,12 @@ export interface WorkItem {
   readonly ref?: unknown
 }
 
+/** How a claimed item's drive ended. */
+export interface TerminalOutcome {
+  readonly kind: "done" | "park" | "stop" | "error"
+  readonly message: string
+}
+
 export interface WorkSource {
   readonly loopKind: string
   /**
@@ -41,4 +47,11 @@ export interface WorkSource {
   claimNext(): Promise<{ item: WorkItem | null; skip: ClaimSkipReason | null }>
   /** Release a claimed item whose drive died before real work started. */
   release(item: WorkItem): Promise<void>
+  /**
+   * Record how a drive ended (dedup ledgers, claim-marker cleanup). Drivers
+   * call this once after every terminal action on a scheduler-claimed item.
+   * Optional: the backlog source needs none (terminal bookkeeping rides the
+   * task file the drive already annotates).
+   */
+  onTerminal?(item: WorkItem, outcome: TerminalOutcome): Promise<void>
 }

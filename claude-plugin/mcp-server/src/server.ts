@@ -20,6 +20,8 @@ import { loadManifest } from "@agentic-loop/core/manifest/load"
 import { stageDef, type LoadedManifest } from "@agentic-loop/core/manifest/schema"
 import { pollOnce } from "@agentic-loop/core/scheduler/scheduler"
 import { makeBacklogSource } from "@agentic-loop/core/source/backlog"
+import { makeGithubPrSource } from "@agentic-loop/core/source/github-pr"
+import type { PolledClaim } from "@agentic-loop/core/scheduler/scheduler"
 import type { WorkSource } from "@agentic-loop/core/source/types"
 import { enabledLoopKinds } from "@agentic-loop/core/config"
 import { fileURLToPath } from "node:url"
@@ -94,6 +96,7 @@ const log = (level: "info" | "warn" | "error", message: string) =>
 // --- shared in-process loop state (one active loop per server/session) ---
 
 let active: LoopState | null = null
+let activeClaim: PolledClaim | null = null // the scheduler claim behind `active`, when loop_claim made it
 let pending: VerdictRecord | null = null // verdict(s) recorded for the current check stage
 let samples: StageSample[] = [] // per-run metrics
 let lastFireAt = Date.now()
@@ -129,12 +132,13 @@ const writeStageMarker = (stage: string | null) => {
       stageDeadline = null
       fs.rmSync(stageMarkerPath(), { force: true })
     } else {
-      const def = stageDef(eng.manifest, stage)
+      const m = activeManifest()
+      const def = stageDef(m.manifest, stage)
       stageDeadline = Date.now() + (def.timeoutMinutes ?? config.stageTimeoutMinutes) * 60_000
       fs.writeFileSync(
         stageMarkerPath(),
         JSON.stringify({
-          kind: eng.manifest.kind,
+          kind: m.manifest.kind,
           stage,
           worktree: active?.git?.worktree ?? null,
           deadline: stageDeadline,
@@ -156,6 +160,9 @@ const snapshot = async () => {
 
 const workTree = () => active?.git?.worktree ?? directory
 
+/** The manifest driving the active loop (engineering when kind is absent). */
+const activeManifest = (): LoadedManifest => manifestFor(active?.kind ?? "engineering")
+
 /** Serialize a value into an MCP text result. */
 const ok = (data: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] })
 const fail = (message: string) => ({ isError: true, content: [{ type: "text" as const, text: message }] })
@@ -173,8 +180,20 @@ const findAnyStatus = async (id: string): Promise<Task | null> => {
 const sourcesFor = (): WorkSource[] =>
   enabledLoopKinds(config).flatMap((kind): WorkSource[] => {
     const loaded = manifestFor(kind)
-    // The github-pr source lands with the PR sitter kind.
-    if (loaded.manifest.workSource.type !== "backlog") return []
+    if (loaded.manifest.workSource.type === "github-pr") {
+      const query = config.loops[kind]?.["query"]
+      return [
+        makeGithubPrSource({
+          $: sh,
+          client: fsClient,
+          directory,
+          tasksDir: config.tasksDir,
+          log,
+          loaded,
+          ...(typeof query === "string" ? { query } : {}),
+        }),
+      ]
+    }
     return [
       makeBacklogSource({
         $: sh,
@@ -223,7 +242,7 @@ const firePayload = (state: LoopState, id: string) => ({
   action: { kind: "fire", stage: state.stage },
   taskId: id,
   isolation: state.git ?? null,
-  prompt: composePrompt(eng, state, state.stage),
+  prompt: composePrompt(manifestFor(state.kind ?? "engineering"), state, state.stage),
   ...(state.stage === "plan"
     ? { note: "PLAN stage: spawn loop-plan-author in task mode; on loop_advance the task parks in plan-review/ for the human gate" }
     : {}),
@@ -288,6 +307,7 @@ server.registerTool(
     if (active) return fail(`A loop is already driving "${loopId(active)}" — finish or loop_stop it first.`)
     const { claim, skips } = await pollOnce(sourcesFor())
     if (!claim) return ok(skips.length ? { claimed: null, skips } : null)
+    activeClaim = claim
     let state = claim.item.state
     samples = []
     pending = null
@@ -297,6 +317,7 @@ server.registerTool(
         state = await ensureIsolation(sh, log, directory, config, state)
       } catch (err) {
         await claim.source.release(claim.item)
+        activeClaim = null
         return fail((err as Error).message)
       }
       active = state
@@ -312,11 +333,15 @@ server.registerTool(
   "loop_compose",
   {
     description: "Return the composed prompt (goal + relevant prior artifacts + isolation lines) to hand a stage subagent.",
-    inputSchema: { stage: z.enum(["plan", "build", "verify", "review"]) },
+    inputSchema: { stage: z.string().min(1) },
   },
   async ({ stage }) => {
     if (!active) return fail("No active loop.")
-    return ok({ prompt: composePrompt(eng, active, stage) })
+    try {
+      return ok({ prompt: composePrompt(activeManifest(), active, stage) })
+    } catch (err) {
+      return fail((err as Error).message)
+    }
   },
 )
 
@@ -326,7 +351,7 @@ server.registerTool(
     description:
       "Record the VERIFY or REVIEW verdict for the running loop. THE ONLY TRUSTED verdict channel — a PASS/FAIL in prose is ignored. Called by the loop-verify/loop-review subagent exactly once per pass. Multiple calls in one stage (multi-lens review) are combined worst-wins.",
     inputSchema: {
-      stage: z.enum(["verify", "review"]),
+      stage: z.string().min(1).describe("The loop's currently running check stage (engineering: verify/review; pr-sitter: triage/verify)."),
       verdict: z.enum(["PASS", "FAIL", "ERROR"]),
       reason: z.string().max(500).optional(),
       criteria: z.array(z.object({ criterion: z.string(), pass: z.boolean() })).optional(),
@@ -335,6 +360,9 @@ server.registerTool(
   async ({ stage, verdict, reason, criteria }) => {
     if (!active) return fail("No active loop — verdict ignored.")
     if (active.stage !== stage) return fail(`The loop is at ${active.stage}, not ${stage} — verdict ignored.`)
+    if (activeManifest().manifest.stages.find((d) => d.name === stage)?.kind !== "check") {
+      return fail(`Stage ${stage} is not a check stage — verdict ignored.`)
+    }
     const rec: VerdictRecord = { verdict, ...(reason ? { reason } : {}), ...(criteria ? { criteria: criteria as CriterionResult[] } : {}) }
     if (!pending) pending = rec
     else {
@@ -371,11 +399,14 @@ server.registerTool(
   {
     description:
       "Set the current stage marker so the PreToolUse hook enforces the right bash allowlist (default-deny for verify/review) and the stage deadline. Call right before spawning EACH stage subagent, plan and build included. Setting 'build' appends the audited 'BUILD started' note the claimability predicates key on.",
-    inputSchema: { stage: z.enum(["plan", "build", "verify", "review"]) },
+    inputSchema: { stage: z.string().min(1) },
   },
   async ({ stage }) => {
     if (!active) return fail("No active loop.")
-    if (stageDef(eng.manifest, stage).isolation !== "none") {
+    if (!activeManifest().manifest.stages.some((d) => d.name === stage)) {
+      return fail(`Unknown stage "${stage}" for loop kind "${activeManifest().manifest.kind}".`)
+    }
+    if (stageDef(activeManifest().manifest, stage).isolation !== "none") {
       // A no-isolation stage (engineering's PLAN) runs in the main tree — no branch, no worktree to reconcile.
       try {
         active = await ensureIsolation(sh, log, directory, config, active) // reconcile a moved/vanished worktree
@@ -418,7 +449,7 @@ server.registerTool(
       stage,
       iteration: active.iteration,
       ms: Date.now() - lastFireAt,
-      ...(stageDef(eng.manifest, stage).kind === "check" ? { verdict: (pending?.verdict ?? "none") as Verdict | "none" } : {}),
+      ...(stageDef(activeManifest().manifest, stage).kind === "check" ? { verdict: (pending?.verdict ?? "none") as Verdict | "none" } : {}),
     })
     // thread failed criteria ahead of the prose for the next iteration
     const block = failedCriteriaBlock(pending)
@@ -428,12 +459,12 @@ server.registerTool(
       await appendNote(sh, active.task, auditNote(`BUILD finished (iteration ${active.iteration + 1})`, new Date(), actor), log)
       await commitAll(sh, workTree(), `loop(${loopId(active)}): build checkpoint (iteration ${active.iteration + 1})`)
     }
-    if (stageDef(eng.manifest, stage).kind === "check" && active.task) {
+    if (stageDef(activeManifest().manifest, stage).kind === "check" && active.task) {
       const failed = pending?.criteria?.filter((c) => !c.pass).length ?? 0
       await appendNote(sh, active.task, auditNote(`${stage.toUpperCase()} verdict: ${pending?.verdict ?? "none → FAIL"}${failed ? ` (${failed} criteria unmet)` : ""} (iteration ${active.iteration + 1})`, new Date(), actor), log)
     }
-    const verdict = stageDef(eng.manifest, stage).kind === "check" ? (pending?.verdict ?? null) : null
-    const { state, action } = advance(eng, active, config, threaded, verdict)
+    const verdict = stageDef(activeManifest().manifest, stage).kind === "check" ? (pending?.verdict ?? null) : null
+    const { state, action } = advance(activeManifest(), active, config, threaded, verdict)
     active = state
     pending = null
 
@@ -441,7 +472,7 @@ server.registerTool(
       await snapshot()
       return ok({
         action: { kind: "fire", stage: action.stage },
-        prompt: composePrompt(eng, active, action.stage),
+        prompt: composePrompt(activeManifest(), active, action.stage),
         note: "call loop_stage before spawning the subagent",
       })
     }
@@ -464,6 +495,7 @@ const runPark = async (
   action: Extract<Action, { kind: "park" }>,
 ): Promise<{ error: string } | { action: { kind: "park"; message: string }; path: string; next: string }> => {
   if (!active?.task) {
+    activeClaim = null
     active = null
     writeStageMarker(null)
     return { error: "No task-backed loop to park." }
@@ -479,6 +511,7 @@ const runPark = async (
     }
     const summary = renderRunSummary(samples, "error", why, config.maxIterations, new Date().toISOString())
     await appendRunLog(sh, directory, config.tasksDir, id, "run · error", summary, log)
+    activeClaim = null // the queued claim was already released above
     active = null
     writeStageMarker(null)
     return { error: `PLAN failed for "${id}" — ${why}. It stays in queued/.` }
@@ -488,6 +521,10 @@ const runPark = async (
   await commitPaths(sh, directory, [config.tasksDir], `loop(${id}): plan written — parked for review`)
   const summary = renderRunSummary(samples, "done", "plan parked for review", config.maxIterations, new Date().toISOString())
   await appendRunLog(sh, directory, config.tasksDir, id, "run · done", summary, log)
+  if (activeClaim) {
+    await activeClaim.source.onTerminal?.(activeClaim.item, { kind: "park", message: action.message })
+    activeClaim = null
+  }
   active = null
   writeStageMarker(null)
   return {
@@ -540,6 +577,11 @@ const runTerminal = async (action: Action) => {
   await teardownIsolation(sh, log, directory, active)
   if (active.task) await clearState(sh, directory, config.tasksDir, active.task.id)
   writeStageMarker(null)
+  if (activeClaim) {
+    const outcome = { kind: action.kind === "done" ? ("done" as const) : ("stop" as const), message: detail }
+    await activeClaim.source.onTerminal?.(activeClaim.item, outcome)
+    activeClaim = null
+  }
   active = null
 }
 

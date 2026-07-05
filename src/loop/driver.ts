@@ -8,7 +8,8 @@ import { loadManifest } from "@agentic-loop/core/manifest/load"
 import { stageDef, type LoadedManifest } from "@agentic-loop/core/manifest/schema"
 import { combineSkips, pollOnce } from "@agentic-loop/core/scheduler/scheduler"
 import { makeBacklogSource } from "@agentic-loop/core/source/backlog"
-import type { WorkSource } from "@agentic-loop/core/source/types"
+import { makeGithubPrSource } from "@agentic-loop/core/source/github-pr"
+import type { TerminalOutcome, WorkSource } from "@agentic-loop/core/source/types"
 import {
   ensureIsolation as coreEnsureIsolation,
   loopId,
@@ -144,8 +145,20 @@ const manifestFor = (kind: string): LoadedManifest => {
 const sourcesFor = (deps: Deps, config: Config): WorkSource[] =>
   enabledLoopKinds(config).flatMap((kind): WorkSource[] => {
     const loaded = manifestFor(kind)
-    // The github-pr source lands with the PR sitter kind.
-    if (loaded.manifest.workSource.type !== "backlog") return []
+    if (loaded.manifest.workSource.type === "github-pr") {
+      const query = config.loops[kind]?.["query"]
+      return [
+        makeGithubPrSource({
+          $: deps.$,
+          client: deps.client,
+          directory: deps.directory,
+          tasksDir: config.tasksDir,
+          log: deps.log,
+          loaded,
+          ...(typeof query === "string" ? { query } : {}),
+        }),
+      ]
+    }
     return [
       makeBacklogSource({
         $: deps.$,
@@ -201,8 +214,8 @@ const lastSkipReason = new Map<string, string>()
  */
 const executingDirs = new Set<string>()
 
-/** A check stage's stage kind — the only stages that carry a verdict. */
-type CheckStage = "verify" | "review"
+/** A check stage's name — validated against the driven kind's manifest. */
+type CheckStage = string
 
 /**
  * Verdicts recorded by the `loop_verdict` tool, per session, consumed by the
@@ -234,6 +247,10 @@ export const recordVerdict = (sessionID: string, stage: CheckStage, record: Verd
   if (!state) return "No active loop in this session — verdict ignored."
   if (state.stage !== stage) {
     return `The loop is at ${state.stage}, not ${stage} — verdict ignored. Only the running check stage may record its own verdict.`
+  }
+  const def = manifestFor(state.kind ?? "engineering").manifest.stages.find((d) => d.name === stage)
+  if (def?.kind !== "check") {
+    return `Stage ${stage} is not a check stage — verdict ignored.`
   }
   recordedVerdicts.set(sessionID, { stage, record })
   return `Recorded ${stage} verdict: ${record.verdict}.`
@@ -287,7 +304,7 @@ const commitBacklog = async (deps: Deps, config: Config, state: LoopState, messa
 }
 
 /** The slash command a stage fires — named by the manifest (e.g. plan → `plan-task`). Pure. */
-const stageCommand = (stage: Stage): string => stageDef(eng.manifest, stage).command
+const stageCommand = (loaded: LoadedManifest, stage: Stage): string => stageDef(loaded.manifest, stage).command
 
 /**
  * Fire a stage command and return the assistant text it produced. Throws when
@@ -360,12 +377,13 @@ const runStageWithLenses = async (
   deps: Deps,
   sessionID: string,
   config: Config,
+  loaded: LoadedManifest,
   state: LoopState,
   stage: Stage,
   baseArgs: string,
   iteration: number,
 ): Promise<{ output: string; verdict: Verdict | null; record: VerdictRecord | null }> => {
-  const isCheck = stageDef(eng.manifest, stage).kind === "check"
+  const isCheck = stageDef(loaded.manifest, stage).kind === "check"
   const lenses = stage === "review" ? config.reviewLenses : []
   const passes: (string | null)[] = lenses.length ? [...lenses] : [null]
   const outputs: string[] = []
@@ -380,7 +398,7 @@ const runStageWithLenses = async (
       : baseArgs
     recordedVerdicts.delete(sessionID) // no stale verdict may leak into this pass
     const t0 = Date.now()
-    const out = await runStage(client, sessionID, stageCommand(stage), args, config.stageTimeoutMinutes)
+    const out = await runStage(client, sessionID, stageCommand(loaded, stage), args, config.stageTimeoutMinutes)
     const ms = Date.now() - t0
     const stamp = new Date().toISOString()
     const header = lens
@@ -442,14 +460,16 @@ const renderMetrics = async (
   await appendRunLog(deps.$, deps.directory, config.tasksDir, loopId(state), `run · ${outcome}`, summary, deps.log)
 }
 
-/** Run the stage chain from `first` until the pure logic yields a gate/done/stop. */
+/** Run the stage chain from `first` until the pure logic yields a gate/done/stop.
+ *  Returns the terminal outcome so callers can report it to the work source. */
 const drive = async (
   deps: Deps,
   sessionID: string,
   config: Config,
   first: { state: LoopState; action: Action },
-): Promise<void> => {
+): Promise<TerminalOutcome | null> => {
   const { client } = deps
+  const loaded = manifestFor(first.state.kind ?? "engineering")
   const actor = await gitActor(deps.$, deps.directory)
   let step = first
   while (step.action.kind === "fire") {
@@ -463,7 +483,7 @@ const drive = async (
     // main tree, on the human's branch) and parks, so it needs no branch, no
     // worktree, and no crash snapshot — a died PLAN is recovered by the stale
     // claim-marker sweep, not by /agent-loop recover.
-    const isolated = stageDef(eng.manifest, stage).isolation !== "none"
+    const isolated = stageDef(loaded.manifest, stage).isolation !== "none"
     if (isolated) {
       step = { ...step, state: await ensureIsolation(deps, config, step.state) }
     }
@@ -476,6 +496,7 @@ const drive = async (
       deps,
       sessionID,
       config,
+      loaded,
       step.state,
       stage,
       args,
@@ -491,12 +512,12 @@ const drive = async (
       // A deliberate /agent-loop stop ends the run — drop the snapshot so a later
       // /agent-loop recover doesn't silently resurrect it from stale state.
       if (step.state.task) await clearState(deps.$, deps.directory, config.tasksDir, step.state.task.id)
-      return
+      return { kind: "stop", message: `stopped during ${stage}` }
     }
     if (stage === "build") {
       await checkpoint(deps, step.state, `loop(${loopId(step.state)}): build iteration ${iteration + 1}`)
     }
-    if (stageDef(eng.manifest, stage).kind === "check" && task) {
+    if (stageDef(loaded.manifest, stage).kind === "check" && task) {
       const failed = record?.criteria?.filter((c) => !c.pass).length ?? 0
       const detail = record?.reason ? ` — ${record.reason}` : ""
       const criteriaNote = failed ? ` (${failed} criteria unmet)` : ""
@@ -526,7 +547,7 @@ const drive = async (
       // front of the human gate.
       if (!state.task) {
         clearLoop(sessionID)
-        return
+        return { kind: "park", message: action.message }
       }
       const fresh = await findByIdIn(client, deps.directory, config.tasksDir, "queued", state.task.id)
       if (!fresh || !hasPlan(fresh)) {
@@ -539,7 +560,7 @@ const drive = async (
         await renderMetrics(deps, sessionID, config, state, "error", why)
         clearLoop(sessionID)
         await toast(client, `PLAN failed for "${state.task.id}" — ${why}. It stays in queued/.`, "error")
-        return
+        return { kind: "error", message: why }
       }
       await appendNote(deps.$, fresh, auditNote("Plan written — parked for plan review", new Date(), actor), deps.log)
       await moveTask(deps.$, fresh, (action.toStatus ?? "plan-review") as TaskStatus) // also releases the queued/ claim marker
@@ -551,7 +572,7 @@ const drive = async (
         `${action.message} Review it, then /agent-loop-task approve-plan ${state.task.id} (or replan ${state.task.id}).`,
         "success",
       )
-      return
+      return { kind: "park", message: action.message }
     }
     case "done": {
       // "Done" for the loop is not "completed" for the task: a human still
@@ -578,7 +599,7 @@ const drive = async (
           ? ` Review the diff${where}.`
           : ""
       await toast(client, `${action.message}${next}`, "success")
-      return
+      return { kind: "done", message: action.message }
     }
     case "stop": {
       // Per design: a failed/stopped task stays in-progress, annotated for a human.
@@ -593,10 +614,10 @@ const drive = async (
       clearLoop(sessionID)
       const where = state.git ? ` Partial work is preserved on branch ${state.git.branch}.` : ""
       await toast(client, `${action.message}${where}`, "warning")
-      return
+      return { kind: "stop", message: action.message }
     }
     case "noop":
-      return
+      return null
   }
 }
 
@@ -631,7 +652,8 @@ const tryClaim = async (deps: Deps, sessionID: string, config: Config): Promise<
   const { item } = claim
   await toast(deps.client, item.claimMessage, "info")
   try {
-    await drive(deps, sessionID, config, firstStep(manifestFor(item.loopKind), item.state))
+    const outcome = await drive(deps, sessionID, config, firstStep(manifestFor(item.loopKind), item.state))
+    if (outcome && claim.source.onTerminal) await claim.source.onTerminal(item, outcome)
   } catch (err) {
     // Died before real work started (e.g. ensureIsolation threw, before
     // setLoop ran — onIdle's catch can't see the task): the claim is ours, so

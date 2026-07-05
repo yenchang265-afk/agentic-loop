@@ -191,12 +191,14 @@ export const AgenticLoop: Plugin = async ({ client, directory, $ }) => {
     tool: {
       loop_verdict: tool({
         description:
-          "Record the VERIFY or REVIEW stage's machine-readable verdict for the running loop. This tool " +
+          "Record a check stage's machine-readable verdict for the running loop (engineering: verify/review; pr-sitter: triage/verify). This tool " +
           "call is the loop's ONLY trusted verdict channel — a PASS/FAIL written in plain text is ignored. " +
           "Call exactly once, at the end of the check stage's turn, after gathering the evidence. Only the " +
           "stage the loop is currently running may record; calls from any other stage or session are ignored.",
         args: {
-          stage: tool.schema.enum(["verify", "review"]).describe("Which check stage this verdict belongs to."),
+          stage: tool.schema
+            .string()
+            .describe("Which check stage this verdict belongs to (must be the loop's currently running check stage)."),
           verdict: tool.schema
             .enum(["PASS", "FAIL", "ERROR"])
             .describe(
