@@ -249,10 +249,29 @@ test("startTaskLoop from the tool path refuses when the session already has a li
   try {
     const res = await startTaskLoop(deps, "sess-start-2", testConfig, "my-task", true)
     assert.equal(res.ok, false)
-    assert.match(res.message, /already has an active loop/)
+    assert.match(res.message, /already has an active or queued loop/)
   } finally {
     clearLoop("sess-start-2")
   }
+})
+
+test("startTaskLoop from the tool path refuses when a drive is already queued this turn", async () => {
+  const bodies = {
+    "docs/tasks/in-progress/task-a.md": serializeTask({ title: "Task A", body: `${PLAN_HEADING}\n\n1. Step.` }),
+    "docs/tasks/in-progress/task-b.md": serializeTask({ title: "Task B", body: `${PLAN_HEADING}\n\n1. Step.` }),
+  }
+  const { client } = makeClient(bodies)
+  const log: string[] = []
+  const deps: Deps = { client, $: makeSucceedingShell(log), directory: "/repo", log: () => {} }
+
+  const first = await startTaskLoop(deps, "sess-start-5", testConfig, "task-a", true)
+  assert.equal(first.ok, true)
+  // The drive only begins on session.idle — getLoop is still empty, but the
+  // pending queue must count: a second start would overwrite task-a's queued
+  // drive and orphan its claim marker.
+  const second = await startTaskLoop(deps, "sess-start-5", testConfig, "task-b", true)
+  assert.equal(second.ok, false)
+  assert.match(second.message, /already has an active or queued loop/)
 })
 
 test("startTaskLoop claims an approved task and queues the drive", async () => {
@@ -295,7 +314,7 @@ const makeClaimLosingShell = (log: string[]) => {
   return ((strings: TemplateStringsArray, ...exprs: unknown[]) => build(strings, exprs)) as any
 }
 
-test("startTaskLoop reports a lost claim race instead of starting", async () => {
+test("startTaskLoop reports a lost claim race as success by other means", async () => {
   const approved = serializeTask({ title: "Do the thing", body: `${PLAN_HEADING}\n\n1. Step.` })
   const { client } = makeClient({ "docs/tasks/in-progress/my-task.md": approved })
   const log: string[] = []
@@ -303,6 +322,9 @@ test("startTaskLoop reports a lost claim race instead of starting", async () => 
 
   const res = await startTaskLoop(deps, "sess-start-4", testConfig, "my-task", true)
 
-  assert.equal(res.ok, false)
+  // The task IS being built (by whoever won the claim) — a failure-shaped
+  // result would invite retries or a bogus failure report.
+  assert.equal(res.ok, true)
   assert.match(res.message, /just claimed by another watcher/)
+  assert.match(res.message, /do not retry/)
 })

@@ -13,6 +13,13 @@ import { listInProgress, wasInterrupted } from "./task/store.ts"
 const EDIT_TOOLS = new Set(["edit", "write", "patch", "multiedit"])
 
 /**
+ * Render an ActionResult as a tool result. Failures get an explicit "Error:"
+ * prefix so the calling agent can't mistake a soft refusal (unknown id, wrong
+ * stage) for success and barrel on through a conversational gate.
+ */
+const toToolResult = (res: driver.ActionResult): string => (res.ok ? res.message : `Error: ${res.message}`)
+
+/**
  * agentic-loop
  *
  * opencode plugin that executes approved plans as an automatic loop:
@@ -199,7 +206,7 @@ export const AgenticLoop: Plugin = async ({ client, directory, $ }) => {
         args: {
           id: tool.schema.string().min(1).describe("The task id (filename without .md)."),
         },
-        execute: async (args) => (await driver.planTask(deps, await getConfig(), args.id)).message,
+        execute: async (args) => toToolResult(await driver.planTask(deps, await getConfig(), args.id)),
       }),
       loop_plan_approve: tool({
         description:
@@ -210,7 +217,7 @@ export const AgenticLoop: Plugin = async ({ client, directory, $ }) => {
         args: {
           id: tool.schema.string().min(1).describe("The task id (filename without .md)."),
         },
-        execute: async (args) => (await driver.planApprove(deps, await getConfig(), args.id)).message,
+        execute: async (args) => toToolResult(await driver.planApprove(deps, await getConfig(), args.id)),
       }),
       loop_start: tool({
         description:
@@ -224,7 +231,7 @@ export const AgenticLoop: Plugin = async ({ client, directory, $ }) => {
         },
         execute: async (args, ctx) => {
           await reconcileOnce()
-          return (await driver.startTaskLoop(deps, ctx.sessionID, await getConfig(), args.id, true)).message
+          return toToolResult(await driver.startTaskLoop(deps, ctx.sessionID, await getConfig(), args.id, true))
         },
       }),
     },

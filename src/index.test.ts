@@ -106,5 +106,8 @@ test("the loop_plan_approve tool enforces the same draft refusal as the command 
 
   const result = await tools.loop_plan_approve?.execute({ id: "my-task" }, { sessionID: "ses_tool" })
 
+  // Soft refusals must be failure-shaped for the agent, not a plain sentence
+  // it could mistake for success and barrel through the gate.
+  assert.match(String(result), /^Error: /)
   assert.match(String(result), /still in draft/)
 })

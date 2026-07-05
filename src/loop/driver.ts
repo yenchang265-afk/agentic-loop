@@ -935,10 +935,14 @@ export const startTaskLoop = async (
   if (findSessionDriving(id)) {
     return { ok: false, message: `Task "${id}" is already being driven by a live loop.`, variant: "warning" }
   }
-  if (fromTool && getLoop(sessionID)) {
+  // A drive queued this turn (`pending`) is as real as a live one — `setLoop`
+  // only happens once the drive starts on idle, so `getLoop` alone would let a
+  // second same-turn loop_start overwrite the first task's queued drive and
+  // orphan its claim marker.
+  if (fromTool && (getLoop(sessionID) || pending.has(sessionID))) {
     return {
       ok: false,
-      message: "This session already has an active loop — finish it or /agent-loop stop it first.",
+      message: "This session already has an active or queued loop — finish it or /agent-loop stop it first.",
       variant: "warning",
     }
   }
@@ -949,7 +953,13 @@ export const startTaskLoop = async (
     return { ok: false, message: `Task "${id}" ${detail}.`, variant: "warning" }
   }
   if (!(await claimTask(deps.$, task))) {
-    return { ok: false, message: `Task "${id}" was just claimed by another watcher.`, variant: "warning" }
+    // Success by other means: the task IS being built, just not by us. Signal
+    // it as ok so tool callers don't retry or report a failure.
+    return {
+      ok: true,
+      message: `Task "${id}" was just claimed by another watcher — it is being built elsewhere; do not retry.`,
+      variant: "info",
+    }
   }
   clearLoop(sessionID)
   pending.set(sessionID, { kind: "start-task", task, goal: taskGoal(task) })

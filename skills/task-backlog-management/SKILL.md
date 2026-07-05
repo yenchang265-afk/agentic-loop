@@ -102,7 +102,7 @@ gate leaves the file where it is; the commands above resume from there.
 | `in-progress → in-review` | driver | automatic, the instant REVIEW returns PASS — parks it as the human diff gate |
 | `in-review → completed` | **you** | you've reviewed the diff and shipped it — run `/agent-loop ship <id>` (an audited move + commit) or move the file by hand; the loop never does this move on its own |
 | stays `in-progress` + note | driver | loop fails (iteration cap) or is stopped while building |
-| `→ abandoned` | **you** | you decide not to do it, from any status |
+| `→ abandoned` | **you** | you decide not to do it, from any active status (`completed`/`abandoned` are terminal — nothing moves out of them) |
 
 A failed or stopped task is **left in `in-progress/`** with a note appended, so
 it is visibly stuck for a human rather than silently re-queued. `/agent-loop recover

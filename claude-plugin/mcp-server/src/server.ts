@@ -26,6 +26,7 @@ import {
   appendNote,
   appendRunLog,
   auditNote,
+  canTransition,
   claimTask,
   extractPlan,
   findByIdIn,
@@ -36,6 +37,7 @@ import {
   listInProgress,
   moveTask,
   selectNext,
+  statusOf,
   STATUSES,
   summarizeBacklog,
   type TaskStatus,
@@ -171,7 +173,7 @@ server.registerTool(
       const elsewhere = await findAnyStatus(id)
       return fail(
         elsewhere
-          ? `Task "${id}" is in ${path.basename(path.dirname(elsewhere.path))} — only approved in-progress tasks can be executed. Plan it with /agent-loop-plan task ${id} and approve it first.`
+          ? `Task "${id}" is in ${statusOf({ id, path: elsewhere.path })} — only approved in-progress tasks can be executed. Plan it with /agent-loop-plan task ${id} and approve it first.`
           : `No task "${id}" found.`,
       )
     }
@@ -386,7 +388,13 @@ const runTerminal = async (action: Action) => {
   if (active.task) {
     if (action.kind === "done") {
       await appendNote(sh, active.task, auditNote("Loop done — review passed, awaiting human diff review", new Date(), actor), log)
-      await moveTask(sh, active.task, "in-review")
+      // Never let a failed move (file relocated externally mid-loop) abort the
+      // terminal path — teardown, state cleanup, and `active = null` must run.
+      try {
+        await moveTask(sh, active.task, "in-review")
+      } catch (err) {
+        log("warn", `could not move ${active.task.id} to in-review: ${(err as Error).message}`)
+      }
     } else {
       await appendNote(sh, active.task, auditNote((action as { message: string }).message, new Date(), actor), log)
     }
@@ -448,7 +456,7 @@ server.registerTool(
       const elsewhere = await findAnyStatus(id)
       return fail(
         elsewhere
-          ? `Task "${id}" is in ${path.basename(path.dirname(elsewhere.path))} — only draft/in-planning tasks can be planned.`
+          ? `Task "${id}" is in ${statusOf({ id, path: elsewhere.path })} — only draft/in-planning tasks can be planned.`
           : `No draft/in-planning task "${id}" found.`,
       )
     }
@@ -477,7 +485,7 @@ server.registerTool(
       const elsewhere = await findAnyStatus(id)
       return fail(
         elsewhere
-          ? `Can't approve "${id}": it's in ${path.basename(path.dirname(elsewhere.path))} — only in-planning tasks can be approved.`
+          ? `Can't approve "${id}": it's in ${statusOf({ id, path: elsewhere.path })} — only in-planning tasks can be approved.`
           : `Can't approve "${id}": no task found.`,
       )
     }
@@ -492,11 +500,21 @@ server.registerTool(
 
 server.registerTool(
   "loop_move",
-  { description: "Move a task file to another status folder.", inputSchema: { id: z.string(), status: z.enum(["draft", "in-planning", "in-progress", "in-review", "completed", "abandoned"]) } },
+  {
+    description:
+      "Move a task file one lifecycle stage forward (draft → in-planning → in-progress → in-review → completed), or abandon it from any active stage. Non-adjacent, backward, and out-of-terminal moves are refused — the lifecycle is sequential; correct an out-of-order file by hand (git mv) if you truly must.",
+    inputSchema: { id: z.string(), status: z.enum(["draft", "in-planning", "in-progress", "in-review", "completed", "abandoned"]) },
+  },
   async ({ id, status }) => {
     await loadCfg()
     const found = await findAnyStatus(id)
     if (!found) return fail(`No task "${id}".`)
+    const from = statusOf({ id, path: found.path })
+    if (!canTransition(from, status)) {
+      return fail(
+        `Can't move "${id}" from ${from} to ${status} — tasks advance one stage at a time (abandon is allowed from any active stage; completed/abandoned are terminal).`,
+      )
+    }
     const newPath = await moveTask(sh, { id, path: found.path }, status)
     return ok({ moved: newPath })
   },
@@ -512,7 +530,7 @@ server.registerTool(
       const elsewhere = await findAnyStatus(id)
       return fail(
         elsewhere
-          ? `Can't ship "${id}": it's in ${path.basename(path.dirname(elsewhere.path))}, not in-review/.`
+          ? `Can't ship "${id}": it's in ${statusOf({ id, path: elsewhere.path })}, not in-review/.`
           : `No in-review task "${id}".`,
       )
     }
