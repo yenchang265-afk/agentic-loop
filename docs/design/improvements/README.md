@@ -2,9 +2,7 @@
 
 **Status: all six plans below are implemented and tested** in the OpenCode
 plugin (`src/`). They are kept as the design record for those features, not
-as a pending backlog. The forward roadmap now lives in
-[`../enterprise-adoption.md`](../enterprise-adoption.md) — the enterprise
-gap analysis and phased improvement plan.
+as a pending backlog.
 
 Sourced from: the current code (all cited paths and function names verified
 against source at time of writing), the residual risks in
@@ -23,8 +21,8 @@ against source at time of writing), the residual risks in
 | 06 | [Run metrics](./06-run-metrics.md) | Per-run stage timings + verdict history in the run log | `src/loop/metrics.ts`; `metrics.test.ts` |
 
 Residuals each plan explicitly deferred (bash worktree pinning, cross-process
-`index.lock` races, metrics export, redaction knobs) are carried forward as
-phase-3 items in [`../enterprise-adoption.md`](../enterprise-adoption.md).
+`index.lock` races, metrics export, redaction knobs) remain open — see
+[`../threat-model.md`](../threat-model.md) for the current residual risks.
 
 ## Conventions every plan follows
 
