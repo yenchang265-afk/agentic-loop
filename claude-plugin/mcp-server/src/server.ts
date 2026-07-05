@@ -5,7 +5,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod"
 import { fsClient, sh } from "./shim.js"
-import { DEFAULT_CONFIG, loadConfig } from "./lib/config.js"
+import { DEFAULT_CONFIG, loadConfig } from "@agentic-loop/core/config"
 import {
   advanceOnIdle,
   composeArgs,
@@ -16,13 +16,13 @@ import {
   type Config,
   type LoopState,
   type TaskRef,
-} from "./lib/loop/state.js"
-import { failedCriteriaBlock, worstOf, type CriterionResult, type Verdict, type VerdictRecord } from "./lib/loop/verdict.js"
-import { renderRunSummary, type Outcome, type StageSample } from "./lib/loop/metrics.js"
-import { commitAll, commitPaths, gitActor, listWorktrees, pruneWorktrees } from "./lib/loop/git.js"
-import { ensureIsolation, loopId, teardownIsolation } from "./lib/loop/isolate.js"
-import { clearState, loadState, saveState } from "./lib/loop/persist.js"
-import { type Task } from "./lib/task/schema.js"
+} from "@agentic-loop/core/loop/state"
+import { failedCriteriaBlock, worstOf, type CriterionResult, type Verdict, type VerdictRecord } from "@agentic-loop/core/loop/verdict"
+import { renderRunSummary, type Outcome, type StageSample } from "@agentic-loop/core/loop/metrics"
+import { commitAll, commitPaths, gitActor, listWorktrees, pruneWorktrees } from "@agentic-loop/core/loop/git"
+import { ensureIsolation, loopId, teardownIsolation } from "@agentic-loop/core/loop/isolate"
+import { clearState, loadState, saveState } from "@agentic-loop/core/loop/persist"
+import { type Task } from "@agentic-loop/core/task/schema"
 import {
   appendNote,
   appendRunLog,
@@ -42,7 +42,7 @@ import {
   STATUSES,
   summarizeBacklog,
   type TaskStatus,
-} from "./lib/task/store.js"
+} from "@agentic-loop/core/task/store"
 
 /**
  * MCP server backing the agentic-loop Claude Code plugin. It holds the loop's
@@ -69,7 +69,8 @@ import {
  */
 
 const directory = process.env.AGENTIC_LOOP_DIR ?? process.cwd()
-const log = (level: string, message: string) => fsClient.app.log({ body: { service: "agentic-loop", level, message } })
+const log = (level: "info" | "warn" | "error", message: string) =>
+  fsClient.app.log({ body: { service: "agentic-loop", level, message } })
 
 // --- shared in-process loop state (one active loop per server/session) ---
 

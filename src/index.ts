@@ -2,12 +2,12 @@ import type { Plugin } from "@opencode-ai/plugin"
 import path from "node:path"
 import { tool } from "@opencode-ai/plugin"
 import { DEFAULT_CONFIG, loadConfig } from "./config.ts"
-import type { Config } from "./loop/state.ts"
+import type { Config } from "./config.ts"
 import * as driver from "./loop/driver.ts"
-import { listWorktrees, pruneWorktrees } from "./loop/git.ts"
-import { listSnapshotIds } from "./loop/persist.ts"
-import { findSessionDriving, getLoop, hasLoop } from "./loop/state.ts"
-import { isOrphanedPlanClaim, listClaimIds, listInProgress, listQueued, releaseOrphanedClaims, wasInterrupted } from "./task/store.ts"
+import { listWorktrees, pruneWorktrees } from "@agentic-loop/core/loop/git"
+import { listSnapshotIds } from "@agentic-loop/core/loop/persist"
+import { findSessionDriving, getLoop, hasLoop } from "@agentic-loop/core/loop/state"
+import { isOrphanedPlanClaim, listClaimIds, listInProgress, listQueued, releaseOrphanedClaims, wasInterrupted } from "@agentic-loop/core/task/store"
 
 /** Tools that write files — guarded to the worktree while a worktree-mode loop drives. */
 const EDIT_TOOLS = new Set(["edit", "write", "patch", "multiedit"])

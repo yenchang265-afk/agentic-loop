@@ -1,8 +1,8 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { PLAN_HEADING } from "../task/store.ts"
-import { serializeTask } from "../task/schema.ts"
-import type { Config } from "./state.ts"
+import { PLAN_HEADING } from "@agentic-loop/core/task/store"
+import { serializeTask } from "@agentic-loop/core/task/schema"
+import type { Config } from "../config.ts"
 import { claimSkipReason, handleTaskCommand, parseTaskArgs, parseWatchArgs, type Deps } from "./driver.ts"
 
 /**

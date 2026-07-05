@@ -1,6 +1,10 @@
 import type { PluginInput } from "@opencode-ai/plugin"
-import path from "node:path"
-import { slugify, type Task } from "../task/schema.ts"
+import { type Task } from "@agentic-loop/core/task/schema"
+import {
+  ensureIsolation as coreEnsureIsolation,
+  loopId,
+  teardownIsolation as coreTeardownIsolation,
+} from "@agentic-loop/core/loop/isolate"
 import {
   appendNote,
   appendRunLog,
@@ -24,7 +28,7 @@ import {
   STATUSES,
   summarizeBacklog,
   type TaskStatus,
-} from "../task/store.ts"
+} from "@agentic-loop/core/task/store"
 import {
   addWorktree,
   checkoutBranch,
@@ -38,9 +42,9 @@ import {
   pruneWorktrees,
   removeWorktree,
   worktreeForBranch,
-} from "./git.ts"
-import { clearState, loadState, saveState } from "./persist.ts"
-import { type Outcome, renderRunSummary, type StageSample } from "./metrics.ts"
+} from "@agentic-loop/core/loop/git"
+import { clearState, loadState, saveState } from "@agentic-loop/core/loop/persist"
+import { type Outcome, renderRunSummary, type StageSample } from "@agentic-loop/core/loop/metrics"
 import {
   failedCriteriaBlock,
   LOOP_REVIEW_TAG,
@@ -49,8 +53,9 @@ import {
   type Verdict,
   type VerdictRecord,
   worstOf,
-} from "./verdict.ts"
-import type { Action, Config, LoopState, Stage, TaskRef } from "./state.ts"
+} from "@agentic-loop/core/loop/verdict"
+import type { Config } from "../config.ts"
+import type { Action, LoopState, Stage, TaskRef } from "@agentic-loop/core/loop/state"
 import {
   advanceOnIdle,
   clearLoop,
@@ -60,7 +65,7 @@ import {
   resumeAtBuild,
   setLoop,
   startAtPlan,
-} from "./state.ts"
+} from "@agentic-loop/core/loop/state"
 
 /**
  * Impure orchestration for the agentic loop. Thin glue over the pure helpers in
@@ -210,99 +215,13 @@ const taskRef = (task: Task, path: string): TaskRef => ({
   acceptance: task.acceptance,
 })
 
-/** A short stable id for branch names and checkpoint messages. Every loop is
- *  task-driven now; the goal-derived slug is a defensive fallback only. */
-const loopId = (state: LoopState): string => state.task?.id ?? (slugify(state.goal.split("\n")[0] ?? "") || "goal")
+/** Git isolation lives in core (`@agentic-loop/core/loop/isolate`); these
+ *  wrappers thread this plugin's `Deps` into its host-agnostic signatures. */
+const ensureIsolation = (deps: Deps, config: Config, state: LoopState): Promise<LoopState> =>
+  coreEnsureIsolation(deps.$, deps.log, deps.directory, config, state)
 
-/** Absolute path to a task's dedicated worktree under the configured root. Pure. */
-export const worktreePathFor = (directory: string, worktreesDir: string, id: string): string =>
-  path.resolve(directory, worktreesDir, id)
-
-/** Run the configured worktree-setup command in a fresh worktree. Warn-and-continue. */
-const runWorktreeSetup = async (deps: Deps, config: Config, wtPath: string): Promise<void> => {
-  if (!config.worktreeSetup) return
-  const out = await deps.$`${{ raw: config.worktreeSetup }}`.cwd(wtPath).quiet().nothrow()
-  if (out.exitCode !== 0) {
-    await deps.log("warn", `loop: worktreeSetup failed in ${wtPath}: ${out.stderr.toString().trim()}`)
-  }
-}
-
-/**
- * Isolate execution for this loop. Two modes:
- *
- * - **Worktree mode** (`config.worktreesDir` set): each loop gets its own
- *   `git worktree` on `loop/<id>`, cut from `base`. The human's checkout is
- *   never touched and concurrent drives are safe. If the worktree can't be
- *   created it **throws** — never falls back to shared-tree branch switching,
- *   which could clobber a concurrent drive's checked-out branch.
- * - **Shared-tree mode** (default): checks out `loop/<id>` in the main tree,
- *   as before. Degrades to no isolation (with a warning) outside a git repo,
- *   on a detached HEAD, or when checkout fails.
- *
- * An existing branch (e.g. a recovered run's) is reused, never reset.
- */
-const ensureIsolation = async (deps: Deps, config: Config, state: LoopState): Promise<LoopState> => {
-  if (state.git) {
-    if (state.git.worktree) {
-      // Worktree mode — never touch the shared tree. Recreate a vanished worktree.
-      if (!(await isGitRepo(deps.$, state.git.worktree))) {
-        await pruneWorktrees(deps.$, deps.directory)
-        if (!(await addWorktree(deps.$, deps.directory, state.git.worktree, state.git.branch, state.git.base))) {
-          throw new Error(`could not recreate worktree ${state.git.worktree} for ${state.git.branch}`)
-        }
-        await runWorktreeSetup(deps, config, state.git.worktree)
-      }
-      return state
-    }
-    // Shared mode — make sure the tree is back on this loop's branch.
-    const cur = await currentBranch(deps.$, deps.directory)
-    if (cur !== state.git.branch && !(await checkoutBranch(deps.$, deps.directory, state.git.branch))) {
-      await deps.log("warn", `loop: could not return to ${state.git.branch} — building on ${cur ?? "detached HEAD"}`)
-    }
-    return state
-  }
-
-  if (!(await isGitRepo(deps.$, deps.directory))) return state
-  const base = await currentBranch(deps.$, deps.directory)
-  if (!base) {
-    await deps.log("warn", "loop: detached HEAD — building without branch isolation")
-    return state
-  }
-  const branch = `loop/${loopId(state)}`
-
-  if (config.worktreesDir) {
-    const wtPath = worktreePathFor(deps.directory, config.worktreesDir, loopId(state))
-    await ensureExcluded(deps.$, deps.directory, config.worktreesDir)
-    if (await isDirty(deps.$, deps.directory)) {
-      await deps.log("info", "loop: main tree has uncommitted changes — they are NOT visible in this loop's worktree")
-    }
-    // Reuse a worktree already registered for this branch (a recovered run).
-    const existing = await worktreeForBranch(deps.$, deps.directory, branch)
-    if (existing) {
-      if (existing !== wtPath) await deps.log("info", `loop: reusing existing worktree ${existing} for ${branch}`)
-      return { ...state, git: { base, branch, worktree: existing } }
-    }
-    // A leftover directory with no registration — prune, then let add try.
-    if (await isGitRepo(deps.$, wtPath)) await pruneWorktrees(deps.$, deps.directory)
-    if (!(await addWorktree(deps.$, deps.directory, wtPath, branch, base))) {
-      throw new Error(`could not create worktree ${wtPath} for ${branch} — resolve it, then /agent-loop recover`)
-    }
-    await runWorktreeSetup(deps, config, wtPath)
-    return { ...state, git: { base, branch, worktree: wtPath } }
-  }
-
-  if (await isDirty(deps.$, deps.directory)) {
-    await deps.log(
-      "warn",
-      "loop: working tree dirty at build start — pre-existing changes will land in this loop's checkpoints",
-    )
-  }
-  if (!(await checkoutBranch(deps.$, deps.directory, branch))) {
-    await deps.log("warn", `loop: could not check out ${branch} — building without branch isolation`)
-    return state
-  }
-  return { ...state, git: { base, branch } }
-}
+const teardownIsolation = (deps: Deps, state: LoopState): Promise<void> =>
+  coreTeardownIsolation(deps.$, deps.log, deps.directory, state)
 
 /** The working directory a loop's stages operate in: its worktree, else the main tree. */
 const workTree = (deps: Deps, state: LoopState): string => state.git?.worktree ?? deps.directory
@@ -311,28 +230,6 @@ const workTree = (deps: Deps, state: LoopState): string => state.git?.worktree ?
 const checkpoint = async (deps: Deps, state: LoopState, message: string): Promise<void> => {
   if (!state.git) return
   await commitAll(deps.$, workTree(deps, state), message)
-}
-
-/**
- * Tear down this loop's isolation. Worktree mode: remove the worktree if it's
- * clean (the branch is kept for human review); a dirty worktree or a failed
- * removal is left in place with a warning. Shared mode: return the main tree to
- * the branch it was on before the loop branched off.
- */
-const teardownIsolation = async (deps: Deps, state: LoopState): Promise<void> => {
-  if (!state.git) return
-  if (state.git.worktree) {
-    if (!(await removeWorktree(deps.$, deps.directory, state.git.worktree))) {
-      await deps.log(
-        "info",
-        `loop: worktree ${state.git.worktree} left in place (dirty or locked) — branch ${state.git.branch} holds the committed work`,
-      )
-    }
-    return
-  }
-  if (!(await checkoutBranch(deps.$, deps.directory, state.git.base))) {
-    await deps.log("warn", `loop: could not return to ${state.git.base} — still on ${state.git.branch}`)
-  }
 }
 
 /**
