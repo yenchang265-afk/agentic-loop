@@ -61,3 +61,5 @@ that list.
 > REVIEW verdict: PASS (iteration 1) [2026-07-05T13:16:24.981Z]
 
 > Loop done — review passed, awaiting human diff review [2026-07-05T13:16:25.161Z]
+
+> Shipped — moved to completed [2026-07-05T13:17:44.607Z]
