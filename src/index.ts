@@ -190,6 +190,43 @@ export const AgenticLoop: Plugin = async ({ client, directory, $ }) => {
             ...(args.criteria !== undefined ? { criteria: args.criteria } : {}),
           }),
       }),
+      loop_plan_task: tool({
+        description:
+          "Move a draft/ task to in-planning/ (audited note + commit) so its ## Implementation Plan can be " +
+          "written onto it in place. The tool equivalent of /agent-loop-plan task <id> — call it ONLY after the " +
+          "user explicitly agreed in-chat to continue from draft to planning. Idempotent for tasks already in " +
+          "in-planning/. Never skips a stage: draft → in-planning is the only move it makes.",
+        args: {
+          id: tool.schema.string().min(1).describe("The task id (filename without .md)."),
+        },
+        execute: async (args) => (await driver.planTask(deps, await getConfig(), args.id)).message,
+      }),
+      loop_plan_approve: tool({
+        description:
+          "Approve a planned task: validates the ## Implementation Plan exists, moves in-planning/ → in-progress/ " +
+          "(the approved queue), appends an audited note, and commits. The tool equivalent of " +
+          "/agent-loop-plan approve <id> — call it ONLY after the user explicitly approved the shown plan in-chat. " +
+          "Refuses planless tasks and tasks still in draft/.",
+        args: {
+          id: tool.schema.string().min(1).describe("The task id (filename without .md)."),
+        },
+        execute: async (args) => (await driver.planApprove(deps, await getConfig(), args.id)).message,
+      }),
+      loop_start: tool({
+        description:
+          "Start executing one approved in-progress/ task in THIS session: claims it atomically and queues the " +
+          "BUILD → VERIFY → REVIEW loop, which begins the moment this agent turn ends. The tool equivalent of " +
+          "/agent-loop task <id> — call it ONLY right after loop_plan_approve succeeded and the user asked to " +
+          "build now. After calling it, end your turn with a short status message so the loop can take over. " +
+          "If the task was just claimed by another watcher, that is success by other means — do not retry.",
+        args: {
+          id: tool.schema.string().min(1).describe("The approved task's id in in-progress/."),
+        },
+        execute: async (args, ctx) => {
+          await reconcileOnce()
+          return (await driver.startTaskLoop(deps, ctx.sessionID, await getConfig(), args.id, true)).message
+        },
+      }),
     },
   }
 }
