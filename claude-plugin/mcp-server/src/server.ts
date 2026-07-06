@@ -17,13 +17,14 @@ import {
 import { advance, composePrompt, firstStep } from "@agentic-loop/core/loop/engine"
 import { registerEngineeringHooks } from "@agentic-loop/core/kinds/engineering"
 import { loadManifest } from "@agentic-loop/core/manifest/load"
-import { stageDef, type LoadedManifest } from "@agentic-loop/core/manifest/schema"
+import { effectiveAllowlist, stageDef, type LoadedManifest } from "@agentic-loop/core/manifest/schema"
 import { pollOnce } from "@agentic-loop/core/scheduler/scheduler"
+import { makeAdoPrSource } from "@agentic-loop/core/source/ado-pr"
 import { makeBacklogSource } from "@agentic-loop/core/source/backlog"
 import { makeGithubPrSource } from "@agentic-loop/core/source/github-pr"
 import type { PolledClaim } from "@agentic-loop/core/scheduler/scheduler"
 import type { WorkSource } from "@agentic-loop/core/source/types"
-import { enabledLoopKinds } from "@agentic-loop/core/config"
+import { enabledLoopKinds, platformFor } from "@agentic-loop/core/config"
 import { fileURLToPath } from "node:url"
 import { failedCriteriaBlock, worstOf, type CriterionResult, type Verdict, type VerdictRecord } from "@agentic-loop/core/loop/verdict"
 import { renderRunSummary, type Outcome, type StageSample } from "@agentic-loop/core/loop/metrics"
@@ -151,7 +152,9 @@ const writeStageMarker = (stage: string | null) => {
           taskId: active?.task?.id ?? null,
           worktree: active?.git?.worktree ?? null,
           deadline: stageDeadline,
-          ...(def.kind === "check" ? { bashAllowlist: def.bashAllowlist } : {}),
+          ...(def.kind === "check"
+            ? { bashAllowlist: effectiveAllowlist(def, platformFor(config, m.manifest.kind)) }
+            : {}),
         }),
       )
     }
@@ -190,6 +193,20 @@ const sourcesFor = (): WorkSource[] =>
   enabledLoopKinds(config).flatMap((kind): WorkSource[] => {
     const loaded = manifestFor(kind)
     if (loaded.manifest.workSource.type === "github-pr") {
+      if (platformFor(config, kind) === "ado") {
+        return [
+          makeAdoPrSource({
+            $: sh,
+            client: fsClient,
+            directory,
+            tasksDir: config.tasksDir,
+            log,
+            loaded,
+            // Config parse fails fast when platform "ado" lacks the ado section.
+            ado: config.ado!,
+          }),
+        ]
+      }
       const query = config.loops[kind]?.["query"]
       return [
         makeGithubPrSource({

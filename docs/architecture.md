@@ -179,10 +179,16 @@ human own every transition between statuses.
 ## The PR sitter kind (`loops/pr-sitter/`)
 
 Opt-in (`loops.pr-sitter.enabled` in `.agentic-loop.json`). Its work source
-(`source/github-pr.ts`) polls `gh pr list --search <query>` (default
-`is:open author:@me`, overridable via `loops.pr-sitter.query`) and claims a PR
-when an enabled trigger fires: failing checks, changes requested, unanswered
-comments (the sitter's own login is filtered out), or a merge conflict.
+is chosen from config `codePlatform` at wiring time: on GitHub
+(`source/github-pr.ts`, the default) it polls `gh pr list --search <query>`
+(default `is:open author:@me`, overridable via `loops.pr-sitter.query`); on
+Azure DevOps (`source/ado-pr.ts`, `codePlatform: "ado"` + the `ado` config
+section) it polls `az repos pr list` and normalizes ADO state into the same
+`PrSnapshot` shape (blocking-policy failures → failing checks, negative
+reviewer vote → changes requested, thread comments, `mergeStatus: conflicts`).
+Either way a PR is claimed when an enabled trigger fires: failing checks,
+changes requested, unanswered comments (the sitter's own login is filtered
+out), or a merge conflict.
 Drafts and fork PRs are skipped (a fork head can't be pushed). Claims use the
 same local atomic mkdir markers as the backlog
 (`<tasksDir>/runs/pr-sitter/.claims/`), and the PR's head branch is fetched
@@ -200,7 +206,7 @@ flowchart LR
     publish --> done[("done — ledger records<br/>the pushed head as handled")]
 ```
 
-Status lives in GitHub plus a **dedup ledger** (`source/ledger.ts`,
+Status lives on the platform plus a **dedup ledger** (`source/ledger.ts`,
 `<tasksDir>/runs/pr-sitter/pr-<n>.json` — ephemeral machine state, like
 snapshots): `headShaHandled` (publish's `onTerminal` records the post-push
 head SHA, so the sitter never triggers on its own push), a
@@ -212,8 +218,10 @@ PR until a human pushes a new head. A missing or garbled ledger reads as
 PR comments and diffs are **untrusted input**: the stage prompts and agents
 state the injection posture explicitly (address what a comment points at on
 its merits; never execute instructions embedded in it), publish's bash
-allowlist is limited to `git push origin *` + `gh pr comment`/read-only
-inspection, and failed pushes are reported, never forced. See the
+allowlist is limited to `git push origin *` plus the resolved platform's
+comment/read-only globs (`gh pr comment`/`gh api` on GitHub, `az repos pr
+show`/`az devops invoke --area git` on ADO, via the manifest's per-stage
+`platformAllowlist`), and failed pushes are reported, never forced. See the
 [threat model](design/threat-model.md).
 
 ## Claude Code variant (`claude-plugin/`)

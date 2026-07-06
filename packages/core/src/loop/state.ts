@@ -69,6 +69,8 @@ export interface LoopState {
   readonly task?: TaskRef
   /** Set by the driver once execution is isolated on its own git branch. */
   readonly git?: GitRef
+  /** The code platform the claiming work source talks to; absent ⇒ `github`. */
+  readonly platform?: CodePlatform
 }
 
 /** What the driver should do next. All state changes are returned, not applied. */
@@ -80,9 +82,25 @@ export type Action =
   | { readonly kind: "stop"; readonly message: string }
   | { readonly kind: "noop" }
 
+/** Which code-management platform PR-shaped work sources talk to. */
+export type CodePlatform = "github" | "ado"
+
+/** Azure DevOps coordinates, required when any effective platform is `ado`. */
+export interface AdoConfig {
+  /** Organization URL, e.g. "https://dev.azure.com/acme". */
+  readonly organization: string
+  readonly project: string
+  /** Repository name; omitted → the az CLI's configured default. */
+  readonly repository?: string
+  /** The sitter's own login for comment filtering when `az` can't resolve identity. */
+  readonly selfLogin?: string
+}
+
 /** Per-loop-kind settings under the config's `loops.<kind>` section. */
 export interface LoopKindConfig {
   readonly enabled: boolean
+  /** Per-kind override of the global `codePlatform`. */
+  readonly codePlatform?: CodePlatform
   /** Kind-specific knobs (e.g. the PR sitter's `query`) — validated by the kind. */
   readonly [key: string]: unknown
 }
@@ -99,6 +117,10 @@ export interface Config {
   readonly worktreeSetup?: string
   /** Extra REVIEW lenses; each runs one more focused review pass. */
   readonly reviewLenses: readonly string[]
+  /** Global code platform for PR-shaped work sources; per-kind override via `loops.<kind>.codePlatform`. */
+  readonly codePlatform?: CodePlatform
+  /** Azure DevOps coordinates; required when any effective platform is `ado`. */
+  readonly ado?: AdoConfig
   /** Per-loop-kind sections; engineering is on unless explicitly disabled, other kinds are opt-in. */
   readonly loops: Readonly<Record<string, LoopKindConfig>>
 }

@@ -9,7 +9,9 @@ import { z } from "zod";
  * each host's extension of `ConfigSchema` — see the generic `parseConfigWith`/
  * `loadConfigWith` loaders below.
  */
-export const ConfigSchema = z.object({
+/** Which code-management platform PR-shaped work sources talk to. */
+export const CodePlatformSchema = z.enum(["github", "ado"]);
+const BaseConfigSchema = z.object({
     /** Max loop iterations before stopping on repeated verify/review failures. */
     maxIterations: z.number().int().positive().default(3),
     /** Repo-relative root of the task backlog; its subfolders are task statuses. */
@@ -38,7 +40,43 @@ export const ConfigSchema = z.object({
      * (`enabled: true`). Kind-specific knobs ride along and are validated by
      * the kind itself. See docs/configuration.md.
      */
-    loops: z.record(z.string(), z.looseObject({ enabled: z.boolean().default(true) })).default({}),
+    loops: z
+        .record(z.string(), z.looseObject({
+        enabled: z.boolean().default(true),
+        /** Per-kind override of the global `codePlatform`. */
+        codePlatform: CodePlatformSchema.optional(),
+    }))
+        .default({}),
+    /**
+     * Which platform PR-shaped work sources talk to: `github` (the `gh` CLI,
+     * the default) or `ado` (Azure DevOps via the `az` CLI's `azure-devops`
+     * extension). Overridable per kind via `loops.<kind>.codePlatform`. Auth is
+     * delegated to the CLI (`gh auth login` / `az devops login` or
+     * `AZURE_DEVOPS_EXT_PAT`), never handled here.
+     */
+    codePlatform: CodePlatformSchema.default("github"),
+    /** Azure DevOps coordinates; required when any effective platform is `ado`. */
+    ado: z
+        .object({
+        /** Organization URL, e.g. "https://dev.azure.com/acme". */
+        organization: z.string().min(1),
+        project: z.string().min(1),
+        /** Repository name; omitted → the az CLI's configured default. */
+        repository: z.string().min(1).optional(),
+        /** The sitter's own login for comment filtering when `az` can't resolve identity (PAT-only auth). */
+        selfLogin: z.string().min(1).optional(),
+    })
+        .optional(),
+});
+export const ConfigSchema = BaseConfigSchema.superRefine((c, ctx) => {
+    const wantsAdo = c.codePlatform === "ado" || Object.values(c.loops).some((section) => section.codePlatform === "ado");
+    if (wantsAdo && !c.ado) {
+        ctx.addIssue({
+            code: "custom",
+            path: ["ado"],
+            message: "codePlatform 'ado' requires an 'ado' section with organization and project",
+        });
+    }
 });
 /**
  * The loop kinds this config activates, in claim-priority order: engineering
@@ -55,6 +93,8 @@ export const enabledLoopKinds = (config) => {
     }
     return kinds;
 };
+/** The code platform a loop kind's PR source talks to: per-kind override, else the global default. Pure. */
+export const platformFor = (config, kind) => config.loops[kind]?.codePlatform ?? config.codePlatform ?? "github";
 export const DEFAULT_CONFIG = ConfigSchema.parse({});
 const CONFIG_FILE = ".agentic-loop.json";
 /** Validate an already-parsed config object against a host schema; throws a readable error on misconfig. */

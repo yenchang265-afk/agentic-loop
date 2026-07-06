@@ -325,3 +325,27 @@ test("pr-sitter: a missing triage verdict reads as FAIL (nothing to do), never a
   const { action } = advance(sitter, prState("triage"), config, "LOOP_TRIAGE: PASS in prose only", null)
   assert.equal(action.kind, "done")
 })
+
+// --- code-platform prompt switching (additive; the oracle above is untouched) ---
+
+test("pr-sitter prompts render gh guidance by default and az guidance when the state is stamped ado", () => {
+  const sitter = loadManifest(LOOPS_DIR, "pr-sitter")
+  const state: LoopState = {
+    kind: "pr-sitter",
+    goal: "PR #7",
+    stage: "triage",
+    iteration: 0,
+    artifacts: {},
+    git: { base: "main", branch: "feat/x" },
+  }
+  const gh = composePrompt(sitter, state, "triage")
+  assert.match(gh, /gh pr view/)
+  assert.doesNotMatch(gh, /az repos/)
+  const ado = composePrompt(sitter, { ...state, platform: "ado" }, "triage")
+  assert.match(ado, /az repos pr show/)
+  assert.doesNotMatch(ado, /gh pr view/)
+  const publish = composePrompt(sitter, { ...state, platform: "ado", stage: "publish" }, "publish")
+  assert.match(publish, /az devops invoke/)
+  assert.match(publish, /NEVER complete, abandon, or approve/)
+  assert.doesNotMatch(publish, /gh pr comment/)
+})

@@ -9,7 +9,9 @@ import type { Config as CoreConfig } from "@agentic-loop/core/loop/state"
  * `watchIntervalMinutes` lives here, not in core).
  */
 
-export const ConfigSchema = CoreConfigSchema.extend({
+// `safeExtend`: the core schema carries a cross-field refinement (codePlatform
+// "ado" requires the `ado` section), which plain `.extend()` would reject.
+export const ConfigSchema = CoreConfigSchema.safeExtend({
   /**
    * Default polling cadence for `/agent-loop watch`: a timer at this interval scans
    * `in-progress/` for claimable approved tasks while the session is idle.

@@ -57,8 +57,16 @@ export const StageDefSchema = z.object({
   timeoutMinutes: z.number().int().positive().optional(),
   /** Bash-command globs this stage may run (enforced by the Claude Code stage guard). */
   bashAllowlist: z.array(z.string().min(1)).default([]),
+  /** Extra bash globs merged into `bashAllowlist` for the resolved code platform (config `codePlatform`). */
+  platformAllowlist: z.record(z.string(), z.array(z.string().min(1))).default({}),
 })
 export type StageDef = z.infer<typeof StageDefSchema>
+
+/** The bash globs a stage may run on the given code platform. Pure. */
+export const effectiveAllowlist = (def: StageDef, platform: string): string[] => [
+  ...def.bashAllowlist,
+  ...(def.platformAllowlist[platform] ?? []),
+]
 
 const TransitionSchema = z.object({
   /** Taken when a `work` stage completes. */
@@ -89,9 +97,14 @@ const BacklogSourceSchema = z.object({
     .min(1),
 })
 
+/**
+ * The hosted-PR work source. The concrete platform (`gh` vs `az`) is resolved
+ * from config `codePlatform` at wiring time, not here — the `"github-pr"`
+ * literal is kept for manifest compatibility.
+ */
 const GithubPrSourceSchema = z.object({
   type: z.literal("github-pr"),
-  /** `gh pr list --search` query selecting the PRs this loop sits on. */
+  /** `gh pr list --search` query selecting the PRs this loop sits on (GitHub only). */
   query: z.string().min(1),
   /** The PR conditions that make an item claimable. */
   triggers: z.array(z.enum(["failing-checks", "changes-requested", "new-comments", "merge-conflict"])).min(1),

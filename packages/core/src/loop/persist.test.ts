@@ -124,3 +124,15 @@ test("clearState removes the snapshot and is idempotent", async () => {
   assert.equal(await loadState(fakeClient(dir), dir, "docs/tasks", "add-rl"), null)
   await clearState($, dir, "docs/tasks", "add-rl") // no throw on absent
 })
+
+test("a platform-stamped snapshot round-trips; a legacy snapshot without it loads platform-less", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "loop-persist-"))
+  const $ = fakeShell()
+  const adoState: LoopState = { ...sampleState, platform: "ado" }
+  await saveState($, dir, "docs/tasks", "add-rl", adoState)
+  const loaded = await loadState(fakeClient(dir), dir, "docs/tasks", "add-rl")
+  assert.equal(loaded?.platform, "ado")
+  fs.writeFileSync(path.join(dir, "docs/tasks/runs/legacy.state.json"), JSON.stringify(sampleState))
+  const legacy = await loadState(fakeClient(dir), dir, "docs/tasks", "legacy")
+  assert.equal(legacy?.platform, undefined)
+})

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { parseManifest } from "./schema.js"
+import { effectiveAllowlist, parseManifest } from "./schema.js"
 
 const base = {
   kind: "k",
@@ -68,4 +68,35 @@ test("rejects a fire at an unknown stage and a counted fire without capMessage",
 
 test("rejects duplicate stage names", () => {
   assert.throws(() => parseManifest({ ...base, stages: [...base.stages, base.stages[0]] }), /duplicate stage names/)
+})
+
+test("platformAllowlist defaults empty and effectiveAllowlist merges the platform's globs", () => {
+  const m = parseManifest(base)
+  assert.deepEqual(m.stages[0]?.platformAllowlist, {})
+  const withPlatform = parseManifest({
+    ...base,
+    stages: [
+      {
+        ...base.stages[0],
+        bashAllowlist: ["ls*"],
+        platformAllowlist: { github: ["gh pr view*"], ado: ["az repos pr show*"] },
+      },
+      base.stages[1],
+    ],
+  })
+  const def = withPlatform.stages[0]!
+  assert.deepEqual(effectiveAllowlist(def, "github"), ["ls*", "gh pr view*"])
+  assert.deepEqual(effectiveAllowlist(def, "ado"), ["ls*", "az repos pr show*"])
+  assert.deepEqual(effectiveAllowlist(def, "other"), ["ls*"])
+})
+
+test("rejects an empty glob inside platformAllowlist", () => {
+  assert.throws(
+    () =>
+      parseManifest({
+        ...base,
+        stages: [{ ...base.stages[0], platformAllowlist: { ado: [""] } }, base.stages[1]],
+      }),
+    /platformAllowlist/,
+  )
 })

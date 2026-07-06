@@ -11,6 +11,8 @@ falling back.
 | `stageTimeoutMinutes` | `60` | Wall-clock cap on a single stage; a stage exceeding it fails the loop instead of hanging it. |
 | `watchIntervalMinutes` | `5` | Default polling cadence for `/agent-loop watch`; overridable per session via `/agent-loop watch <interval>`. **OpenCode-only** — this field is an extension the OpenCode plugin adds on top of the shared core schema (`src/config.ts`); the Claude Code plugin has no watch timer. |
 | `loops` | `{}` | Per-loop-kind sections — see below. |
+| `codePlatform` | `"github"` | Which platform PR-shaped work sources talk to: `"github"` (the `gh` CLI) or `"ado"` (Azure DevOps via the `az` CLI). Overridable per kind with `loops.<kind>.codePlatform`. See below. |
+| `ado` | unset | Azure DevOps coordinates (`organization`, `project`, optional `repository` and `selfLogin`); **required** when any effective platform is `"ado"` — the config fails fast without it. |
 | `worktreesDir` | unset | See hardening below. |
 | `worktreeSetup` | unset | Shell command run inside a freshly created worktree (e.g. `"npm ci"`). |
 | `reviewLenses` | `[]` | See hardening below. Max 5 lenses. |
@@ -43,10 +45,53 @@ config order.
 
 - **`loops.engineering.enabled`** — default `true`; set `false` to run only
   other kinds (e.g. a dedicated PR-sitter watcher).
-- **`loops.pr-sitter.enabled`** — default off; requires an authenticated `gh`.
+- **`loops.pr-sitter.enabled`** — default off; requires an authenticated
+  platform CLI (`gh`, or `az` when the platform is `ado`).
 - **`loops.pr-sitter.query`** — overrides the manifest's
   `gh pr list --search` query (default `is:open author:@me`) selecting which
-  PRs the sitter watches.
+  PRs the sitter watches. GitHub only — on ADO the sitter watches active PRs
+  authored by its own identity.
+- **`loops.<kind>.codePlatform`** — per-kind override of the global
+  `codePlatform` (e.g. run the sitter against ADO while everything else
+  defaults to GitHub).
+
+## Code platform (`codePlatform` / `ado`)
+
+The PR sitter binds to a hosted-PR work source (`workSource.type:
+"github-pr"` in its manifest); which platform that source actually talks to
+is resolved from config at wiring time — the manifest is never forked.
+
+```json
+{
+  "codePlatform": "ado",
+  "ado": {
+    "organization": "https://dev.azure.com/acme",
+    "project": "widgets",
+    "repository": "widgets-api",
+    "selfLogin": "sitter@acme.com"
+  },
+  "loops": { "pr-sitter": { "enabled": true } }
+}
+```
+
+- **`ado.organization` / `ado.project`** — required ADO coordinates.
+- **`ado.repository`** — optional; omitted → the az CLI's configured default.
+- **`ado.selfLogin`** — optional; the sitter's own login for filtering its own
+  PR comments. Needed under PAT-only auth, where `az ad signed-in-user` /
+  `az account show` can't resolve an identity — without it every comment
+  (including the sitter's own replies) re-triggers attention.
+- **Prerequisites for `"ado"`**: `az` CLI with the `azure-devops` extension
+  (`az extension add --name azure-devops`), authenticated via `az devops login`
+  or `AZURE_DEVOPS_EXT_PAT`. Auth is delegated to the CLI, exactly like `gh`.
+- **Semantics on ADO**: failing checks come from blocking branch policies
+  (`az repos pr policy list`) — a repo with no build policy never fires
+  `failing-checks`; comments come from PR threads; a negative reviewer vote
+  maps to changes-requested; `mergeStatus: conflicts` maps to merge-conflict.
+- Stage bash allowlists are platform-scoped: the manifest's
+  `platformAllowlist.github` / `.ado` globs are merged into the stage's
+  `bashAllowlist` for the resolved platform. The OpenCode agent frontmatter
+  (static YAML) carries both platforms' CLI allowlists as a deliberate
+  breadth tradeoff — the loop.json/stage-marker path stays platform-narrow.
 
 See [`loops/README.md`](../loops/README.md) for authoring new kinds and
 [`docs/design/threat-model.md`](design/threat-model.md) for the PR sitter's

@@ -42,6 +42,8 @@ const LoopStateSchema = z.object({
     artifacts: z.record(z.string(), z.string()).default({}),
     task: TaskRefSchema.optional(),
     git: GitRefSchema.optional(),
+    /** Code platform stamped by the claiming work source; absent (old snapshots) ⇒ github. */
+    platform: z.enum(["github", "ado"]).optional(),
 });
 /** Absolute path of a task's state snapshot. Pure. */
 export const statePath = (directory, tasksDir, id) => path.join(directory, tasksDir, "runs", `${id}.state.json`);

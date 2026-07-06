@@ -17,11 +17,19 @@
       "prompt": "stages/triage.md",
       "isolation": "none",
       "bashAllowlist": [
-        "gh pr view*", "gh pr checks*", "gh pr diff*", "gh api *", "gh run view*", "gh run list*",
         "git status*", "git diff*", "git log*", "git show*", "git fetch*",
         "git -C * status*", "git -C * diff*", "git -C * log*", "git -C * show*", "git -C * fetch*",
         "ls*", "cat *", "head *", "tail *", "grep *", "find *", "wc *"
-      ]
+      ],
+      "platformAllowlist": {
+        "github": [
+          "gh pr view*", "gh pr checks*", "gh pr diff*", "gh api *", "gh run view*", "gh run list*"
+        ],
+        "ado": [
+          "az repos pr show*", "az repos pr list*", "az repos pr policy list*",
+          "az pipelines runs show*", "az pipelines runs list*", "az devops invoke --area git*"
+        ]
+      }
     },
     {
       "name": "fix",
@@ -60,11 +68,18 @@
       "isolation": "worktree",
       "bashAllowlist": [
         "git push origin *", "git -C * push origin *",
-        "gh pr comment *", "gh pr view*", "gh pr checks*", "gh api *",
         "git status*", "git diff*", "git log*", "git show*",
         "git -C * status*", "git -C * diff*", "git -C * log*", "git -C * show*",
         "ls*", "cat *", "head *", "tail *", "grep *", "wc *"
-      ]
+      ],
+      "platformAllowlist": {
+        "github": [
+          "gh pr comment *", "gh pr view*", "gh pr checks*", "gh api *"
+        ],
+        "ado": [
+          "az repos pr show*", "az devops invoke --area git*"
+        ]
+      }
     }
   ],
   "transitions": {

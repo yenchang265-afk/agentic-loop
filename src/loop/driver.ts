@@ -8,6 +8,8 @@ import { registerEngineeringHooks } from "@agentic-loop/core/kinds/engineering"
 import { loadManifest } from "@agentic-loop/core/manifest/load"
 import { stageDef, type LoadedManifest } from "@agentic-loop/core/manifest/schema"
 import { combineSkips, pollOnce } from "@agentic-loop/core/scheduler/scheduler"
+import { platformFor } from "@agentic-loop/core/config"
+import { makeAdoPrSource } from "@agentic-loop/core/source/ado-pr"
 import { makeBacklogSource } from "@agentic-loop/core/source/backlog"
 import { makeGithubPrSource } from "@agentic-loop/core/source/github-pr"
 import type { TerminalOutcome, WorkSource } from "@agentic-loop/core/source/types"
@@ -151,6 +153,20 @@ const sourcesFor = (deps: Deps, config: Config): WorkSource[] =>
   enabledLoopKinds(config).flatMap((kind): WorkSource[] => {
     const loaded = manifestFor(kind)
     if (loaded.manifest.workSource.type === "github-pr") {
+      if (platformFor(config, kind) === "ado") {
+        return [
+          makeAdoPrSource({
+            $: deps.$,
+            client: deps.client,
+            directory: deps.directory,
+            tasksDir: config.tasksDir,
+            log: deps.log,
+            loaded,
+            // Config parse fails fast when platform "ado" lacks the ado section.
+            ado: config.ado!,
+          }),
+        ]
+      }
       const query = config.loops[kind]?.["query"]
       return [
         makeGithubPrSource({

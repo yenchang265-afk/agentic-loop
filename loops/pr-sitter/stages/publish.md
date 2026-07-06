@@ -9,6 +9,6 @@ Goal: {{goal}}
 {{#artifacts.verify}}Verification result:
 {{artifacts.verify}}{{/artifacts.verify}}
 ---
-{{#git}}Push the verified commits: `git push origin {{git.branch}}`. Then reply on the PR — one `gh pr comment` (or per-thread reply via `gh api`) per addressed finding, saying what changed and where. NEVER merge, close, or approve the PR; that stays a human call.{{/git}}
+{{#git}}Push the verified commits: `git push origin {{git.branch}}`. {{#platform.github}}Then reply on the PR — one `gh pr comment` (or per-thread reply via `gh api`) per addressed finding, saying what changed and where. NEVER merge, close, or approve the PR; that stays a human call.{{/platform.github}}{{#platform.ado}}Then reply on the PR — one thread reply via `az devops invoke --area git --resource pullRequestThreads …` per addressed finding, saying what changed and where. NEVER complete, abandon, or approve the PR; that stays a human call.{{/platform.ado}}{{/git}}
 ---
 {{#worktree}}{{worktree.instructions}}{{/worktree}}

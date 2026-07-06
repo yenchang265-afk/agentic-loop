@@ -31,7 +31,7 @@ export declare const ledgerPath: (directory: string, tasksDir: string, pr: numbe
 export declare const loadLedger: (client: Client, directory: string, tasksDir: string, pr: number, now: string) => Promise<PrLedger>;
 /** Write a PR's ledger. Best-effort — dedup failure must never fail a drive. */
 export declare const saveLedger: ($: Shell, directory: string, tasksDir: string, ledger: PrLedger) => Promise<void>;
-/** What a polled PR currently looks like (from `gh pr list --json`). */
+/** What a polled PR currently looks like, normalized from the platform CLI (`gh pr list --json` / `az repos pr list`). */
 export interface PrSnapshot {
     readonly number: number;
     readonly title: string;

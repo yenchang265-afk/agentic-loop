@@ -40,6 +40,8 @@ export const promptContext = (state: LoopState): TemplateContext => {
   return {
     goal: state.goal,
     iteration: String(state.iteration),
+    // Code-platform switches for prompt templates ({{#platform.ado}}…); absent platform ⇒ github.
+    platform: { github: state.platform !== "ado", ado: state.platform === "ado" },
     task: state.task ? { id: state.task.id, path: state.task.path } : undefined,
     acceptance: accept.length ? { bullets: accept.map((c) => `- ${c}`).join("\n") } : undefined,
     artifacts: { ...state.artifacts },
