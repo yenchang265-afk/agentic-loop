@@ -6,12 +6,20 @@ permission:
   webfetch: deny
   bash:
     "*": deny
+    # Both platforms' CLIs are allowed here (static frontmatter can't switch);
+    # config codePlatform decides which one the stage prompt actually uses.
     "gh pr view*": allow
     "gh pr checks*": allow
     "gh pr diff*": allow
     "gh api *": allow
     "gh run view*": allow
     "gh run list*": allow
+    "az repos pr show*": allow
+    "az repos pr list*": allow
+    "az repos pr policy list*": allow
+    "az pipelines runs show*": allow
+    "az pipelines runs list*": allow
+    "az devops invoke --area git*": allow
     "git status*": allow
     "git diff*": allow
     "git log*": allow
@@ -41,16 +49,19 @@ A goal naming the PR (number, branch, base) and why it needs attention
 
 ## Your job
 
-1. `gh pr view <n> --comments`, `gh pr checks <n>`, and `gh pr diff <n>` to see
-   the full picture. Pull the ACTUAL error out of failing check logs
-   (`gh run view --log-failed`) — "CI is red" is not a finding.
+1. Get the full picture — GitHub: `gh pr view <n> --comments`,
+   `gh pr checks <n>`, `gh pr diff <n>`; Azure DevOps: `az repos pr show --id <n>`,
+   `az repos pr policy list --id <n>`, threads via `az devops invoke --area git
+   --resource pullRequestThreads …`. Pull the ACTUAL error out of failing check
+   logs (`gh run view --log-failed` / `az pipelines runs show`) — "CI is red"
+   is not a finding.
 2. Emit a **structured findings list**: one numbered entry per unanswered
    review comment (quote it, name the file/line it points at), per failing
    check (name + the underlying error), and the conflict state if any.
 3. Record the verdict via the `loop_verdict` tool with `stage: "triage"`:
    - **PASS** — actionable work exists; your findings are the fix stage's work order.
    - **FAIL** — nothing needs doing (checks green, comments answered, no conflict).
-   - **ERROR** — the PR could not be inspected (gh/network failure).
+   - **ERROR** — the PR could not be inspected (gh/az/network failure).
 
 ## Rules
 

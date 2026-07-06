@@ -11,6 +11,12 @@ import type { Config } from "./loop/state.js";
  * each host's extension of `ConfigSchema` — see the generic `parseConfigWith`/
  * `loadConfigWith` loaders below.
  */
+/** Which code-management platform PR-shaped work sources talk to. */
+export declare const CodePlatformSchema: z.ZodEnum<{
+    github: "github";
+    ado: "ado";
+}>;
+export type CodePlatform = z.infer<typeof CodePlatformSchema>;
 export declare const ConfigSchema: z.ZodObject<{
     maxIterations: z.ZodDefault<z.ZodNumber>;
     tasksDir: z.ZodDefault<z.ZodString>;
@@ -20,13 +26,30 @@ export declare const ConfigSchema: z.ZodObject<{
     reviewLenses: z.ZodDefault<z.ZodArray<z.ZodString>>;
     loops: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;
+        /** Per-kind override of the global `codePlatform`. */
+        codePlatform: z.ZodOptional<z.ZodEnum<{
+            github: "github";
+            ado: "ado";
+        }>>;
     }, z.core.$loose>>>;
+    codePlatform: z.ZodDefault<z.ZodEnum<{
+        github: "github";
+        ado: "ado";
+    }>>;
+    ado: z.ZodOptional<z.ZodObject<{
+        organization: z.ZodString;
+        project: z.ZodString;
+        repository: z.ZodOptional<z.ZodString>;
+        selfLogin: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
 }, z.core.$strip>;
 /**
  * The loop kinds this config activates, in claim-priority order: engineering
  * first (unless disabled), then any opted-in kinds in config order. Pure.
  */
 export declare const enabledLoopKinds: (config: Config) => string[];
+/** The code platform a loop kind's PR source talks to: per-kind override, else the global default. Pure. */
+export declare const platformFor: (config: Config, kind: string) => CodePlatform;
 export declare const DEFAULT_CONFIG: Config;
 /** A zod schema whose parse produces some host's config shape. */
 type ConfigSchemaLike<T> = {

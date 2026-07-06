@@ -42,8 +42,11 @@ export declare const StageDefSchema: z.ZodObject<{
     }>>;
     timeoutMinutes: z.ZodOptional<z.ZodNumber>;
     bashAllowlist: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    platformAllowlist: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>>;
 }, z.core.$strip>;
 export type StageDef = z.infer<typeof StageDefSchema>;
+/** The bash globs a stage may run on the given code platform. Pure. */
+export declare const effectiveAllowlist: (def: StageDef, platform: string) => string[];
 declare const TransitionSchema: z.ZodObject<{
     onDone: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
         kind: z.ZodLiteral<"fire">;
@@ -175,6 +178,7 @@ export declare const LoopManifestSchema: z.ZodObject<{
         }>>;
         timeoutMinutes: z.ZodOptional<z.ZodNumber>;
         bashAllowlist: z.ZodDefault<z.ZodArray<z.ZodString>>;
+        platformAllowlist: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>>;
     }, z.core.$strip>>;
     transitions: z.ZodRecord<z.ZodString, z.ZodObject<{
         onDone: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{

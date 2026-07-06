@@ -198,7 +198,17 @@ push to any branch, comment anywhere, sometimes merge.
 - **Residual:** the enforcement rides the stage allowlists and agent
   permissions, not the token itself. For hard containment, run the watcher
   with a fine-grained PAT scoped to contents:write + pull-requests:write on
-  the repos it sits on, and protect release branches on the forge.
+  the repos it sits on, and protect release branches on the forge. The same
+  holds on Azure DevOps (`codePlatform: "ado"`): the sitter uses only push +
+  thread replies (`az devops invoke --area git`), completing/abandoning a PR
+  is excluded everywhere, and a scoped `AZURE_DEVOPS_EXT_PAT` (Code
+  read/write) is the hard-containment equivalent. Two allowlist-breadth
+  notes: the manifest's stage allowlists are platform-scoped
+  (`platformAllowlist.github`/`.ado` merged at stage-marker time, so only the
+  resolved platform's CLI is admitted), but the OpenCode agent frontmatter is
+  static YAML and deliberately carries **both** platforms' globs; and the
+  `az devops invoke --area git*` glob is prefix matching — wider than one
+  REST resource, though still confined to the git area.
 
 ### T9. Ledger tampering replays or suppresses work
 

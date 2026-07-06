@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { DEFAULT_CONFIG, enabledLoopKinds, parseConfig } from "./config.js"
+import { DEFAULT_CONFIG, enabledLoopKinds, parseConfig, platformFor } from "./config.js"
 
 test("defaults leave worktree isolation off and review single-pass", () => {
   assert.equal(DEFAULT_CONFIG.worktreesDir, undefined)
@@ -64,4 +64,47 @@ test("other loop kinds are opt-in; engineering can be disabled", () => {
 test("kind-specific knobs ride along in the loops section", () => {
   const c = parseConfig({ loops: { "pr-sitter": { enabled: true, query: "is:open author:@me" } } })
   assert.equal(c.loops["pr-sitter"]?.["query"], "is:open author:@me")
+})
+
+test("codePlatform defaults to github and rejects unknown platforms", () => {
+  assert.equal(DEFAULT_CONFIG.codePlatform, "github")
+  assert.equal(platformFor(DEFAULT_CONFIG, "pr-sitter"), "github")
+  assert.throws(() => parseConfig({ codePlatform: "gitlab" }), /Invalid .*codePlatform/)
+})
+
+test("global codePlatform ado requires the ado section", () => {
+  assert.throws(() => parseConfig({ codePlatform: "ado" }), /requires an 'ado' section/)
+  const c = parseConfig({
+    codePlatform: "ado",
+    ado: { organization: "https://dev.azure.com/acme", project: "widgets" },
+  })
+  assert.equal(c.codePlatform, "ado")
+  assert.equal(c.ado?.project, "widgets")
+  assert.equal(platformFor(c, "pr-sitter"), "ado")
+})
+
+test("per-loop codePlatform overrides the global default and also requires the ado section", () => {
+  assert.throws(
+    () => parseConfig({ loops: { "pr-sitter": { enabled: true, codePlatform: "ado" } } }),
+    /requires an 'ado' section/,
+  )
+  const c = parseConfig({
+    loops: { "pr-sitter": { enabled: true, codePlatform: "ado" } },
+    ado: { organization: "https://dev.azure.com/acme", project: "widgets" },
+  })
+  assert.equal(platformFor(c, "pr-sitter"), "ado")
+  assert.equal(platformFor(c, "engineering"), "github")
+  const back = parseConfig({
+    codePlatform: "ado",
+    ado: { organization: "https://dev.azure.com/acme", project: "widgets" },
+    loops: { "pr-sitter": { enabled: true, codePlatform: "github" } },
+  })
+  assert.equal(platformFor(back, "pr-sitter"), "github")
+})
+
+test("ado section fields are validated", () => {
+  assert.throws(
+    () => parseConfig({ codePlatform: "ado", ado: { organization: "", project: "p" } }),
+    /Invalid .*ado/,
+  )
 })

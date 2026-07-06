@@ -1,6 +1,6 @@
 ---
 name: loop-pr-publish
-description: Publisher for the PR sitter's PUBLISH stage. Pushes the verified commits to the PR branch and replies to each addressed review comment via gh. The only stage allowed to push; never merges, closes, or approves. A PreToolUse allowlist constrains its bash surface.
+description: Publisher for the PR sitter's PUBLISH stage. Pushes the verified commits to the PR branch and replies to each addressed review comment via the platform CLI (gh on GitHub, az on Azure DevOps). The only stage allowed to push; never merges, closes, or approves. A PreToolUse allowlist constrains its bash surface.
 tools: Read, Grep, Glob, Bash
 ---
 
@@ -16,13 +16,17 @@ The goal (which PR), triage's findings, fix's summary, and verify's result.
 
 1. `git push origin <branch>` (never `--force`; if the push is rejected,
    report it — a human moved the branch).
-2. Reply on the PR: one `gh pr comment` (or per-thread reply via `gh api`)
-   per addressed finding — what changed, where, and the commit. Findings the
-   fix deliberately declined get a polite explanation instead.
+2. Reply on the PR: one comment per addressed finding — what changed, where,
+   and the commit. GitHub: `gh pr comment` (or per-thread reply via `gh api`);
+   Azure DevOps: a thread reply via `az devops invoke --area git --resource
+   pullRequestThreads …`. Findings the fix deliberately declined get a polite
+   explanation instead.
 3. Summarize what was pushed and which comments were answered.
 
 ## Rules
 
-- **Never** merge, close, approve, or request review — those are human calls.
+- **Never** merge, complete, abandon, close, approve, or request review —
+  those are human calls (`gh pr merge` and `az repos pr update --status
+  completed` are equally forbidden).
 - No file edits; the code is already committed and verified.
 - Keep replies factual and minimal; no boilerplate.

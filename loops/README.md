@@ -104,11 +104,16 @@ kind gets isolation discipline for free by including it).
   `tasksDir` (engineering). Pools are walked in priority order; claims are
   atomic `.claims/` mkdir markers; `claimPredicate` names a registered
   predicate (e.g. `engineering.isClaimable`).
-- **`github-pr`** — open PRs matching a `gh pr list --search` query needing
-  attention per the `triggers` list (`failing-checks`, `changes-requested`,
-  `new-comments`, `merge-conflict`), deduped by the per-PR ledger under
-  `<tasksDir>/runs/pr-sitter/`. Drafts and fork PRs are skipped; the PR's
-  head is fetched into a local branch at claim so isolation reuses it.
+- **`github-pr`** — open hosted PRs needing attention per the `triggers` list
+  (`failing-checks`, `changes-requested`, `new-comments`, `merge-conflict`),
+  deduped by the per-PR ledger under `<tasksDir>/runs/pr-sitter/`. Drafts and
+  fork PRs are skipped; the PR's head is fetched into a local branch at claim
+  so isolation reuses it. The concrete platform is resolved from config
+  `codePlatform` at wiring time: GitHub polls `gh pr list --search <query>`;
+  Azure DevOps polls `az repos pr list` (the sitter's own active PRs) with
+  failing checks read from blocking branch policies — a repo without a build
+  policy never fires `failing-checks`. Stage `platformAllowlist` entries merge
+  into `bashAllowlist` for the resolved platform.
 
 ## The TS escape hatch
 

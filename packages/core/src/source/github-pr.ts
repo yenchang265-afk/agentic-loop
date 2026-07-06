@@ -1,9 +1,9 @@
 import { z } from "zod"
 import type { Client, Log, Shell } from "../host.js"
 import type { LoadedManifest } from "../manifest/schema.js"
-import type { LoopState } from "../loop/state.js"
 import { attentionTriggers, loadLedger, saveLedger, type PrSnapshot, type PrTrigger } from "./ledger.js"
-import type { ClaimSkipReason, TerminalOutcome, WorkItem, WorkSource } from "./types.js"
+import { fetchHead, makeClaimMarkers, prWorkItem, terminalLedgerUpdate } from "./pr-shared.js"
+import type { ClaimSkipReason, TerminalOutcome, WorkSource } from "./types.js"
 
 /**
  * The GitHub-PR work source (the PR sitter's): claimable units of work are
@@ -54,22 +54,6 @@ interface GithubPrDeps {
   readonly now?: () => string
 }
 
-const triggerSummary = (triggers: readonly PrTrigger[], snapshot: PrSnapshot): string =>
-  triggers
-    .map((t) => {
-      switch (t) {
-        case "failing-checks":
-          return `failing checks: ${snapshot.failingChecks.join(", ")}`
-        case "changes-requested":
-          return "review requested changes"
-        case "new-comments":
-          return `${snapshot.newComments.length} unanswered comment(s)`
-        case "merge-conflict":
-          return "merge conflict with the base branch"
-      }
-    })
-    .join("; ")
-
 export const makeGithubPrSource = (deps: GithubPrDeps): WorkSource => {
   const { $, client, directory, tasksDir, log, loaded } = deps
   const binding = loaded.manifest.workSource
@@ -87,53 +71,7 @@ export const makeGithubPrSource = (deps: GithubPrDeps): WorkSource => {
     return viewerLogin
   }
 
-  const claimsDir = `${directory}/${tasksDir}/runs/pr-sitter/.claims`
-  const claimMarker = async (pr: number): Promise<boolean> => {
-    await $`mkdir -p ${claimsDir}`.quiet().nothrow()
-    const out = await $`mkdir ${`${claimsDir}/pr-${pr}`}`.quiet().nothrow()
-    return out.exitCode === 0
-  }
-  const releaseMarker = async (pr: number): Promise<void> => {
-    await $`rmdir ${`${claimsDir}/pr-${pr}`}`.quiet().nothrow()
-  }
-
-  /** Fetch the PR head into a local branch ref so isolation can reuse it. */
-  const fetchHead = async (headRef: string): Promise<boolean> => {
-    const out = await $`git -C ${directory} fetch origin ${`+refs/heads/${headRef}:refs/heads/${headRef}`}`
-      .quiet()
-      .nothrow()
-    if (out.exitCode !== 0) {
-      // The branch may be checked out somewhere (fetch refuses to move it) —
-      // fall back to a plain fetch so at least the remote ref is fresh.
-      const plain = await $`git -C ${directory} fetch origin ${headRef}`.quiet().nothrow()
-      return plain.exitCode === 0
-    }
-    return true
-  }
-
-  const item = (snapshot: PrSnapshot, triggers: readonly PrTrigger[]): WorkItem => {
-    const goal =
-      `PR #${snapshot.number} "${snapshot.title}" — address what needs attention and get it back to green ` +
-      `(${triggerSummary(triggers, snapshot)}). Base: ${snapshot.baseRefName}, head: ${snapshot.headRefName}. ` +
-      `Never merge the PR; that stays a human call.`
-    const state: LoopState = {
-      kind: loaded.manifest.kind,
-      goal,
-      stage: loaded.manifest.stages[0]?.name ?? "triage",
-      iteration: 0,
-      artifacts: {},
-      git: { base: snapshot.baseRefName, branch: snapshot.headRefName },
-    }
-    return {
-      id: `pr-${snapshot.number}`,
-      loopKind: loaded.manifest.kind,
-      title: `PR #${snapshot.number}: ${snapshot.title}`,
-      entryStage: state.stage,
-      state,
-      claimMessage: `Watch: claimed PR #${snapshot.number} — ${triggerSummary(triggers, snapshot)}`,
-      ref: { snapshot, triggers },
-    }
-  }
+  const markers = makeClaimMarkers($, directory, tasksDir)
 
   return {
     loopKind: loaded.manifest.kind,
@@ -185,16 +123,16 @@ export const makeGithubPrSource = (deps: GithubPrDeps): WorkSource => {
         }
         const triggers = attentionTriggers(snapshot, ledger, binding.triggers)
         if (triggers.length === 0) continue
-        if (!(await claimMarker(pr.number))) {
+        if (!(await markers.claim(pr.number))) {
           heldIds.push(`pr-${pr.number}`)
           continue
         }
-        if (!(await fetchHead(pr.headRefName))) {
+        if (!(await fetchHead($, directory, pr.headRefName))) {
           await log("warn", `pr-sitter: could not fetch ${pr.headRefName} for PR #${pr.number} — skipping`)
-          await releaseMarker(pr.number)
+          await markers.release(pr.number)
           continue
         }
-        return { item: item(snapshot, triggers), skip: null }
+        return { item: prWorkItem(loaded, "github", snapshot, triggers), skip: null }
       }
       if (heldIds.length) {
         return {
@@ -210,7 +148,7 @@ export const makeGithubPrSource = (deps: GithubPrDeps): WorkSource => {
 
     async release(work) {
       const { snapshot } = work.ref as { snapshot: PrSnapshot }
-      await releaseMarker(snapshot.number)
+      await markers.release(snapshot.number)
     },
 
     async onTerminal(work, outcome: TerminalOutcome) {
@@ -238,27 +176,9 @@ export const makeGithubPrSource = (deps: GithubPrDeps): WorkSource => {
           /* keep snapshot values */
         }
       }
-      const updated =
-        outcome.kind === "done"
-          ? {
-              ...ledger,
-              headShaHandled: head,
-              ...(lastCommentAt ? { lastCommentAtHandled: lastCommentAt } : {}),
-              ...(triggers.includes("merge-conflict")
-                ? { conflictAttempt: { headSha: head, baseSha: "" } }
-                : {}),
-              updatedAt: now(),
-            }
-          : {
-              ...ledger,
-              failedAttempts: [
-                ...ledger.failedAttempts,
-                { headSha: snapshot.headRefOid, trigger: triggers.join("+") || "unknown", at: now() },
-              ],
-              updatedAt: now(),
-            }
+      const updated = terminalLedgerUpdate(ledger, outcome, triggers, snapshot.headRefOid, head, lastCommentAt, now())
       await saveLedger($, directory, tasksDir, updated)
-      await releaseMarker(snapshot.number)
+      await markers.release(snapshot.number)
     },
   }
 }
