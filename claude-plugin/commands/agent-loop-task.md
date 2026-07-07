@@ -1,6 +1,6 @@
 ---
-description: Author a backlog task by interviewing the user, approve it into the queue, gate its plan, or send it back for re-planning
-argument-hint: new <idea> | approve <id> | approve-plan <id> | replan <id> [reason]
+description: Author a backlog task by interviewing the user, reshape a draft, approve it into the queue, gate its plan, or send it back for re-planning
+argument-hint: new <idea> | retask <id> [note] | approve <id> | approve-plan <id> | replan <id> [reason]
 ---
 
 Task authoring and the human gates for the agentic loop — the loop itself
@@ -33,6 +33,22 @@ Dispatch:
     ask the user for the Jira issue key / ADO work item id to put in
     `tracker.key`. Pairing is optional — if they don't have one, leave
     `tracker` off; the task queues and runs unpaired.
+- **`retask <id> [note]`** — reshape a `draft/` task before you approve it,
+  when the drafted goal or acceptance came out wrong. YOU (the main agent) run
+  the interview, same as `new` — subagents cannot converse with the user:
+  1. Resolve `<id>` in `docs/tasks/draft/` **only**. If it isn't there (it's
+     already queued/planned, or missing), refuse: "only drafts can be
+     re-tasked — a parked plan uses `/agent-loop-task replan <id>`" and stop.
+  2. Read the existing draft and show its current title, priority, acceptance,
+     body (and any `tracker` block) to the user.
+  3. **Always** invoke the `interview-me` skill to reshape it, seeding it with
+     the optional `note` and the current draft. Re-confirm the goal and 2–5
+     testable acceptance criteria, then get an explicit "looks right".
+  4. Spawn the **`loop-plan-author`** subagent (Task tool) in **`retask` mode**
+     with the id and the confirmed title/priority/acceptance/body (carry
+     forward the `tracker` block if the draft had one) to rewrite
+     `docs/tasks/draft/<id>.md` **in place** — the id/filename never changes.
+     Still no plan. The next step is unchanged: `/agent-loop-task approve <id>`.
 - **`approve <id>`** — the task gate. Call
   `mcp__agentic-loop__loop_task_approve({id})` — it moves the reviewed draft
   to `docs/tasks/queued/` (audited note + commit). No plan is required — the
@@ -50,10 +66,10 @@ Dispatch:
   `queued/` with an audited rejection note; the next PLAN pass must address
   it. **Spawn nothing and write nothing** — report the outcome and stop.
 
-The flow: `new` (interview → draft) → human reviews the draft → `approve
-<id>` queues it → `/agent-loop task <id>` (or `claim`) plans it and parks the
-plan in `plan-review/` → human reviews the plan → `approve-plan <id>` (or
-`replan <id> <why>`) → `/agent-loop` builds it.
+The flow: `new` (interview → draft) → human reviews the draft (reshape it with
+`retask <id>` if it's off) → `approve <id>` queues it → `/agent-loop task <id>`
+(or `claim`) plans it and parks the plan in `plan-review/` → human reviews the
+plan → `approve-plan <id>` (or `replan <id> <why>`) → `/agent-loop` builds it.
 
 These verbs are the **deferred** path — approving a task that parked earlier.
 When a loop you are driving hits a gate live (a plan just parked, or a build

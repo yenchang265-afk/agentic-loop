@@ -9,8 +9,9 @@ description: Explains the automatic agentic loop driven by the OpenCode `/agent-
 
 The lifecycle is split into two commands. **`/agent-loop-task`** is the
 authoring-and-gates side: its agent interviews you into a planless draft
-(`new <idea>`), `approve <id>` is the task gate that parks it in `queued/`,
-and `approve-plan <id>` / `replan <id>` are the plan gate. **`/agent-loop`** is
+(`new <idea>`), `retask <id>` re-interviews and reshapes a draft in place,
+`approve <id>` is the task gate that parks it in `queued/`, and
+`approve-plan <id>` / `replan <id>` are the plan gate. **`/agent-loop`** is
 the loop side: it plans a queued task **right before execution** (so plans
 don't rot while tasks sit parked) and drives BUILD, VERIFY, REVIEW as one
 automatic pipeline over a plan-approved task. The PLAN stage never blocks on
@@ -54,6 +55,7 @@ directly — ship the diff yourself.)
 ```
 authoring + gates (the /agent-loop-task command, interactive):
   /agent-loop-task new <idea>      ──▶ interview ──▶ planless draft in draft/
+  /agent-loop-task retask <id> [note] ▶ re-interview ──▶ draft rewritten in place (same id)
   /agent-loop-task approve <id>    ──▶ parked in queued/            ← the task gate
   /agent-loop-task approve-plan <id> ▶ plan-review/ → in-progress/  ← the plan gate
   /agent-loop-task replan <id> [why] ▶ back to queued/ (audited rejection)

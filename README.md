@@ -25,8 +25,9 @@ Authoring a new kind is a `loop.json` + stage prompts away — see
 
 Authoring and execution are two commands. **`/agent-loop-task`** interviews
 you into a draft task (`new <idea>` — always, so the goal and testable
-acceptance criteria come from you, not a guess), `approve <id>` queues the
-reviewed draft, and `approve-plan <id>` / `replan <id>` are the plan gate.
+acceptance criteria come from you, not a guess), `retask <id>` reshapes a draft
+you're not happy with, `approve <id>` queues the reviewed draft, and
+`approve-plan <id>` / `replan <id>` are the plan gate.
 **`/agent-loop`** plans a queued task **right before execution** — so plans
 don't rot while tasks sit parked — and builds plan-approved ones:
 
@@ -102,9 +103,9 @@ Idempotent — re-run after `git pull` for updates.
 
 ## Commands
 
-- `/agent-loop-task new <idea>` · `approve <id>` · `approve-plan <id>` ·
-  `replan <id> [why]` — interview → draft → task gate → (the loop plans) →
-  plan gate
+- `/agent-loop-task new <idea>` · `retask <id> [note]` · `approve <id>` ·
+  `approve-plan <id>` · `replan <id> [why]` — interview → draft (reshape with
+  `retask`) → task gate → (the loop plans) → plan gate
 - `/agent-loop task <id>` · `watch` · `ship <id>` · `recover <id>` · `stop` · `status` —
   plan the queue and execute the plan-approved tasks; `watch` also polls every
   other enabled loop kind's work source (e.g. the PR sitter's)

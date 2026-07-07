@@ -11,8 +11,9 @@ guide covers the OpenCode plugin. It provides:
 1. **The automatic agentic loop** (`/agent-loop-task` + `/agent-loop`) — a real plugin
    (`src/index.ts` → `src/loop/`, agents/commands under `.opencode/`) that
    splits the lifecycle into two commands: `/agent-loop-task` interviews you
-   into a planless draft task (`new <idea>` — always), `approve <id>` queues
-   it, and `approve-plan <id>` / `replan <id>` are the plan gate;
+   into a planless draft task (`new <idea>` — always), `retask <id>` reshapes
+   a draft in place, `approve <id>` queues it, and `approve-plan <id>` /
+   `replan <id>` are the plan gate;
    `/agent-loop` claims work (`task <id>`, or a `watch [interval]` worker
    session polling on idle events plus a timer), plans a queued task right
    before execution (PLAN parks the plan in `plan-review/` for your gate and
