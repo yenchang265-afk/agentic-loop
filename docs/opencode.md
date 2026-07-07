@@ -38,6 +38,10 @@ Authoring + gates (`/agent-loop-task`):
 
 - `/agent-loop-task new <idea>` — interview you (always — at minimum a
   restate-and-confirm) into a **planless draft** in `docs/tasks/draft/`
+- `/agent-loop-task retask <id> [note]` — reshape a `draft/` task before you
+  approve it: re-interview you (seeded by the optional note) and rewrite the
+  same draft in place — same id, no plan. Drafts only (a parked plan uses
+  `replan`)
 - `/agent-loop-task approve <id>` — the task gate: park the reviewed draft in
   `docs/tasks/queued/` (audited + committed); the loop plans it on claim
 - `/agent-loop-task approve-plan <id>` — the plan gate: validate the parked

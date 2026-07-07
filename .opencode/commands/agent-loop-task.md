@@ -1,6 +1,6 @@
 ---
-description: Author a backlog task by interviewing you, approve it into the queue, gate its plan, or send it back for re-planning
-argument-hint: new <idea> | approve <id> | approve-plan <id> | replan <id> [reason]
+description: Author a backlog task by interviewing you, reshape a draft, approve it into the queue, gate its plan, or send it back for re-planning
+argument-hint: new <idea> | retask <id> [note] | approve <id> | approve-plan <id> | replan <id> [reason]
 ---
 
 Task authoring and the human gates for the agentic loop — the loop itself
@@ -48,6 +48,22 @@ Dispatch:
        un-approved draft is inert, so the loop never claims it. Close it by
        hand with the loop move tool (to `abandoned/` or `completed/`) once
        every child has shipped.
+- **`retask <id> [note]`** — reshape a `draft/` task before you approve it,
+  when the drafted goal or acceptance came out wrong. YOU (the current agent)
+  run the interview, same as `new` — subagents cannot converse with the user:
+  1. Resolve `<id>` in `docs/tasks/draft/` **only**. If it isn't there (it's
+     already queued/planned, or missing), refuse: "only drafts can be
+     re-tasked — a parked plan uses `/agent-loop-task replan <id>`" and stop.
+  2. Read the existing draft and show its current title, priority, acceptance,
+     body (and any `tracker` block) to the user.
+  3. **Always** invoke the `interview-me` skill to reshape it, seeding it with
+     the optional `note` and the current draft. Re-confirm the goal and 2–5
+     testable acceptance criteria, then get an explicit "looks right".
+  4. Invoke the **`loop-plan-author`** subagent in **`retask` mode** with the
+     id and the confirmed title/priority/acceptance/body (carry forward the
+     `tracker` block if the draft had one) to rewrite `docs/tasks/draft/<id>.md`
+     **in place** — the id/filename never changes. Still no plan. The next step
+     is unchanged: `/agent-loop-task approve <id>`.
 - **`approve <id>`** — the task gate. The plugin handles this
   deterministically **before** this turn starts: it moves the reviewed draft
   to `docs/tasks/queued/` (audited note + commit). No plan is required — the
@@ -64,10 +80,11 @@ Dispatch:
   reason; the next PLAN pass must address it. **Invoke nothing, write
   nothing** — report the outcome and stop.
 
-The flow: `new` (interview → draft) → human reviews the draft → `approve
-<id>` parks it in the queue → `/agent-loop` (task or watch) plans it and parks
-the plan in `plan-review/` → human reviews the plan → `approve-plan <id>`
-(or `replan <id> <why>`) → `/agent-loop` builds it.
+The flow: `new` (interview → draft) → human reviews the draft (reshape it with
+`retask <id>` if it's off) → `approve <id>` parks it in the queue →
+`/agent-loop` (task or watch) plans it and parks the plan in `plan-review/` →
+human reviews the plan → `approve-plan <id>` (or `replan <id> <why>`) →
+`/agent-loop` builds it.
 
 Never move, create, or delete files under `docs/tasks/` yourself — no bash
 `mv`/`mkdir`/`rm`, no direct writes into status folders (the plugin blocks

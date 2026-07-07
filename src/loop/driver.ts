@@ -1004,9 +1004,10 @@ export type TaskCmdArgs = { mode: "approve" | "approve-plan" | "replan"; id: str
 /**
  * Classify `/agent-loop-task` arguments. `approve <id>`, `approve-plan <id>`,
  * and `replan <id> [reason]` are fully deterministic plugin work; everything
- * else (including `new <idea>`) passes through untouched. `approve-plan` is
- * matched before `approve` (prefix collision). An empty id is preserved so
- * the caller can toast a usage hint.
+ * else (including `new <idea>` and `retask <id> [note]`) passes through
+ * untouched — those two are agent-authored (interview + draft write), not
+ * plugin moves. `approve-plan` is matched before `approve` (prefix collision).
+ * An empty id is preserved so the caller can toast a usage hint.
  */
 export const parseTaskArgs = (args: string): TaskCmdArgs => {
   const arg = args.trim()
@@ -1027,9 +1028,9 @@ export const parseTaskArgs = (args: string): TaskCmdArgs => {
 
 /**
  * Handle a `/agent-loop-task ...` command. Three subcommands are deterministic
- * plugin work (the agent writes nothing); `new <idea>` passes through
- * untouched — its authoring (interview, draft) is the agent's job, see
- * `.opencode/commands/agent-loop-task.md`:
+ * plugin work (the agent writes nothing); `new <idea>` and `retask <id>` pass
+ * through untouched — their authoring (interview, draft write / rewrite) is the
+ * agent's job, see `.opencode/commands/agent-loop-task.md`:
  *
  * - `approve <id>` — the task gate: park a reviewed `draft/` task in
  *   `queued/`. No plan is required (or expected) — planning happens inside

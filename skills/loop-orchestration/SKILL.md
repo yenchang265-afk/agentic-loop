@@ -9,8 +9,9 @@ description: Explains the automatic agentic loop driven by the OpenCode `/agent-
 
 The lifecycle is split into two commands. **`/agent-loop-task`** is the
 authoring-and-gates side: its agent interviews you into a planless draft
-(`new <idea>`), `approve <id>` is the task gate that parks it in `queued/`,
-and `approve-plan <id>` / `replan <id>` are the plan gate. **`/agent-loop`** is
+(`new <idea>`), `retask <id>` re-interviews and reshapes a draft in place,
+`approve <id>` is the task gate that parks it in `queued/`, and
+`approve-plan <id>` / `replan <id>` are the plan gate. **`/agent-loop`** is
 the loop side: it plans a queued task **right before execution** (so plans
 don't rot while tasks sit parked) and drives BUILD, VERIFY, REVIEW as one
 automatic pipeline over a plan-approved task. The PLAN stage never blocks on
@@ -54,6 +55,7 @@ directly — ship the diff yourself.)
 ```
 authoring + gates (the /agent-loop-task command, interactive):
   /agent-loop-task new <idea>      ──▶ interview ──▶ planless draft in draft/
+  /agent-loop-task retask <id> [note] ▶ re-interview ──▶ draft rewritten in place (same id)
   /agent-loop-task approve <id>    ──▶ parked in queued/            ← the task gate
   /agent-loop-task approve-plan <id> ▶ plan-review/ → in-progress/  ← the plan gate
   /agent-loop-task replan <id> [why] ▶ back to queued/ (audited rejection)
@@ -78,14 +80,15 @@ the loop (the /agent-loop command, unattended — never blocks on a human):
 
 ## Process
 
-1. `/agent-loop-task new <idea>` — the `loop-plan-author` agent **always
+1. `/agent-loop-task new <idea>` — the command's own agent **always
    interviews you** (a restate-and-confirm at minimum, a full interview when
-   the idea is vague) to pin down the goal and testable acceptance criteria,
-   confirms the draft with you, and writes a planless draft to `draft/`. A
-   **heavy idea is split into sibling drafts** — vertical, independently
-   shippable slices ordered by `priority`, plus one `type: epic` tracking
-   draft that is never approved. See `task-backlog-management` → "Slicing a
-   heavy idea".
+   the idea is vague) to pin down the goal and testable acceptance criteria and
+   confirms the draft with you; subagents can't converse, so it then hands the
+   confirmed intent to the `loop-plan-author` subagent, which writes the
+   planless draft to `draft/`. A **heavy idea is split into sibling drafts** —
+   vertical, independently shippable slices ordered by `priority`, plus one
+   `type: epic` tracking draft that is never approved. See
+   `task-backlog-management` → "Slicing a heavy idea".
 2. `/agent-loop-task approve <id>` — after you review the draft — the plugin
    moves it to `queued/` with an audited "Task approved" note and commits.
    No plan yet, by design.
@@ -126,12 +129,13 @@ the loop (the /agent-loop command, unattended — never blocks on a human):
 
 ## The gates are a command, planning and execution are the loop
 
-- **Interview (always, inside `/agent-loop-task new`).** The author agent runs
-  the `interview-me` skill live with you on every `new` — a single
+- **Interview (always, inside `/agent-loop-task new`).** The command's own
+  agent runs the `interview-me` skill live with you on every `new` — a single
   restate-and-confirm when the idea already carries a clear goal and testable
   criteria, one question at a time until there's an explicit yes on a
   restated intent when it doesn't. It also confirms the drafted task before
-  writing anything.
+  handing it to the `loop-plan-author` subagent to write (subagents can't
+  converse with you).
 - **Two approvals (always, `/agent-loop-task`).** `approve <id>` gates the
   task (scope + acceptance) into `queued/`; `approve-plan <id>` gates the
   loop-written plan into `in-progress/`. Nothing gets built until a human

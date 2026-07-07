@@ -29,8 +29,9 @@ execution (PLAN stage) and parked in `plan-review/` for a human gate,
 instead of being authored up front by a planning command.
 
 - **Command rename** — `/agent-loop-plan` is gone; task authoring and both
-  human gates live in `/agent-loop-task` (`new <idea>` · `approve <id>` ·
-  `approve-plan <id>` · `replan <id> [reason]`). Re-run `./install.sh` after
+  human gates live in `/agent-loop-task` (`new <idea>` · `retask <id> [note]` ·
+  `approve <id>` · `approve-plan <id>` · `replan <id> [reason]`). Re-run
+  `./install.sh` after
   updating; a previously installed `commands/agent-loop-plan.md` symlink now
   dangles — delete it if it lingers.
 - **Folder migration** — `in-planning/` was replaced by `queued/` (task

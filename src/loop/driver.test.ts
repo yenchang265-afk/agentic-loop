@@ -117,8 +117,10 @@ test("a bare subcommand keeps an empty id for the usage toast", () => {
   assert.deepEqual(parseTaskArgs("approve-plan   "), { mode: "approve-plan", id: "" })
 })
 
-test("new and free text pass through", () => {
+test("new, retask, and free text pass through", () => {
   assert.deepEqual(parseTaskArgs("new add rate limiting"), { mode: "passthrough" })
+  // retask is agent-authored (re-interview + rewrite the draft), not a deterministic move.
+  assert.deepEqual(parseTaskArgs("retask my-task tighten acceptance"), { mode: "passthrough" })
   assert.deepEqual(parseTaskArgs(""), { mode: "passthrough" })
   assert.deepEqual(parseTaskArgs("approver thing"), { mode: "passthrough" })
 })

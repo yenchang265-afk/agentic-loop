@@ -27,8 +27,8 @@ who moves what) is the engineering backlog, unchanged.
 - Use before running `/agent-loop-task approve <id>`, `/agent-loop-task
   approve-plan <id>`, `/agent-loop-task replan <id>`, or `/agent-loop task <id>` —
   all read from this backlog.
-- Use when reviewing what `/agent-loop-task new` filed, or when
-  moving a task to `abandoned/`.
+- Use when reviewing what `/agent-loop-task new` filed, reshaping a draft with
+  `/agent-loop-task retask <id>`, or moving a task to `abandoned/`.
 
 ## The folders
 
@@ -156,6 +156,7 @@ scope judgement, not a measured limit.
 | Transition | Who | When |
 |------------|-----|------|
 | into `draft/` | `/agent-loop-task new` or you | an interviewed (or hand-written) planless stub |
+| stays `draft/` (rewritten in place) | **`/agent-loop-task retask <id> [note]`** | reshape a draft before approval — re-interview, overwrite the same file, keep the id; no folder move, drafts only |
 | `draft → queued` | **`/agent-loop-task approve <id>`** | the human task gate — scope + acceptance approved, planless by design; audited note + commit |
 | `queued → plan-review` | driver | the loop's PLAN stage wrote the plan and parked it for review; audited note + commit |
 | `plan-review → in-progress` | **`/agent-loop-task approve-plan <id>`** | the human plan gate; audited note + commit |
