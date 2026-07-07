@@ -89,6 +89,10 @@ npm install             # npm workspaces — also builds @agentic-loop/core (pre
 
 Idempotent — re-run after `git pull` for updates.
 
+Some capabilities need an extra CLI or MCP server (e.g. the PR sitter on Azure
+DevOps, or the browser-testing skill) — see
+[docs/prerequisites.md](docs/prerequisites.md).
+
 ## Commands
 
 - `/agent-loop-task new <idea>` · `approve <id>` · `approve-plan <id>` ·
@@ -114,6 +118,8 @@ skills library via [AGENTS.md](AGENTS.md).
   install detail
 - [`claude-plugin/README.md`](claude-plugin/README.md) — Claude Code install,
   commands, known limitations
+- [docs/prerequisites.md](docs/prerequisites.md) — what each capability, loop
+  kind, and skill needs installed (CLIs, MCP servers, services)
 - [docs/configuration.md](docs/configuration.md) — `.agentic-loop.json`
   reference, per-kind `loops` sections, and optional hardening (worktrees,
   review lenses, redaction)

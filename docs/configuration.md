@@ -4,6 +4,9 @@ Optional JSON file at the repo root. Every field has a sane default; a
 misconfigured file fails fast with a clear message instead of silently
 falling back.
 
+For which CLIs / MCP servers each `codePlatform` and capability requires, see
+[prerequisites.md](prerequisites.md).
+
 | Field | Default | What it does |
 |-------|---------|--------------|
 | `maxIterations` | `3` | Max loop iterations before stopping on repeated check-stage failures (engineering: VERIFY/REVIEW; a manifest may override per kind). When the engineering cap trips, the plan is suspect — send it back with `/agent-loop-task replan <id>`. |
