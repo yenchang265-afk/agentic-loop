@@ -113,7 +113,7 @@ ensure_node() {
   fi
   case "$PKG" in
     apt)
-      curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR_MIN}.x" | $SUDO -E bash -
+      curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR_MIN}.x" | $SUDO bash -
       $SUDO apt-get install -y nodejs
       ;;
     brew)
@@ -381,7 +381,7 @@ register_mcp_opencode() {
 # ---------------------------------------------------------------------------
 # run
 # ---------------------------------------------------------------------------
-echo "agentic-loop bootstrap — pkg manager: $PKG${CHECK_ONLY:+ (check-only)}"
+echo "agentic-loop bootstrap — pkg manager: $PKG"
 [ "$CHECK_ONLY" -eq 1 ] && echo "(check-only: reporting status, changing nothing)"
 echo
 
