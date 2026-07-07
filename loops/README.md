@@ -73,7 +73,9 @@ Transition **effects**:
   that judged an older attempt.
 - `park` — exit the loop at a human gate; `toStatus` names the work-source
   status the item parks into (engineering's PLAN → `plan-review`).
-- `done` / `stop` — terminal, with a message (and optional `toStatus`).
+- `done` — terminal success, with a message and an optional `toStatus` (the
+  work-source status the item lands in, e.g. `in-review`).
+- `stop` — terminal halt, with a message only (no `toStatus`).
 
 Every stage needs a transitions entry; `work` stages need `onDone`, `check`
 stages need all of `onPass`/`onFail`/`onError`. A missing verdict on a check

@@ -106,9 +106,10 @@ Idempotent — re-run after `git pull` for updates.
 - `/agent-loop-task new <idea>` · `retask <id> [note]` · `approve <id>` ·
   `approve-plan <id>` · `replan <id> [why]` — interview → draft (reshape with
   `retask`) → task gate → (the loop plans) → plan gate
-- `/agent-loop task <id>` · `watch` · `ship <id>` · `recover <id>` · `stop` · `status` —
-  plan the queue and execute the plan-approved tasks; `watch` also polls every
-  other enabled loop kind's work source (e.g. the PR sitter's)
+- `/agent-loop task <id>` · `watch` · `unwatch` · `ship <id>` · `recover <id>` ·
+  `stop` · `status` · `doctor` — plan the queue and execute the plan-approved
+  tasks; `watch` also polls every other enabled loop kind's work source (e.g.
+  the PR sitter's)
 
 Full command reference: [docs/opencode.md](docs/opencode.md) (OpenCode) ·
 [`claude-plugin/README.md`](claude-plugin/README.md) (Claude Code — `/agent-loop claim`

@@ -24,6 +24,7 @@ sections in `.agentic-loop.json` — see "Loop kinds" at the end.
 ```
 authoring + gates (the /agent-loop-task command, interactive, BEFORE the loop):
   /agent-loop-task new <idea>       ──▶ interview (main agent) ──▶ planless draft in draft/
+  /agent-loop-task retask <id> [note] ▶ re-interview (main agent) ──▶ draft rewritten in place (same id)
   /agent-loop-task approve <id>     ──▶ loop_task_approve parks in queued/        ← the task gate
   /agent-loop-task approve-plan <id> ─▶ loop_plan_approve: plan-review/ ▶ in-progress/  ← the plan gate
   /agent-loop-task replan <id> [why] ─▶ loop_replan: back to queued/ (audited rejection)

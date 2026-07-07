@@ -80,10 +80,12 @@ the loop (the /agent-loop command, unattended — never blocks on a human):
 
 ## Process
 
-1. `/agent-loop-task new <idea>` — the `loop-plan-author` agent **always
+1. `/agent-loop-task new <idea>` — the command's own agent **always
    interviews you** (a restate-and-confirm at minimum, a full interview when
-   the idea is vague) to pin down the goal and testable acceptance criteria,
-   confirms the draft with you, and writes a planless draft to `draft/`.
+   the idea is vague) to pin down the goal and testable acceptance criteria and
+   confirms the draft with you; subagents can't converse, so it then hands the
+   confirmed intent to the `loop-plan-author` subagent, which writes the
+   planless draft to `draft/`.
 2. `/agent-loop-task approve <id>` — after you review the draft — the plugin
    moves it to `queued/` with an audited "Task approved" note and commits.
    No plan yet, by design.
@@ -124,12 +126,13 @@ the loop (the /agent-loop command, unattended — never blocks on a human):
 
 ## The gates are a command, planning and execution are the loop
 
-- **Interview (always, inside `/agent-loop-task new`).** The author agent runs
-  the `interview-me` skill live with you on every `new` — a single
+- **Interview (always, inside `/agent-loop-task new`).** The command's own
+  agent runs the `interview-me` skill live with you on every `new` — a single
   restate-and-confirm when the idea already carries a clear goal and testable
   criteria, one question at a time until there's an explicit yes on a
   restated intent when it doesn't. It also confirms the drafted task before
-  writing anything.
+  handing it to the `loop-plan-author` subagent to write (subagents can't
+  converse with you).
 - **Two approvals (always, `/agent-loop-task`).** `approve <id>` gates the
   task (scope + acceptance) into `queued/`; `approve-plan <id>` gates the
   loop-written plan into `in-progress/`. Nothing gets built until a human

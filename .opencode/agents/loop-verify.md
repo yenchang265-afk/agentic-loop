@@ -82,7 +82,7 @@ ERROR if the runner itself is genuinely unavailable.
 3. **Decide** — PASS only if every acceptance criterion is met and tests are green;
    otherwise FAIL.
 4. **On a FAIL**, invoke the `debugging-and-error-recovery` skill to root-cause the
-   failure (not to fix it) so the report below is precise enough for the next PLAN
+   failure (not to fix it) so the report below is precise enough for the next BUILD
    iteration to act on directly.
 
 ## Output
@@ -105,7 +105,7 @@ Above the verdict, give:
 - A per-criterion checklist (met / not met) with the evidence for each.
 - The test command output summary (what ran, what passed/failed).
 - On FAIL: a concrete list of gaps — what is missing or wrong and *why*, per the
-  debugging-and-error-recovery root-cause analysis — so the next PLAN iteration
+  debugging-and-error-recovery root-cause analysis — so the next BUILD iteration
   can fix it precisely.
 
 ## Hard rules
