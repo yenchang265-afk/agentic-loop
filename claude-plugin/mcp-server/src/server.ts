@@ -46,6 +46,7 @@ import {
   listByStatus,
   listClaimIds,
   moveTask,
+  pairingCoverage,
   releaseClaim,
   releaseOrphanedClaims,
   rescueStray,
@@ -687,9 +688,11 @@ server.registerTool(
     for (const s of STATUSES) byStatus[s] = await listByStatus(fsClient, directory, config.tasksDir, s, log)
     const summary = summarizeBacklog(byStatus)
     const anomalies = await auditBacklog(fsClient, directory, config.tasksDir)
+    const pm = config.projectManagement
     return ok({
       active: active ? { stage: active.stage, iteration: active.iteration + 1, task: active.task?.id ?? active.goal } : null,
       backlog: summary,
+      ...(pm ? { pairing: { system: pm.system, ...pairingCoverage(byStatus) } } : {}),
       ...(hasAnomalies(anomalies) ? { anomalies: formatAnomalies(anomalies, config.tasksDir).map((l) => `${l} (loop_doctor repairs)`) } : {}),
     })
   },
@@ -768,6 +771,13 @@ server.registerTool(
         elsewhere
           ? `Can't approve "${id}": it's in ${path.basename(path.dirname(elsewhere.path))} — only draft tasks can be approved.`
           : `Can't approve "${id}": no task found.`,
+      )
+    }
+    const pm = config.projectManagement
+    if (pm?.requirePairing && !draft.tracker) {
+      return fail(
+        `Can't approve "${id}": projectManagement.requirePairing is on, so it must be paired to a ${pm.system} item first. ` +
+          `Add a tracker block to the draft frontmatter (system: ${pm.system}, key: <issue key / work item id>) and re-approve.`,
       )
     }
     const actor = await gitActor(sh, directory)

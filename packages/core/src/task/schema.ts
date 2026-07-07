@@ -30,10 +30,14 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml"
  * Everything past `title` is optional, so pre-existing task files still parse.
  */
 
+/** The project-management trackers a task can be paired to. */
+export const TRACKER_SYSTEMS = ["jira", "azure-devops"] as const
+export type TrackerSystem = (typeof TRACKER_SYSTEMS)[number]
+
 /** The tracker a task is paired to. `system` + `key` together identify the item. */
 export const TaskTrackerSchema = z.object({
   /** Which tracker this task is paired to. */
-  system: z.enum(["jira", "azure-devops"]),
+  system: z.enum(TRACKER_SYSTEMS),
   /** Jira issue key (`PROJ-123`) or Azure DevOps work item id (`1234`). */
   key: z.string().min(1, "tracker.key is required when a tracker is set"),
   /** Deep link to the item in the tracker's web UI. Optional. */
@@ -96,6 +100,9 @@ const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/
 
 /** Derive the task id from its filename (`add-foo.md` → `add-foo`). */
 export const taskId = (filename: string): string => filename.replace(/\.md$/i, "")
+
+/** Whether a task is paired to a tracker item (has a `tracker` block). Pure. */
+export const isPaired = (task: Pick<Task, "tracker">): boolean => task.tracker !== undefined
 
 /**
  * Parse and validate a task file. Throws a readable, filename-prefixed error when

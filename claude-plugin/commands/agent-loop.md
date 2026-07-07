@@ -35,7 +35,10 @@ Dispatch:
   This is the pull equivalent of the OpenCode plugin's `/agent-loop watch` —
   there is no standing watch mode on this substrate.
 - **`status`** — call `mcp__agentic-loop__loop_status` and report the active
-  loop plus the backlog roll-up.
+  loop plus the backlog roll-up. When a `projectManagement` tracker is
+  configured, the result also carries a `pairing` block (tracker system,
+  paired count, unpaired task ids) — surface which active tasks still need to
+  be paired to a Jira/ADO item.
 - **`ship <id>`** — call `mcp__agentic-loop__loop_ship({id})` to move a
   reviewed task from `in-review/` to `completed/`. Do this only after the
   human has reviewed the branch diff.

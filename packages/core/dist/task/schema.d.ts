@@ -27,6 +27,9 @@ import { z } from "zod";
  *
  * Everything past `title` is optional, so pre-existing task files still parse.
  */
+/** The project-management trackers a task can be paired to. */
+export declare const TRACKER_SYSTEMS: readonly ["jira", "azure-devops"];
+export type TrackerSystem = (typeof TRACKER_SYSTEMS)[number];
 /** The tracker a task is paired to. `system` + `key` together identify the item. */
 export declare const TaskTrackerSchema: z.ZodObject<{
     system: z.ZodEnum<{
@@ -76,6 +79,8 @@ export interface Task {
 }
 /** Derive the task id from its filename (`add-foo.md` → `add-foo`). */
 export declare const taskId: (filename: string) => string;
+/** Whether a task is paired to a tracker item (has a `tracker` block). Pure. */
+export declare const isPaired: (task: Pick<Task, "tracker">) => boolean;
 /**
  * Parse and validate a task file. Throws a readable, filename-prefixed error when
  * the frontmatter is missing, not valid YAML, or fails the schema.

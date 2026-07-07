@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { buildTaskFile, parseTask, serializeTask, slugify } from "./schema.js"
+import { buildTaskFile, isPaired, parseTask, serializeTask, slugify } from "./schema.js"
 
 const PATH = "/repo/docs/tasks/in-progress/add-foo.md"
 
@@ -183,6 +183,11 @@ test("serializeTask omits unset optional fields but keeps the pairing", () => {
   assert.doesNotMatch(content, /estimate/)
   assert.doesNotMatch(content, /labels/)
   assert.doesNotMatch(content, /parent/)
+})
+
+test("isPaired reflects whether a tracker block is present", () => {
+  assert.equal(isPaired({ tracker: undefined }), false)
+  assert.equal(isPaired({ tracker: { system: "jira", key: "PROJ-1" } }), true)
 })
 
 test("serializeTask round-trips the aligned fields through parseTask", () => {
