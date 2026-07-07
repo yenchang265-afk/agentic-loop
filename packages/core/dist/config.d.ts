@@ -31,7 +31,6 @@ export declare const ProjectManagementSchema: z.ZodObject<{
     }>;
     baseUrl: z.ZodOptional<z.ZodString>;
     defaultType: z.ZodOptional<z.ZodString>;
-    requirePairing: z.ZodDefault<z.ZodBoolean>;
 }, z.core.$strip>;
 export type ProjectManagement = z.infer<typeof ProjectManagementSchema>;
 export declare const ConfigSchema: z.ZodObject<{
@@ -66,7 +65,6 @@ export declare const ConfigSchema: z.ZodObject<{
         }>;
         baseUrl: z.ZodOptional<z.ZodString>;
         defaultType: z.ZodOptional<z.ZodString>;
-        requirePairing: z.ZodDefault<z.ZodBoolean>;
     }, z.core.$strip>>;
 }, z.core.$strip>;
 /**

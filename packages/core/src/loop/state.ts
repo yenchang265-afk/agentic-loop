@@ -107,8 +107,6 @@ export interface ProjectManagementConfig {
   readonly baseUrl?: string
   /** Default issue/work-item type stamped on newly authored tasks. */
   readonly defaultType?: string
-  /** When true, a task cannot be approved into the queue until it is paired. */
-  readonly requirePairing: boolean
 }
 
 /** Per-loop-kind settings under the config's `loops.<kind>` section. */

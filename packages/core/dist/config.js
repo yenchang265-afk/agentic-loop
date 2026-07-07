@@ -30,11 +30,6 @@ export const ProjectManagementSchema = z.object({
     baseUrl: z.string().url("projectManagement.baseUrl must be a URL").optional(),
     /** Default issue/work-item type stamped on newly authored tasks. Optional. */
     defaultType: z.string().min(1).optional(),
-    /**
-     * When true, a task cannot be approved into the queue until it is paired to a
-     * tracker item (has a `tracker` block). Defaults to false. See `loop_task_approve`.
-     */
-    requirePairing: z.boolean().default(false),
 });
 const BaseConfigSchema = z.object({
     /** Max loop iterations before stopping on repeated verify/review failures. */

@@ -113,8 +113,7 @@ API; a human copies the issue key/id into the task.
   "projectManagement": {
     "system": "jira",
     "baseUrl": "https://acme.atlassian.net/browse/",
-    "defaultType": "story",
-    "requirePairing": true
+    "defaultType": "story"
   }
 }
 ```
@@ -126,16 +125,15 @@ API; a human copies the issue key/id into the task.
   no link is built.
 - **`defaultType`** — optional issue/work-item type stamped on new drafts
   (e.g. `story`, `task`, `bug`).
-- **`requirePairing`** — when `true`, `/agent-loop-task approve <id>` refuses a
-  draft with no `tracker` block, so nothing enters the queue unpaired. Defaults
-  to `false`.
+
+Pairing is always **optional** — a task never has to carry a `tracker` block;
+this section only supplies authoring defaults and the status view.
 
 Impact on the commands:
 
 - **`/agent-loop-task new`** pre-fills `tracker.system` (and `type` from
   `defaultType`) so the drafted task is ready to pair — you fill in the
   `tracker.key`.
-- **`/agent-loop-task approve`** enforces `requirePairing`.
 - **`/agent-loop status`** adds a `pairing` roll-up: the tracker system, how
   many active tasks are paired, and the ids of those still unpaired.
 

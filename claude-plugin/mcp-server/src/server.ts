@@ -773,13 +773,6 @@ server.registerTool(
           : `Can't approve "${id}": no task found.`,
       )
     }
-    const pm = config.projectManagement
-    if (pm?.requirePairing && !draft.tracker) {
-      return fail(
-        `Can't approve "${id}": projectManagement.requirePairing is on, so it must be paired to a ${pm.system} item first. ` +
-          `Add a tracker block to the draft frontmatter (system: ${pm.system}, key: <issue key / work item id>) and re-approve.`,
-      )
-    }
     const actor = await gitActor(sh, directory)
     await appendNote(sh, draft, auditNote("Task approved — queued for planning", new Date(), actor), log)
     const newPath = await moveTask(sh, draft, "queued")

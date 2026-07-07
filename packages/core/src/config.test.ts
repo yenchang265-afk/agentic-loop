@@ -123,10 +123,9 @@ test("projectManagement is off by default", () => {
   assert.equal(defaultTrackerSystem(DEFAULT_CONFIG), undefined)
 })
 
-test("parseConfig accepts a projectManagement section and defaults requirePairing to false", () => {
+test("parseConfig accepts a minimal projectManagement section", () => {
   const cfg = parseConfig({ projectManagement: { system: "jira" } })
   assert.equal(cfg.projectManagement?.system, "jira")
-  assert.equal(cfg.projectManagement?.requirePairing, false)
   assert.equal(defaultTrackerSystem(cfg), "jira")
 })
 
@@ -136,10 +135,9 @@ test("parseConfig accepts the full projectManagement shape", () => {
       system: "azure-devops",
       baseUrl: "https://dev.azure.com/acme/proj/_workitems/edit/",
       defaultType: "task",
-      requirePairing: true,
     },
   })
-  assert.equal(cfg.projectManagement?.requirePairing, true)
+  assert.equal(cfg.projectManagement?.system, "azure-devops")
   assert.equal(cfg.projectManagement?.defaultType, "task")
 })
 
