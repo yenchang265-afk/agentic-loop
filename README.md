@@ -25,7 +25,9 @@ Authoring a new kind is a `loop.json` + stage prompts away — see
 
 Authoring and execution are two commands. **`/agent-loop-task`** interviews
 you into a draft task (`new <idea>` — always, so the goal and testable
-acceptance criteria come from you, not a guess), `retask <id>` reshapes a draft
+acceptance criteria come from you, not a guess; a **heavy idea is split into
+sibling drafts**, one vertical slice each plus a `type: epic` tracker, so no
+one task overruns a single build context), `retask <id>` reshapes a draft
 you're not happy with, `approve <id>` queues the reviewed draft, and
 `approve-plan <id>` / `replan <id>` are the plan gate.
 **`/agent-loop`** plans a queued task **right before execution** — so plans

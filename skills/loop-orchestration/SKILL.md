@@ -85,7 +85,10 @@ the loop (the /agent-loop command, unattended — never blocks on a human):
    the idea is vague) to pin down the goal and testable acceptance criteria and
    confirms the draft with you; subagents can't converse, so it then hands the
    confirmed intent to the `loop-plan-author` subagent, which writes the
-   planless draft to `draft/`.
+   planless draft to `draft/`. A **heavy idea is split into sibling drafts** —
+   vertical, independently shippable slices ordered by `priority`, plus one
+   `type: epic` tracking draft that is never approved. See
+   `task-backlog-management` → "Slicing a heavy idea".
 2. `/agent-loop-task approve <id>` — after you review the draft — the plugin
    moves it to `queued/` with an audited "Task approved" note and commits.
    No plan yet, by design.
