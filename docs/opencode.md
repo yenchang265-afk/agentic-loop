@@ -107,5 +107,9 @@ updates. Use `--copy` instead of symlinks, or pass a directory to install
 somewhere other than the default OpenCode config dir. Bare `./install.sh`
 installs the Claude Code plugin too.
 
+On an interactive terminal the install ends with a short **config wizard** that
+seeds `.agentic-loop.json` into the project the loop will drive — see
+[configuration.md](configuration.md).
+
 On Windows, symlinks need WSL or symlink-capable Windows (Developer Mode);
 without that, use `--copy` (no live updates — re-run after `git pull`).

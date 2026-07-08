@@ -100,6 +100,8 @@ npm install             # npm workspaces — also builds @agentic-loop/core (pre
 - `./install.sh claude` builds the bundled MCP server and links the shared
   skills/references, then prints the load options (`claude --plugin-dir` or
   marketplace) — details in [`claude-plugin/README.md`](claude-plugin/README.md).
+- After installing, an interactive terminal gets a short **config wizard** that
+  seeds `.agentic-loop.json` — see [docs/configuration.md](docs/configuration.md).
 
 Idempotent — re-run after `git pull` for updates.
 
@@ -139,6 +141,12 @@ skills library via [AGENTS.md](AGENTS.md).
   (`/agent-loop-plan`, `in-planning/`, the blocking PLAN gate)
 - [docs/design/](docs/design/) — threat model, hardening design records
   (including [07 — multi-loop scheduler](docs/design/improvements/07-multi-loop-scheduler.md))
+
+Each topic is canonical in one file — config/wizard in
+[docs/configuration.md](docs/configuration.md), OpenCode/Claude install +
+commands in their plugin docs, architecture in
+[docs/architecture.md](docs/architecture.md). Update the canonical file and
+link to it; don't copy.
 
 ## Layout
 

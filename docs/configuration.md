@@ -4,6 +4,16 @@ Optional JSON file at the repo root. Every field has a sane default; a
 misconfigured file fails fast with a clear message instead of silently
 falling back.
 
+`./install.sh` seeds this file for you: on an interactive terminal it runs a
+short wizard (code platform, PR sitter, worktrees, plus an advanced gate for the
+tracker, review lenses, and iteration cap) and writes a valid `.agentic-loop.json`
+into the project the loop will drive — the same directory the plugin reads config
+from at runtime (`$AGENTIC_LOOP_DIR`, else the current directory), which it
+prompts for. It never overwrites an existing file and is skipped under piped/CI
+runs. Flags: `--no-config` skips it, `--config` forces it on, `-y`/`--yes` writes
+an all-defaults file without prompting. Everything below can also be hand-edited
+afterward.
+
 | Field | Default | What it does |
 |-------|---------|--------------|
 | `maxIterations` | `3` | Max loop iterations before stopping on repeated check-stage failures (engineering: VERIFY/REVIEW; a manifest may override per kind). When the engineering cap trips, the plan is suspect — send it back with `/agent-loop-task replan <id>`. |

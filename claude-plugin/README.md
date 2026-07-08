@@ -41,6 +41,12 @@ or add the repo as a marketplace and install:
 runs the built `mcp-server/dist/server.js`) and creates relative symlinks for the
 platform-agnostic skills and the reference checklists.
 
+Run from the repo root, `./install.sh claude` finishes with the interactive
+**config wizard** that seeds `.agentic-loop.json` (see
+[`../docs/configuration.md`](../docs/configuration.md)). The
+`cd claude-plugin && ./install.sh` shortcut runs only the Claude half and
+does not include the wizard.
+
 ## Commands
 
 Authoring + gates (`/agent-loop-task`):
@@ -102,13 +108,10 @@ task authoring and both gates always go through `/agent-loop-task`.
 
 ## Configuration
 
-Optional `.agentic-loop.json` at the repo root (all fields default):
-`maxIterations`, `tasksDir`, `stageTimeoutMinutes`, `worktreesDir`,
-`worktreeSetup`, `reviewLenses`, `loops`, `codePlatform`, `ado`,
-`projectManagement` — field reference in
-[`docs/configuration.md`](../docs/configuration.md). Same schema as the
-OpenCode plugin **minus** `watchIntervalMinutes` (no watch mode here — see
-below). The removed `gateBeforeBuild`/`interviewBeforePlan` keys are
+Optional `.agentic-loop.json` at the repo root (all fields default) — full
+field reference in [`docs/configuration.md`](../docs/configuration.md). Same
+schema as the OpenCode plugin **minus** `watchIntervalMinutes` (no watch mode
+here — see below); the removed `gateBeforeBuild`/`interviewBeforePlan` keys are
 silently ignored.
 
 ## Known limitations
