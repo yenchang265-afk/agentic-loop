@@ -215,6 +215,15 @@ const makeClient = (files: Record<string, string>) => {
         const content = files[query.path]
         return { data: content !== undefined ? { content } : undefined }
       },
+      // Emulate the real opencode client, which findByIdIn/listByStatus resolve
+      // through: given a folder path, return one node per direct-child file.
+      list: async ({ query }: { query: { path: string } }) => {
+        const prefix = query.path.endsWith("/") ? query.path : `${query.path}/`
+        const data = Object.keys(files)
+          .filter((p) => p.startsWith(prefix) && !p.slice(prefix.length).includes("/"))
+          .map((p) => ({ type: "file" as const, name: p.slice(prefix.length), path: p, absolute: `/repo/${p}`, ignored: false }))
+        return { data }
+      },
     },
     tui: {
       showToast: async ({ body }: { body: { message: string; variant: string } }) => {
