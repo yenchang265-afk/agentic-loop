@@ -157,6 +157,12 @@ export const AgenticLoop: Plugin = async ({ client, directory, $ }) => {
     },
 
     event: async ({ event }) => {
+      // A user interrupt (ESC) surfaces as a MessageAbortedError, not a dedicated
+      // event — route it to onInterrupt so watch mode stops and the loop halts
+      // instead of the trailing session.idle re-claiming work. No reconcileOnce:
+      // it's pointless here and would delay the critical synchronous unwatch.
+      const interruptedSid = driver.abortedSessionID(event)
+      if (interruptedSid) return void (await driver.onInterrupt(deps, interruptedSid))
       if (event.type !== "session.idle") return
       await reconcileOnce()
       const { sessionID } = event.properties

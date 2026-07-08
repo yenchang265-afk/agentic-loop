@@ -240,6 +240,11 @@ const driving = new Set<string>()
 /** Sessions in `/agent-loop watch` mode — a standing flag, not a one-shot `Pending`,
  *  since it must survive many no-op idle ticks between claims. */
 const watching = new Set<string>()
+/** Sessions the user interrupted (ESC) mid-drive. Trips drive's stop guard after
+ *  the current stage settles, so the loop halts without prematurely nulling
+ *  `getLoop` (which `onIdle`'s catch still needs on a reject-on-abort). Cleared
+ *  when the drive unwinds. */
+const interrupted = new Set<string>()
 /** Per-watching-session polling timers and their cadence (for status display). */
 const watchTimers = new Map<string, ReturnType<typeof setInterval>>()
 const watchIntervalsMs = new Map<string, number>()
@@ -650,16 +655,25 @@ const drive = async (
       iteration,
     )
     if (trackBuild) await appendNote(deps.$, task, auditNote(`BUILD finished (iteration ${iteration + 1})`, new Date(), actor), deps.log)
-    // A /agent-loop stop while the stage ran cleared this session's loop — halt the
-    // chain, preserving whatever the stage did as a checkpoint on the branch.
-    if (!getLoop(sessionID)) {
-      await renderMetrics(deps, sessionID, config, step.state, "stopped", `stopped during ${stage}`)
-      await checkpoint(deps, step.state, `loop(${loopId(step.state)}): incomplete — stopped during ${stage}`)
+    // Halt the chain when either a `/agent-loop stop` cleared this session's loop
+    // while the stage ran, or the user interrupted (ESC) mid-drive — preserving
+    // whatever the stage did as a checkpoint on the branch. The interrupt path
+    // leaves `getLoop` set (so `onIdle`'s catch stays intact on a reject-on-abort),
+    // so this block clears it itself.
+    const wasInterrupted = interrupted.has(sessionID)
+    if (!getLoop(sessionID) || wasInterrupted) {
+      const how = wasInterrupted ? "interrupted" : "stopped"
+      await renderMetrics(deps, sessionID, config, step.state, "stopped", `${how} during ${stage}`)
+      await checkpoint(deps, step.state, `loop(${loopId(step.state)}): incomplete — ${how} during ${stage}`)
       await teardownIsolation(deps, step.state)
-      // A deliberate /agent-loop stop ends the run — drop the snapshot so a later
-      // /agent-loop recover doesn't silently resurrect it from stale state.
-      if (step.state.task) await clearState(deps.$, deps.directory, config.tasksDir, step.state.task.id)
-      return { kind: "stop", message: `stopped during ${stage}` }
+      // A deliberate /agent-loop stop ends the run — drop the snapshot so recover can't
+      // resurrect stale state. An ESC interrupt is a pause: KEEP the snapshot so
+      // /agent-loop recover <id> resumes at THIS stage (recover-state), not a BUILD
+      // restart. A reject-on-abort already keeps it (onIdle's catch never clears state),
+      // so both interrupt paths converge on exact-stage resume.
+      if (step.state.task && !wasInterrupted) await clearState(deps.$, deps.directory, config.tasksDir, step.state.task.id)
+      clearLoop(sessionID) // self-contained — no-op no-harm when /agent-loop stop already cleared it
+      return { kind: "stop", message: `${how} during ${stage}` }
     }
     if (stage === "build") {
       await checkpoint(deps, step.state, `loop(${loopId(step.state)}): build iteration ${iteration + 1}`)
@@ -842,6 +856,71 @@ const formatBacklog = (s: Awaited<ReturnType<typeof backlogSummary>>): string =>
 }
 
 /**
+ * The shared "stop watching" cleanup: drop the session from `watching`, kill its
+ * poll timer, forget its last skip reason, and release the clone's watch lease
+ * (only if it was actually watching — a double release would corrupt the shared
+ * per-directory refcount). Returns whether the session was watching. Every mutation
+ * except the lease release is synchronous, so callers racing an idle event win.
+ */
+const stopWatching = async (deps: Deps, sessionID: string): Promise<boolean> => {
+  const was = watching.delete(sessionID)
+  stopWatchTimer(sessionID)
+  lastSkipReason.delete(sessionID)
+  if (was) await releaseWatchLease(deps)
+  return was
+}
+
+/**
+ * A user interrupt (ESC) mid-drive, routed from the plugin's event hook when a
+ * `MessageAbortedError` lands on this session. Stops watching (no re-trigger on the
+ * trailing idle) AND halts the current loop after the in-flight stage settles: the
+ * `interrupted` flag trips drive's stop guard, and dropping `pending` cancels any
+ * deferred one-shot work. Mutations are synchronous before the first `await` so a
+ * racing `session.idle` sees the cleared `watching`. Idempotent — a double dispatch
+ * (session.error + message.updated for one ESC) is a harmless no-op.
+ */
+export const onInterrupt = async (deps: Deps, sessionID: string): Promise<void> => {
+  const state = getLoop(sessionID) // still set on the interrupt (the flag path keeps it)
+  const hadLoop = state !== undefined
+  pending.delete(sessionID)
+  // Only flag when a loop is actually driving — otherwise the flag would linger
+  // (no drive to consume it in onIdle's finally) and wrongly halt this session's
+  // NEXT loop. A running stage always has getLoop set (drive's setLoop), so the
+  // interruptable moment is covered.
+  if (hadLoop) interrupted.add(sessionID)
+  const wasWatching = await stopWatching(deps, sessionID)
+  // The interrupt keeps the snapshot, so recover resumes at the interrupted stage —
+  // point the user straight at it.
+  if (hadLoop) {
+    const id = state?.task?.id
+    const msg = id ? `Loop interrupted — run /agent-loop recover ${id} to resume.` : "Loop interrupted."
+    await toast(deps.client, msg, "info")
+  } else if (wasWatching) {
+    await toast(deps.client, "Stopped watching — interrupted.", "info")
+  }
+}
+
+/**
+ * The watched session a user-interrupt event names, or undefined. A user ESC
+ * surfaces only as a `MessageAbortedError` — on `message.updated` (assistant
+ * message; `info.sessionID` always present, the primary signal) or `session.error`
+ * (usable only when its optional `sessionID` is present). Everything else, including
+ * `session.idle`, returns undefined so the normal flow is untouched. Pure.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const abortedSessionID = (event: any): string | undefined => {
+  if (event?.type === "message.updated") {
+    const info = event.properties?.info
+    if (info?.error?.name === "MessageAbortedError") return info.sessionID
+  }
+  if (event?.type === "session.error") {
+    const p = event.properties
+    if (p?.error?.name === "MessageAbortedError" && p.sessionID) return p.sessionID
+  }
+  return undefined
+}
+
+/**
  * Consume any pending loop work for a session that just went idle. Guarded so the
  * idle events the driver's own commands generate do not re-enter it.
  */
@@ -921,6 +1000,7 @@ export const onIdle = async (deps: Deps, sessionID: string, config: Config): Pro
     await toast(deps.client, `Loop error: ${message}`, "error")
   } finally {
     driving.delete(sessionID)
+    interrupted.delete(sessionID) // consumed by this drive; a fresh drive re-arms via onInterrupt
     if (serialize) executingDirs.delete(deps.directory)
   }
 }
@@ -1167,10 +1247,7 @@ export const handleCommand = async (
   }
 
   if (lower === "stop" || lower === "abort") {
-    const wasWatching = watching.delete(sessionID)
-    stopWatchTimer(sessionID)
-    lastSkipReason.delete(sessionID)
-    if (wasWatching) await releaseWatchLease(deps)
+    const wasWatching = await stopWatching(deps, sessionID)
     pending.delete(sessionID)
     const state = getLoop(sessionID)
     if (state?.task) {
@@ -1217,10 +1294,7 @@ export const handleCommand = async (
   }
 
   if (lower === "unwatch") {
-    const was = watching.delete(sessionID)
-    stopWatchTimer(sessionID)
-    lastSkipReason.delete(sessionID)
-    if (was) await releaseWatchLease(deps)
+    const was = await stopWatching(deps, sessionID)
     await toast(client, was ? "Stopped watching." : "Not watching.", "info")
     return
   }
