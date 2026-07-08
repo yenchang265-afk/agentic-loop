@@ -100,6 +100,11 @@ npm install             # npm workspaces — also builds @agentic-loop/core (pre
 - `./install.sh claude` builds the bundled MCP server and links the shared
   skills/references, then prints the load options (`claude --plugin-dir` or
   marketplace) — details in [`claude-plugin/README.md`](claude-plugin/README.md).
+- After installing, an interactive terminal gets a short **config wizard** that
+  seeds an initial [`.agentic-loop.json`](docs/configuration.md) into the
+  project the loop will drive (code platform, PR sitter, worktrees, …). It never
+  overwrites an existing file and is skipped under piped/CI runs. Opt out with
+  `--no-config`; seed a defaults file non-interactively with `--yes`.
 
 Idempotent — re-run after `git pull` for updates.
 

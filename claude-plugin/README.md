@@ -41,6 +41,12 @@ or add the repo as a marketplace and install:
 runs the built `mcp-server/dist/server.js`) and creates relative symlinks for the
 platform-agnostic skills and the reference checklists.
 
+Run from the repo root, `./install.sh claude` finishes with the interactive
+**config wizard** that seeds an initial [`.agentic-loop.json`](../docs/configuration.md)
+into the project the loop will drive (skipped under piped/CI runs; `--no-config`
+to skip, `--yes` to seed defaults). The `cd claude-plugin && ./install.sh`
+shortcut runs only the Claude half and does not include the wizard.
+
 ## Commands
 
 Authoring + gates (`/agent-loop-task`):
