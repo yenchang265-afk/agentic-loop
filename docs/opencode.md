@@ -108,14 +108,8 @@ somewhere other than the default OpenCode config dir. Bare `./install.sh`
 installs the Claude Code plugin too.
 
 On an interactive terminal the install ends with a short **config wizard** that
-writes an initial [`.agentic-loop.json`](configuration.md) into the project the
-loop will drive — the same directory the plugin reads config from at runtime
-(`$AGENTIC_LOOP_DIR`, else the current directory), which it prompts for. It asks
-about the code platform, PR sitter, and worktrees (plus an advanced gate for the
-task tracker, review lenses, and iteration cap), never overwrites an existing
-config, and is skipped under piped/CI runs. Flags: `--no-config` to skip,
-`--config` to force it on, `-y`/`--yes` to seed an all-defaults file without
-prompting.
+seeds `.agentic-loop.json` into the project the loop will drive — see
+[configuration.md](configuration.md).
 
 On Windows, symlinks need WSL or symlink-capable Windows (Developer Mode);
 without that, use `--copy` (no live updates — re-run after `git pull`).
