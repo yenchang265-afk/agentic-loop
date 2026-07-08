@@ -660,14 +660,18 @@ const drive = async (
     // whatever the stage did as a checkpoint on the branch. The interrupt path
     // leaves `getLoop` set (so `onIdle`'s catch stays intact on a reject-on-abort),
     // so this block clears it itself.
-    if (!getLoop(sessionID) || interrupted.has(sessionID)) {
-      const how = interrupted.has(sessionID) ? "interrupted" : "stopped"
+    const wasInterrupted = interrupted.has(sessionID)
+    if (!getLoop(sessionID) || wasInterrupted) {
+      const how = wasInterrupted ? "interrupted" : "stopped"
       await renderMetrics(deps, sessionID, config, step.state, "stopped", `${how} during ${stage}`)
       await checkpoint(deps, step.state, `loop(${loopId(step.state)}): incomplete — ${how} during ${stage}`)
       await teardownIsolation(deps, step.state)
-      // A deliberate stop/interrupt ends the run — drop the snapshot so a later
-      // /agent-loop recover doesn't silently resurrect it from stale state.
-      if (step.state.task) await clearState(deps.$, deps.directory, config.tasksDir, step.state.task.id)
+      // A deliberate /agent-loop stop ends the run — drop the snapshot so recover can't
+      // resurrect stale state. An ESC interrupt is a pause: KEEP the snapshot so
+      // /agent-loop recover <id> resumes at THIS stage (recover-state), not a BUILD
+      // restart. A reject-on-abort already keeps it (onIdle's catch never clears state),
+      // so both interrupt paths converge on exact-stage resume.
+      if (step.state.task && !wasInterrupted) await clearState(deps.$, deps.directory, config.tasksDir, step.state.task.id)
       clearLoop(sessionID) // self-contained — no-op no-harm when /agent-loop stop already cleared it
       return { kind: "stop", message: `${how} during ${stage}` }
     }
@@ -876,7 +880,8 @@ const stopWatching = async (deps: Deps, sessionID: string): Promise<boolean> => 
  * (session.error + message.updated for one ESC) is a harmless no-op.
  */
 export const onInterrupt = async (deps: Deps, sessionID: string): Promise<void> => {
-  const hadLoop = getLoop(sessionID) !== undefined
+  const state = getLoop(sessionID) // still set on the interrupt (the flag path keeps it)
+  const hadLoop = state !== undefined
   pending.delete(sessionID)
   // Only flag when a loop is actually driving — otherwise the flag would linger
   // (no drive to consume it in onIdle's finally) and wrongly halt this session's
@@ -884,7 +889,15 @@ export const onInterrupt = async (deps: Deps, sessionID: string): Promise<void> 
   // interruptable moment is covered.
   if (hadLoop) interrupted.add(sessionID)
   const wasWatching = await stopWatching(deps, sessionID)
-  if (hadLoop || wasWatching) await toast(deps.client, "Loop stopped — interrupted.", "info")
+  // The interrupt keeps the snapshot, so recover resumes at the interrupted stage —
+  // point the user straight at it.
+  if (hadLoop) {
+    const id = state?.task?.id
+    const msg = id ? `Loop interrupted — run /agent-loop recover ${id} to resume.` : "Loop interrupted."
+    await toast(deps.client, msg, "info")
+  } else if (wasWatching) {
+    await toast(deps.client, "Stopped watching — interrupted.", "info")
+  }
 }
 
 /**
