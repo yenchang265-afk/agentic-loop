@@ -73,8 +73,10 @@ creating a new one (that would duplicate the id — use `new` for a fresh draft)
 
 Your prompt carries a `Task file:` line naming the claimed `queued/` task's
 path (fall back to looking in `docs/tasks/queued/` if it's ever missing).
-Read the task, read the relevant code (you are read-only toward source), and
-write the `## Implementation Plan` onto **that same file, in place**
+Read the task, read the relevant code (you are read-only toward source) —
+**code exploration for the plan is yours**, delegated here rather than done by
+the main agent's interview turn — and write the `## Implementation Plan` onto
+**that same file, in place**
 (replacing any prior plan section — a replan must address why the old plan
 failed, not sit beside it; the prompt threads the rejected plan and the
 file's audit notes carry the reasons). Do not move the file; the server

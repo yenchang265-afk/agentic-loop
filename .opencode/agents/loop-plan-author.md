@@ -40,7 +40,9 @@ it exactly rather than improvising.
 - **`task`** — the loop's PLAN stage. Your prompt carries a `Task file:`
   line naming the claimed `queued/` task's path (fall back to looking in
   `docs/tasks/queued/` if it's ever missing). Read the task, read the
-  relevant code, produce its `## Implementation Plan`, and write it onto
+  relevant code — **code exploration for the plan is yours**, delegated here
+  rather than done by the main agent's interview turn — produce its
+  `## Implementation Plan`, and write it onto
   **that same file, in place** (replacing any prior plan section — a replan
   must address why the old plan failed, not sit beside it; the prompt
   threads the rejected plan and the file's audit notes carry the reasons).

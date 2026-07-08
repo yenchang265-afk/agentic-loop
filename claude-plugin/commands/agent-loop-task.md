@@ -13,7 +13,11 @@ Dispatch:
 
 - **`new <idea>`** — turn a rough idea into one or more **planless drafts** in
   `docs/tasks/draft/`. YOU (the main agent) run the interview — subagents
-  cannot converse with the user:
+  cannot converse with the user. Your turn is **interview-only**: keep
+  `interview-me` here in the main agent and do **not** deep-read source inline.
+  Any codebase context you need (e.g. to judge scope in step 2) is delegated —
+  planning-time code exploration is the `loop-plan-author` subagent's job in its
+  PLAN stage (mode `task`), which reads the code when it writes the plan:
   1. **Always** invoke the `interview-me` skill first (never silently skip):
      if the idea already states a clear goal and testable criteria, a single
      restate-and-confirm question suffices; when anything is vague, run the

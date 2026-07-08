@@ -536,6 +536,7 @@ npm install                    <span class="c"># workspaces + builds core dist/<
         </table>
       </div>
       <div class="note">The wiring lives in the sub-agent definitions (<code>claude-plugin/agents/loop-*.md</code>), not the stage prompts — so "the stage's agent invokes these skills." Stage names themselves come from each kind's <code>loops/&lt;kind&gt;/loop.json</code>; they are not a fixed global enum.</div>
+      <div class="note"><strong>AUTHOR splits by capability:</strong> the <code>interview-me</code> interview runs in the <strong>main agent</strong> (subagents can't converse with you), and its turn is interview-only — it does not deep-read source. Code exploration is <strong>delegated</strong> to the <code>loop-plan-author</code> subagent, which reads the code when it writes the plan in the PLAN stage (mode <code>task</code>).</div>
 
       <h3>Full skills catalog</h3>
       <p style="font-size:14px;color:var(--muted-txt)">Filter by role, or search names and purposes.</p>
