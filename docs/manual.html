@@ -524,8 +524,8 @@ npm install                    <span class="c"># workspaces + builds core dist/<
         <table>
           <thead><tr><th>Stage</th><th>Sub-agent</th><th>Invokes</th></tr></thead>
           <tbody>
-            <tr><td><span class="stag plan" style="font-size:11px">PLAN</span></td><td><code>loop-plan-author</code></td><td><code>task-backlog-management</code> · <code>planning-and-task-breakdown</code></td></tr>
-            <tr><td><span class="stag build" style="font-size:11px">BUILD</span></td><td><code>loop-build</code></td><td><code>incremental-implementation</code> · <code>test-driven-development</code></td></tr>
+            <tr><td><span class="stag plan" style="font-size:11px">PLAN</span></td><td><code>loop-plan-author</code></td><td><code>task-backlog-management</code> · <code>planning-and-task-breakdown</code><br><span style="color:var(--muted-txt)">when relevant: <code>api-and-interface-design</code> · <code>deprecation-and-migration</code> · <code>documentation-and-adrs</code></span></td></tr>
+            <tr><td><span class="stag build" style="font-size:11px">BUILD</span></td><td><code>loop-build</code></td><td><code>incremental-implementation</code> · <code>test-driven-development</code><br><span style="color:var(--muted-txt)">when relevant: <code>frontend-ui-engineering</code> · <code>observability-and-instrumentation</code> · <code>code-simplification</code></span></td></tr>
             <tr><td><span class="stag verify" style="font-size:11px">VERIFY</span></td><td><code>loop-verify</code></td><td><code>debugging-and-error-recovery</code> <span style="color:var(--muted-txt)">(on FAIL, to root-cause)</span></td></tr>
             <tr><td><span class="stag review" style="font-size:11px">REVIEW</span></td><td><code>loop-review</code></td><td><code>code-review-and-quality</code> · <code>security-and-hardening</code> · <code>performance-optimization</code></td></tr>
             <tr><td><span class="stag authoring" style="font-size:11px">AUTHOR</span></td><td>main agent</td><td><code>interview-me</code> · <code>idea-refine</code></td></tr>
@@ -687,10 +687,12 @@ npm install                    <span class="c"># workspaces + builds core dist/<
     plan:{name:"PLAN",kind:"work",agent:"loop-plan-author",iso:"isolation: none",
       what:"Writes an <b>## Implementation Plan</b> directly onto the claimed queued task file, then <b>parks</b> it in plan-review/ and exits. It never blocks on a human and touches only the task file on the main tree.",
       skills:["task-backlog-management","planning-and-task-breakdown"],
+      cond:["api-and-interface-design","deprecation-and-migration","documentation-and-adrs"],
       transit:[["done","→","onDone parks the task in plan-review/ for the plan gate"]]},
     build:{name:"BUILD",kind:"work",agent:"loop-build",iso:"isolation: worktree",
       what:"Implements the approved plan <b>test-first (TDD)</b> on the loop's <code>loop/&lt;id&gt;</code> branch or worktree, committing a checkpoint each iteration. Edit + bash allowed.",
       skills:["incremental-implementation","test-driven-development"],
+      cond:["frontend-ui-engineering","observability-and-instrumentation","code-simplification"],
       transit:[["done","→","onDone fires VERIFY"]]},
     verify:{name:"VERIFY",kind:"check",agent:"loop-verify",iso:"isolation: worktree",
       what:"Runs tests &amp; acceptance criteria. No edits; bash is restricted to a test-runner allowlist. Records only PASS / FAIL / ERROR through the trusted <code>loop_verdict</code> tool.",
@@ -705,7 +707,9 @@ npm install                    <span class="c"># workspaces + builds core dist/<
   var detail=document.getElementById("stagedetail");
   function renderStage(key){
     var s=STAGES[key];
-    var sk=s.skills.map(function(n){return '<span class="skref" data-goto="'+n+'">'+n+'</span>';}).join("");
+    var skref=function(n){return '<span class="skref" data-goto="'+n+'">'+n+'</span>';};
+    var sk=s.skills.map(skref).join("");
+    var cond=s.cond?'<div class="lbl" style="margin-top:12px">Also, when the task calls for it</div>'+s.cond.map(skref).join(""):"";
     var tr=s.transit.map(function(t){return '<div class="t"><span class="verd '+VCLASS[t[0]]+'">'+t[0].toUpperCase()+'</span><span>'+t[2]+'</span></div>';}).join("");
     detail.innerHTML=
       '<div class="sd-head"><h3>'+s.name+'</h3>'+
@@ -714,7 +718,7 @@ npm install                    <span class="c"># workspaces + builds core dist/<
       '<span class="chip">agent: '+s.agent+'</span></div>'+
       '<p style="margin:6px 0 0;font-size:14.5px">'+s.what+'</p>'+
       '<div class="sd-grid">'+
-        '<div><div class="lbl">Invokes skills</div>'+sk+'</div>'+
+        '<div><div class="lbl">Invokes skills</div>'+sk+cond+'</div>'+
         '<div><div class="lbl">Transitions</div><div class="transit">'+tr+'</div></div>'+
       '</div>';
     [].slice.call(detail.querySelectorAll(".skref")).forEach(function(r){
