@@ -3,7 +3,16 @@ import { test } from "node:test"
 import { PLAN_HEADING } from "@agentic-loop/core/task/store"
 import { serializeTask } from "@agentic-loop/core/task/schema"
 import type { Config } from "../config.ts"
-import { claimSkipReason, handleTaskCommand, parseTaskArgs, parseWatchArgs, recordAdoData, type Deps } from "./driver.ts"
+import {
+  abortedSessionID,
+  claimSkipReason,
+  handleTaskCommand,
+  onInterrupt,
+  parseTaskArgs,
+  parseWatchArgs,
+  recordAdoData,
+  type Deps,
+} from "./driver.ts"
 
 /**
  * The watch-mode plumbing (timers, idle queries) is exercised manually
@@ -123,6 +132,63 @@ test("new, retask, and free text pass through", () => {
   assert.deepEqual(parseTaskArgs("retask my-task tighten acceptance"), { mode: "passthrough" })
   assert.deepEqual(parseTaskArgs(""), { mode: "passthrough" })
   assert.deepEqual(parseTaskArgs("approver thing"), { mode: "passthrough" })
+})
+
+/**
+ * `abortedSessionID`: a user ESC surfaces only as a `MessageAbortedError`. The
+ * matcher names the watched session to unwatch, and MUST stay silent on every
+ * other event so the normal idle flow is untouched. This is the load-bearing
+ * pure part of the interrupt wiring.
+ */
+
+test("message.updated carrying a MessageAbortedError yields the assistant session id", () => {
+  const event = {
+    type: "message.updated",
+    properties: { info: { sessionID: "sess-1", error: { name: "MessageAbortedError" } } },
+  }
+  assert.equal(abortedSessionID(event), "sess-1")
+})
+
+test("session.error with a MessageAbortedError and a session id yields it", () => {
+  const event = {
+    type: "session.error",
+    properties: { sessionID: "sess-2", error: { name: "MessageAbortedError" } },
+  }
+  assert.equal(abortedSessionID(event), "sess-2")
+})
+
+test("session.error abort WITHOUT a session id is unusable (optional field) → undefined", () => {
+  const event = { type: "session.error", properties: { error: { name: "MessageAbortedError" } } }
+  assert.equal(abortedSessionID(event), undefined)
+})
+
+test("non-abort events are ignored", () => {
+  assert.equal(abortedSessionID({ type: "session.idle", properties: { sessionID: "sess" } }), undefined)
+  assert.equal(
+    abortedSessionID({ type: "message.updated", properties: { info: { sessionID: "sess", role: "user" } } }),
+    undefined,
+  )
+  assert.equal(
+    abortedSessionID({ type: "session.error", properties: { sessionID: "sess", error: { name: "ApiError" } } }),
+    undefined,
+  )
+  assert.equal(abortedSessionID({ type: "message.updated", properties: {} }), undefined)
+  assert.equal(abortedSessionID({ type: "message.part.updated", properties: {} }), undefined)
+})
+
+/**
+ * `onInterrupt` on a session with no loop and no watch (e.g. a stray ESC while
+ * idle, or a subagent's child sessionID that was never watched) must be a silent
+ * no-op: no toast, and no shell call (so no spurious watch-lease release).
+ */
+
+test("onInterrupt is a silent no-op when not driving and not watching", async () => {
+  const { client, toasts } = makeClient({})
+  const deps: Deps = { client, $: explodingShell, directory: "/repo", log: () => {} }
+
+  await onInterrupt(deps, "sess-never-watched")
+
+  assert.equal(toasts.length, 0)
 })
 
 test("loop_ado_data is ignored when no ado-mcp poll is awaiting input in the session", () => {
