@@ -47,14 +47,45 @@ export const ensureIsolation = async ($, log, directory, config, state, baseBran
                 }
                 await runWorktreeSetup($, log, config, state.git.worktree);
             }
-            return state;
+            return { ...state, isolated: true };
         }
-        // Shared mode — make sure the tree is back on this loop's branch.
+        // `git` is pre-set with no worktree yet. Two ways this happens:
+        //  1. A PR-shaped source named the PR's head branch to isolate ONTO (pr-sitter):
+        //     `isolated` is still false, so establish real isolation here — a worktree
+        //     when `worktreesDir` is set (so the human's main tree is never switched to
+        //     the PR branch), else a shared-tree checkout.
+        //  2. An already-isolated shared-tree loop being reconciled before a later stage
+        //     (`isolated` already true): just make sure the tree is back on its branch.
+        if (!state.isolated && config.worktreesDir) {
+            await ensureExcluded($, directory, config.worktreesDir);
+            const wtPath = worktreePathFor(directory, config.worktreesDir, loopId(state));
+            // `git worktree list` includes the MAIN tree as its first entry; if the human
+            // (or a prior shared-mode run) left it checked out on this branch,
+            // `existing === directory` — adopting it as "the worktree" would isolate ONTO
+            // the human's tree, the exact harm this path avoids. Only reuse a SEPARATE
+            // worktree; otherwise create one (which fails loudly if the branch is checked
+            // out in the main tree, rather than silently committing it).
+            const existing = await worktreeForBranch($, directory, state.git.branch);
+            if (existing && path.resolve(existing) !== path.resolve(directory)) {
+                if (existing !== wtPath)
+                    await log("info", `loop: reusing existing worktree ${existing} for ${state.git.branch}`);
+                return { ...state, git: { ...state.git, worktree: existing }, isolated: true };
+            }
+            if (await isGitRepo($, wtPath))
+                await pruneWorktrees($, directory);
+            // `addWorktree` reuses the (already-fetched) head branch as-is — no `-b`.
+            if (!(await addWorktree($, directory, wtPath, state.git.branch, state.git.base))) {
+                throw new Error(`could not create worktree ${wtPath} for ${state.git.branch} — resolve it, then /agent-loop recover`);
+            }
+            await runWorktreeSetup($, log, config, wtPath);
+            return { ...state, git: { ...state.git, worktree: wtPath }, isolated: true };
+        }
+        // Shared mode — make sure the tree is on this loop's branch.
         const cur = await currentBranch($, directory);
         if (cur !== state.git.branch && !(await checkoutBranch($, directory, state.git.branch))) {
             await log("warn", `loop: could not return to ${state.git.branch} — building on ${cur ?? "detached HEAD"}`);
         }
-        return state;
+        return { ...state, isolated: true };
     }
     if (!(await isGitRepo($, directory)))
         return state;
@@ -74,12 +105,14 @@ export const ensureIsolation = async ($, log, directory, config, state, baseBran
         if (await isDirty($, directory)) {
             await log("info", "loop: main tree has uncommitted changes — they are NOT visible in this loop's worktree");
         }
-        // Reuse a worktree already registered for this branch (a recovered run).
+        // Reuse a worktree already registered for this branch (a recovered run) — but
+        // never the main tree itself (`git worktree list` includes it), which would
+        // isolate onto the human's checkout.
         const existing = await worktreeForBranch($, directory, branch);
-        if (existing) {
+        if (existing && path.resolve(existing) !== path.resolve(directory)) {
             if (existing !== wtPath)
                 await log("info", `loop: reusing existing worktree ${existing} for ${branch}`);
-            return { ...state, git: { base, branch, worktree: existing } };
+            return { ...state, git: { base, branch, worktree: existing }, isolated: true };
         }
         // A leftover directory with no registration — prune, then let add try.
         if (await isGitRepo($, wtPath))
@@ -88,7 +121,7 @@ export const ensureIsolation = async ($, log, directory, config, state, baseBran
             throw new Error(`could not create worktree ${wtPath} for ${branch} — resolve it, then /agent-loop recover`);
         }
         await runWorktreeSetup($, log, config, wtPath);
-        return { ...state, git: { base, branch, worktree: wtPath } };
+        return { ...state, git: { base, branch, worktree: wtPath }, isolated: true };
     }
     if (await isDirty($, directory)) {
         await log("warn", "loop: working tree dirty at build start — pre-existing changes will land in this loop's checkpoints");
@@ -97,7 +130,7 @@ export const ensureIsolation = async ($, log, directory, config, state, baseBran
         await log("warn", `loop: could not check out ${branch} — building without branch isolation`);
         return state;
     }
-    return { ...state, git: { base, branch } };
+    return { ...state, git: { base, branch }, isolated: true };
 };
 /**
  * Tear down this loop's isolation. Worktree mode: remove the worktree if it's
