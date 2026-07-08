@@ -46,6 +46,42 @@ test("throws on invalid YAML in the frontmatter", () => {
   assert.throws(() => parseTask("t.md", "---\ntitle: : :\n  bad: indent\n---\nb", "/p"), /t\.md:/)
 })
 
+// The YAML colon-space footgun: an acceptance bullet containing `: ` parses as
+// a single-key map, not a string. A degraded/human author trips this routinely;
+// before the coercion, parseTask threw and every gate toasted "no task found"
+// for a file plainly present on disk. See coerceListItem in schema.ts.
+test("recovers acceptance items tripped by the YAML colon-space footgun", () => {
+  const content = [
+    "---",
+    "title: Portfolio tracker",
+    "acceptance:",
+    "  - User records a transaction (ticker, shares, price, market: TW/US)",
+    "  - App auto-fetches prices for TW and US tickers",
+    "  - Dashboard shows a holdings list: ticker, price, unrealized P&L",
+    "---",
+    "body",
+  ].join("\n")
+  const task = parseTask("portfolio.md", content, "/p/portfolio.md")
+  assert.deepEqual(task.acceptance, [
+    "User records a transaction (ticker, shares, price, market: TW/US)",
+    "App auto-fetches prices for TW and US tickers",
+    "Dashboard shows a holdings list: ticker, price, unrealized P&L",
+  ])
+})
+
+test("coerces bare-scalar acceptance/labels items to strings", () => {
+  const content = ["---", "title: t", "labels:", "  - 2330", "acceptance:", "  - 429", "---", "b"].join("\n")
+  const task = parseTask("t.md", content, "/p")
+  assert.deepEqual(task.labels, ["2330"])
+  assert.deepEqual(task.acceptance, ["429"])
+})
+
+test("recovers a labels item tripped by the colon-space footgun", () => {
+  const content = ["---", "title: t", "labels:", "  - area: auth service", "---", "b"].join("\n")
+  const task = parseTask("t.md", content, "/p")
+  assert.deepEqual(task.labels, ["area: auth service"])
+})
+
 // --- serializeTask / slugify / buildTaskFile ---
 
 test("slugify kebab-cases a title", () => {

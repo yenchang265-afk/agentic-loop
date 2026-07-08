@@ -41,6 +41,39 @@ export const TaskTrackerSchema = z.object({
     /** Jira Epic Link / Azure DevOps parent — the parent item's key or id. Optional. */
     parent: z.string().min(1).optional(),
 });
+/**
+ * Coerce one YAML-parsed list item back to a string.
+ *
+ * Hand- and LLM-authored frontmatter routinely trips the YAML colon-space
+ * footgun: a block-sequence entry like `- Dashboard shows: ticker, price`
+ * parses as a single-key MAP (`{ "Dashboard shows": "ticker, price" }`), not
+ * the string the author meant. A strict `z.array(z.string())` would then
+ * reject a plainly-valid task file — and because `findByIdIn` swallows the
+ * parse error to `null`, every gate would toast a misleading "no task found"
+ * for a file that is right there on disk. Reconstruct the original
+ * `key: value` text so these files parse; coerce bare scalars (e.g. a numeric
+ * ticker) via String(). Pure.
+ */
+const coerceListItem = (v) => {
+    if (typeof v === "string")
+        return v;
+    if (v === null || v === undefined)
+        return "";
+    if (Array.isArray(v))
+        return v.map(coerceListItem).join(", ");
+    if (typeof v === "object") {
+        return Object.entries(v)
+            .map(([k, val]) => (val === null || val === undefined ? `${k}:` : `${k}: ${coerceListItem(val)}`))
+            .join(", ");
+    }
+    return String(v);
+};
+/**
+ * A YAML string-list field (`acceptance`, `labels`) that tolerates the
+ * colon-space footgun above by normalizing every item to a string before
+ * validation. An absent field still defaults to `[]`.
+ */
+const StringListSchema = z.preprocess((v) => (Array.isArray(v) ? v.map(coerceListItem) : v), z.array(z.string()));
 export const TaskFrontmatterSchema = z.object({
     /** Required. The one-line task title; also the loop goal's headline. (Jira Summary / ADO Title) */
     title: z.string().min(1, "title is required"),
@@ -61,9 +94,9 @@ export const TaskFrontmatterSchema = z.object({
     /** Assignee / Assigned To — an email, username, or display name. Optional. */
     assignee: z.string().min(1).optional(),
     /** Jira labels / Azure DevOps tags. Optional; defaults to []. */
-    labels: z.array(z.string()).default([]),
+    labels: StringListSchema.default([]),
     /** Testable criteria threaded into the verify stage. (Acceptance Criteria) Optional. */
-    acceptance: z.array(z.string()).default([]),
+    acceptance: StringListSchema.default([]),
     /** The tracker item this task is paired to. Optional; set it to link a task. */
     tracker: TaskTrackerSchema.optional(),
 });

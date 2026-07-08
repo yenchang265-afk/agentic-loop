@@ -47,8 +47,8 @@ export declare const TaskFrontmatterSchema: z.ZodObject<{
     priority: z.ZodDefault<z.ZodNumber>;
     estimate: z.ZodOptional<z.ZodNumber>;
     assignee: z.ZodOptional<z.ZodString>;
-    labels: z.ZodDefault<z.ZodArray<z.ZodString>>;
-    acceptance: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    labels: z.ZodDefault<z.ZodPipe<z.ZodTransform<unknown, unknown>, z.ZodArray<z.ZodString>>>;
+    acceptance: z.ZodDefault<z.ZodPipe<z.ZodTransform<unknown, unknown>, z.ZodArray<z.ZodString>>>;
     tracker: z.ZodOptional<z.ZodObject<{
         system: z.ZodEnum<{
             jira: "jira";
