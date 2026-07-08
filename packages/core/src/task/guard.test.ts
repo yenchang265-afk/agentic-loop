@@ -89,6 +89,35 @@ test("classifyBash blocks mutations of the backlog", () => {
   }
 })
 
+test("classifyBash allows mkdir of canonical status dirs (backlog scaffolding)", () => {
+  for (const cmd of [
+    "mkdir -p docs/tasks/draft",
+    "mkdir docs/tasks/draft",
+    "mkdir -p docs/tasks/in-progress",
+    "mkdir -p docs/tasks/draft/", // trailing slash
+    "mkdir -p ./docs/tasks/draft",
+    "mkdir -p /repo/docs/tasks/completed",
+    "mkdir -p docs/tasks/draft docs/tasks/queued", // several canonical dirs at once
+    "ls docs/tasks && mkdir -p docs/tasks/draft", // read-only + canonical mkdir segments
+  ]) {
+    assert.equal(classifyBash(cmd, ctx).allow, true, cmd)
+  }
+})
+
+test("classifyBash still blocks mkdir that isn't a plain canonical status dir", () => {
+  for (const cmd of [
+    "mkdir docs/tasks/run", // off-canonical folder (a stray)
+    "mkdir -p docs/tasks", // the bare backlog root
+    "mkdir -p docs/tasks/draft/nested", // deeper than a status dir
+    "mkdir -p docs/tasks/in-progress/.claims/a", // a claim marker
+    "mkdir -p docs/tasks/draft docs/tasks/run", // one canonical, one stray
+    "mkdir -p docs/tasks/draft && rm -rf docs/tasks/queued", // canonical mkdir can't shield a mutation
+    "mkdir -p docs/tasks/draft\nmv docs/tasks/a.md docs/tasks/completed/", // …nor across a newline
+  ]) {
+    assert.equal(classifyBash(cmd, ctx).allow, false, cmd)
+  }
+})
+
 test("classifyBash blocks redirects and compound-command escapes referencing the backlog", () => {
   assert.equal(classifyBash("cat plan.md > docs/tasks/queued/a.md", ctx).allow, false)
   assert.equal(classifyBash("printf 'x' >> docs/tasks/queued/a.md", ctx).allow, false)

@@ -3,7 +3,8 @@ const ALLOW = { allow: true };
 const block = (reason) => ({ allow: false, reason });
 const HOW_TO_MUTATE = "the folder a backlog file lives in IS its state — mutate it only through the loop tools " +
     "(loop_task_approve / loop_plan_approve / loop_replan / loop_ship / loop_move / loop_doctor) " +
-    "or the /agent-loop-task verbs, never by hand.";
+    "or the /agent-loop-task verbs, never by hand. To create a task, write a draft/<id>.md file " +
+    "(or run /agent-loop new) — the status folders are created for you.";
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 /** The backlog-relative remainder of `filePath` (e.g. "draft/a.md"), or null when outside the backlog. */
 export const backlogRelPath = (filePath, tasksDir) => {
@@ -61,12 +62,34 @@ const READ_ONLY = [
 const MUTATING_TOKENS = [" -exec", " -execdir", " -delete", " -ok "];
 const toRe = (glob) => new RegExp("^" + glob.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$", "s");
 const matchesAny = (cmd, globs) => globs.some((g) => toRe(g).test(cmd.trim()));
+// The canonical status folders (`draft`, `queued`, …) may be *created* by hand.
+const CANONICAL_STATUS_DIRS = new Set(STATUSES);
+/**
+ * A bare `mkdir`/`mkdir -p` whose every path argument is exactly a canonical
+ * status dir (`<tasksDir>/<status>`) — e.g. `mkdir -p docs/tasks/draft`. Such a
+ * command only scaffolds the lifecycle skeleton: it cannot move, rename, or
+ * delete any task file, and the target is a real status, not a stray folder, so
+ * it can't corrupt state. Anything deeper (`.../draft/x.md`, a `.claims/` marker),
+ * off-canonical (`.../run`), or the bare root falls through to the default deny.
+ */
+const isCanonicalMkdir = (segment, tasksDir) => {
+    const m = /^mkdir\s+(?:-p\s+)?(\S.*)$/.exec(segment);
+    if (!m)
+        return false;
+    const args = m[1].trim().split(/\s+/).filter(Boolean);
+    return (args.length > 0 &&
+        args.every((arg) => {
+            const rel = backlogRelPath(arg, tasksDir);
+            return rel !== null && CANONICAL_STATUS_DIRS.has(rel.replace(/\/+$/, ""));
+        }));
+};
 /**
  * Bash commands. A command that never references the backlog dir is allowed.
- * One that does is default-denied unless every pipeline segment matches the
- * read-only allowlist, with no output redirection and no `find -exec`-style
- * escape — so `mv`, `mkdir`, `rm`, `sed -i`, `tee`, and `>` into the backlog
- * are blocked by construction.
+ * One that does is default-denied unless every pipeline segment either matches
+ * the read-only allowlist or is a canonical-status `mkdir` (scaffolding), with no
+ * output redirection and no `find -exec`-style escape — so `mv`, `rm`, `sed -i`,
+ * `tee`, `>`, and any non-canonical `mkdir` into the backlog are blocked by
+ * construction.
  */
 export const classifyBash = (command, ctx) => {
     if (!command.includes(ctx.tasksDir))
@@ -87,10 +110,10 @@ export const classifyBash = (command, ctx) => {
         .split(/&&|\|\||;|\||\n|\r/)
         .map((s) => s.trim())
         .filter(Boolean);
-    if (segments.every((s) => matchesAny(s, READ_ONLY)))
+    if (segments.every((s) => matchesAny(s, READ_ONLY) || isCanonicalMkdir(s, ctx.tasksDir)))
         return ALLOW;
     return block(`agentic-loop: only read-only commands (ls/cat/head/tail/grep/rg/find/wc/diff/stat/tree, git reads) ` +
-        `may reference ${ctx.tasksDir}/ — ${HOW_TO_MUTATE}`);
+        `and canonical-status mkdir may reference ${ctx.tasksDir}/ — ${HOW_TO_MUTATE}`);
 };
 /** Route a tool call to the right classifier. Unknown tools are allowed (not this guard's concern). */
 export const classifyMutation = (tool, args, ctx) => {

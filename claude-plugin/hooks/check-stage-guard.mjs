@@ -83,7 +83,8 @@ const readMarker = (cwd, tasksDir) => {
 const HOW_TO_MUTATE =
   "the folder a backlog file lives in IS its state — mutate it only through the loop tools " +
   "(loop_task_approve / loop_plan_approve / loop_replan / loop_ship / loop_move / loop_doctor) " +
-  "or the /agent-loop-task verbs, never by hand."
+  "or the /agent-loop-task verbs, never by hand. To create a task, write a draft/<id>.md file " +
+  "(or run /agent-loop new) — the status folders are created for you."
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
@@ -100,6 +101,27 @@ const BACKLOG_READ_ONLY = [
 ]
 
 const MUTATING_TOKENS = [" -exec", " -execdir", " -delete", " -ok "]
+
+// The canonical status folders (mirrors STATUSES in packages/core/src/task/store.ts).
+const CANONICAL_STATUS_DIRS = new Set([
+  "draft", "queued", "plan-review", "in-progress", "in-review", "completed", "abandoned",
+])
+
+// A `mkdir`/`mkdir -p` whose every arg is exactly `<tasksDir>/<status>` scaffolds the
+// lifecycle without moving/renaming/deleting any task file — safe. Anything deeper,
+// off-canonical, or the bare root falls through to the default deny. Mirrors guard.ts.
+const isCanonicalMkdir = (segment, tasksDir) => {
+  const m = /^mkdir\s+(?:-p\s+)?(\S.*)$/.exec(segment)
+  if (!m) return false
+  const args = m[1].trim().split(/\s+/).filter(Boolean)
+  return (
+    args.length > 0 &&
+    args.every((arg) => {
+      const rel = backlogRelPath(arg, tasksDir)
+      return rel !== null && CANONICAL_STATUS_DIRS.has(rel.replace(/\/+$/, ""))
+    })
+  )
+}
 
 /** {allow:true} | {allow:false, reason}; mirrors guard.ts's classifyMutation. */
 const classifyBacklogMutation = (tool, ti, tasksDir, planTaskId) => {
@@ -137,12 +159,12 @@ const classifyBacklogMutation = (tool, ti, tasksDir, planTaskId) => {
       .split(/&&|\|\||;|\||\n|\r/)
       .map((s) => s.trim())
       .filter(Boolean)
-    if (segments.every((s) => matchesAny(s, BACKLOG_READ_ONLY))) return { allow: true }
+    if (segments.every((s) => matchesAny(s, BACKLOG_READ_ONLY) || isCanonicalMkdir(s, tasksDir))) return { allow: true }
     return {
       allow: false,
       reason:
         `agentic-loop: only read-only commands (ls/cat/head/tail/grep/rg/find/wc/diff/stat/tree, git reads) ` +
-        `may reference ${tasksDir}/ — ${HOW_TO_MUTATE}`,
+        `and canonical-status mkdir may reference ${tasksDir}/ — ${HOW_TO_MUTATE}`,
     }
   }
   return { allow: true }
