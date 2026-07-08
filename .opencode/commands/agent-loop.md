@@ -36,17 +36,22 @@ you**.
   clone/worktree, or unwatch the first. A dead watcher's lease is taken over
   automatically once its heartbeat goes stale.
 - **`/agent-loop unwatch`** — take this session out of watch mode and stop its
-  polling timer (a build already in progress still finishes).
-- **`/agent-loop recover <id>`** — resume an in-progress task whose run died
-  mid-build (crash/restart): re-claims it and resumes from its state snapshot
-  at the exact stage it reached (or, with no valid snapshot, re-enters at
-  BUILD from the persisted plan). Check `git status`/`git diff` first.
+  polling timer (a build already in progress still finishes). Pressing **ESC**
+  mid-drive also unwatches *and* interrupts the running loop (see `recover`).
+- **`/agent-loop recover <id>`** — resume an in-progress task whose run stopped
+  early — a crash/restart, or a user **interrupt (ESC)** mid-drive: re-claims
+  it and resumes from its state snapshot at the exact stage it reached (or,
+  with no valid snapshot, re-enters at BUILD from the persisted plan). ESC is a
+  pause — it halts after the in-flight stage settles and keeps the snapshot;
+  `/agent-loop stop` ends the run and drops it. Check `git status`/`git diff`
+  first.
 - **`/agent-loop ship <id>`** — move a reviewed task from `in-review/` to
   `completed/`, appending an audited "Shipped" note and committing the move.
   The final-gate action (raw `mv` against the backlog is blocked — the
   command is the only path).
 - **`/agent-loop stop`** (alias: `abort`) — abort the loop and exit watch mode
-  (timer included), in this session.
+  (timer included), in this session. Drops the run's snapshot — a deliberate
+  end, nothing to recover (unlike an ESC pause).
 - **`/agent-loop status`** — print the current loop (stage, iteration, watch state
   and cadence) plus a whole-backlog roll-up: counts per folder and the
   actionable flags (awaiting approval, claimable, claim-held, interrupted,

@@ -24,9 +24,13 @@ the plan itself is suspect and a human sends it back with
 A stage that outlives `stageTimeoutMinutes` fails the loop instead of
 hanging it. On a REVIEW PASS the task parks in `in-review/` — the loop never
 pushes or opens a PR itself; you review the branch diff, then run
-`/agent-loop ship <id>` to move it to `completed/`. A run that dies mid-build is
-resumed with `/agent-loop recover <id>` — loop state is snapshotted after every
-stage, so recovery resumes at the exact stage it reached.
+`/agent-loop ship <id>` to move it to `completed/`. A run that stops early —
+a crash, or a user **interrupt (ESC)** mid-drive — is resumed with
+`/agent-loop recover <id>`: loop state is snapshotted after every stage, so
+recovery resumes at the exact stage it reached. ESC is a **pause** — it halts
+the loop after the in-flight stage settles and stops watch mode, but keeps the
+snapshot (recover picks up there); a deliberate `/agent-loop stop` **ends** the
+run and drops the snapshot, so there is nothing to recover.
 
 Both knobs above (and the optional hardening: worktrees, review lenses,
 secret redaction, run summaries) are configured in `.agentic-loop.json` —
@@ -61,15 +65,20 @@ The loop (`/agent-loop`):
   Takes the clone's **watch lease** (`runs/.watch-lease/`, heartbeat every
   tick) — a second opencode process watching the same clone is refused; a
   dead watcher's lease is taken over once its heartbeat goes stale
-- `/agent-loop unwatch` — stop this session from claiming new work (timer included)
+- `/agent-loop unwatch` — stop this session from claiming new work (timer
+  included). Pressing **ESC** mid-drive does this too *and* interrupts the
+  running loop (see `recover`); `unwatch` only clears the watch flag and leaves
+  an in-flight loop to finish
 - `/agent-loop doctor [fix]` — audit the backlog for stray folders/files,
   duplicate ids, and held claim markers; `fix` applies the unambiguous
   repairs (rescue strays to `draft/`, drop emptied folders, release stale
   markers)
-- `/agent-loop recover <id>` — resume an in-progress task whose run died mid-build
-  (crash, restart), from its state snapshot (or its persisted plan)
+- `/agent-loop recover <id>` — resume an in-progress task whose run stopped
+  early — a crash/restart, or a user **interrupt (ESC)** — from its state
+  snapshot (or its persisted plan), at the exact stage it reached
 - `/agent-loop ship <id>` — move a reviewed `in-review/` task to `completed/`, audited
-- `/agent-loop stop` — abort, clear state, and exit watch mode
+- `/agent-loop stop` — abort, clear state, and exit watch mode; **drops the
+  snapshot** (deliberate end — nothing to recover, unlike an ESC pause)
 - `/agent-loop status` — print the current loop (stage, iteration, watch cadence)
   plus a whole-backlog roll-up (counts, awaiting-approval/claimable/
   interrupted/in-review)
