@@ -124,20 +124,22 @@ export const listByStatus = async (client, directory, tasksDir, status, log) => 
 export const listQueued = (client, directory, tasksDir, log) => listByStatus(client, directory, tasksDir, "queued", log);
 /** List and parse every task in `in-progress/` — the pool `/agent-loop watch` claims from. */
 export const listInProgress = (client, directory, tasksDir, log) => listByStatus(client, directory, tasksDir, "in-progress", log);
-/** Resolve a specific task by id within a status folder, or null if missing/invalid. */
-export const findByIdIn = async (client, directory, tasksDir, status, id) => {
-    const filename = `${id}.md`;
-    const rel = `${tasksDir}/${status}/${filename}`;
-    const read = await client.file.read({ query: { path: rel, directory } }).catch(() => null);
-    const content = read?.data?.content;
-    if (!content)
-        return null;
-    try {
-        return parseTask(filename, content, path.join(directory, rel));
-    }
-    catch {
-        return null;
-    }
+/**
+ * Resolve a specific task by id within a status folder, or null if missing/invalid.
+ *
+ * Resolves by LISTING the folder and matching the id — the same `client.file.list`
+ * path the scheduler claims through — rather than building `<id>.md` and reading it
+ * directly. A host (notably opencode) can resolve a hand-built relative read path
+ * differently from a listed one, so the old direct-read made a task that is plainly
+ * present (the loop had just moved it here) read back as missing — every
+ * `/agent-loop-task approve|approve-plan|replan` then toasted "no task found". The
+ * asymmetry only bit the gates: the loop already claims via `listByStatus`. If the
+ * loop can reach a task, the gate now can too. Only ever called on human-triggered /
+ * one-off paths (gates, release, recover, ship), never per-poll, so the list is free.
+ */
+export const findByIdIn = async (client, directory, tasksDir, status, id, log) => {
+    const tasks = await listByStatus(client, directory, tasksDir, status, log);
+    return tasks.find((t) => t.id === id) ?? null;
 };
 /** Directory of atomic claim markers, alongside the task files of one status folder. */
 const claimsDir = (taskPath) => path.join(path.dirname(taskPath), ".claims");
