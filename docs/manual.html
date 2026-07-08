@@ -55,6 +55,7 @@ body{
 a{color:var(--accent);text-decoration:none}
 a:hover{text-decoration:underline}
 code,kbd{font-family:var(--mono)}
+kbd{font-size:.82em;padding:1px 6px;border:1px solid var(--border-strong);border-bottom-width:2px;border-radius:5px;background:var(--surface-2);color:var(--ink-2);white-space:nowrap}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
 
 /* ============================================================= header */
@@ -511,6 +512,8 @@ npm install                    <span class="c"># workspaces + builds core dist/<
       <p style="font-size:14px;color:var(--muted-txt)">Under <code>docs/tasks/</code> (configurable via <code>tasksDir</code>), plus <code>abandoned/</code> for dropped work and an ephemeral <code>runs/</code> holding machine state. PLAN <em>parks</em> — it writes the plan onto the task file and exits rather than blocking on a human, so the loop is always free to pick up other work.</p>
 
       <div class="note"><b>OpenCode vs Claude Code.</b> Same kinds and lifecycle. OpenCode runs a background <code>session.idle</code> driver with a <code>watch</code> polling mode; Claude Code has no background driver — the main agent drives via a bundled MCP server, gates are interactive prompts, and <code>/agent-loop claim</code> replaces <code>watch</code>.</p></div>
+
+      <div class="note"><b>Pausing a run (Esc).</b> On OpenCode, pressing <kbd>Esc</kbd> mid-drive interrupts the loop: it stops watch mode and halts <em>after</em> the in-flight stage settles, keeping the run snapshot. Resume exactly where it stopped with <code>/agent-loop recover &lt;id&gt;</code>. That is the difference from <code>/agent-loop stop</code>, a deliberate end that drops the snapshot — nothing to recover.</p></div>
     </section>
 
     <!-- ===================================================== SKILLS -->
@@ -599,10 +602,12 @@ npm install                    <span class="c"># workspaces + builds core dist/<
           <div class="tblwrap" style="margin-top:8px"><table style="min-width:0"><tbody>
             <tr><td><code>task &lt;id&gt;</code></td><td>Drive one task through its stages.</td></tr>
             <tr><td><code>claim</code></td><td>Pull &amp; drive the next ready unit of work.</td></tr>
-            <tr><td><code>watch [interval]</code></td><td>Poll for work (OpenCode only).</td></tr>
+            <tr><td><code>watch [interval]</code> · <code>unwatch</code></td><td>Poll for work / clear the watch flag (OpenCode only).</td></tr>
             <tr><td><code>status</code></td><td>Backlog + pairing roll-up.</td></tr>
             <tr><td><code>ship &lt;id&gt;</code></td><td>Ship gate → completed.</td></tr>
-            <tr><td><code>recover &lt;id&gt;</code> · <code>doctor [fix]</code> · <code>stop</code></td><td>Recover an interrupted task, diagnose/repair, halt.</td></tr>
+            <tr><td><kbd>Esc</kbd></td><td>Pause a running loop — halts after the in-flight stage settles and keeps the snapshot. Resume with <code>recover</code>.</td></tr>
+            <tr><td><code>recover &lt;id&gt;</code></td><td>Resume an interrupted task (crash or <kbd>Esc</kbd> pause) at the exact stage it stopped.</td></tr>
+            <tr><td><code>doctor [fix]</code> · <code>stop</code></td><td>Diagnose/repair; or halt the run and drop the snapshot (deliberate end — nothing to recover, unlike an <kbd>Esc</kbd> pause).</td></tr>
           </tbody></table></div>
         </div>
       </div>
@@ -757,16 +762,16 @@ npm install                    <span class="c"># workspaces + builds core dist/<
     ["code-review-and-quality",["review"],"Multi-axis code review before any change enters the main branch, whoever wrote it."],
     ["security-and-hardening",["review","library"],"Hardens against vulnerabilities and audits code that handles untrusted input, auth, storage, or third-party services."],
     ["performance-optimization",["review","library"],"Profiles and fixes bottlenecks; addresses regressions and Core Web Vitals when performance requirements exist."],
-    ["code-simplification",["library"],"Refactors working code for clarity without changing behaviour."],
-    ["api-and-interface-design",["library"],"Designs stable APIs, module boundaries, and type contracts between modules."],
-    ["frontend-ui-engineering",["library"],"Builds production-quality user-facing interfaces — components, layout, and state."],
+    ["code-simplification",["build","library"],"Refactors working code for clarity without changing behaviour. BUILD reaches for it when a re-build's job is to reduce complexity."],
+    ["api-and-interface-design",["plan","library"],"Designs stable APIs, module boundaries, and type contracts between modules. PLAN reaches for it when a task changes a public interface."],
+    ["frontend-ui-engineering",["build","library"],"Builds production-quality user-facing interfaces — components, layout, and state. BUILD reaches for it when the change touches UI."],
     ["browser-testing-with-devtools",["library"],"Tests in real browsers via the Chrome DevTools MCP — DOM, console, network, performance, visuals."],
     ["ci-cd-and-automation",["library"],"Sets up and modifies build and deployment pipelines, quality gates, and CI test runners."],
     ["git-workflow-and-versioning",["library"],"Structures committing, branching, and conflict resolution across parallel streams of work."],
-    ["documentation-and-adrs",["library"],"Records architectural decisions and documentation future engineers and agents will need."],
-    ["observability-and-instrumentation",["library"],"Adds logging, metrics, tracing, and alerting so production behaviour is visible and diagnosable."],
+    ["documentation-and-adrs",["plan","library"],"Records architectural decisions and documentation future engineers and agents will need. PLAN reaches for it when a plan makes a notable architectural decision."],
+    ["observability-and-instrumentation",["build","library"],"Adds logging, metrics, tracing, and alerting so production behaviour is visible and diagnosable. BUILD reaches for it when the change adds a production code path."],
     ["shipping-and-launch",["library"],"Prepares production launches: pre-launch checklist, monitoring, staged rollout, rollback."],
-    ["deprecation-and-migration",["library"],"Manages sunsetting old systems and migrating users from one implementation to another."],
+    ["deprecation-and-migration",["plan","library"],"Manages sunsetting old systems and migrating users from one implementation to another. PLAN reaches for it when a task removes or migrates a system."],
     ["source-driven-development",["library"],"Grounds implementation decisions in official documentation, citing sources, free of outdated patterns."],
     ["doubt-driven-development",["library"],"Subjects every non-trivial decision to a fresh-context adversarial review before it stands."],
     ["context-engineering",["library"],"Optimizes agent context and rules files at session start or when output quality degrades."]
