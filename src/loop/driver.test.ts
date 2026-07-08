@@ -2,15 +2,20 @@ import assert from "node:assert/strict"
 import { test } from "node:test"
 import { PLAN_HEADING } from "@agentic-loop/core/task/store"
 import { serializeTask } from "@agentic-loop/core/task/schema"
+import { firstStep } from "@agentic-loop/core/loop/engine"
+import type { LoopState } from "@agentic-loop/core/loop/state"
 import type { Config } from "../config.ts"
 import {
   abortedSessionID,
   claimSkipReason,
+  drive,
   handleTaskCommand,
+  manifestFor,
   onInterrupt,
   parseTaskArgs,
   parseWatchArgs,
   recordAdoData,
+  recordVerdict,
   type Deps,
 } from "./driver.ts"
 
@@ -405,4 +410,43 @@ test("replan also accepts a cap-tripped in-progress task", async () => {
 
   assert.equal(toasts[0]?.variant, "success")
   assert.ok(log.some((cmd) => cmd.includes("mv") && cmd.includes("queued")))
+})
+
+/**
+ * `drive` must interpret transitions against the CLAIMED kind's manifest, not a
+ * hardcoded engineering one. Regression guard for the pr-sitter drive path: its
+ * stages are triage/fix/verify/publish, so an engineering-manifest lookup of
+ * "triage" throws and crashes the very first transition. A `triage` FAIL parks
+ * the loop as `done` ("nothing actionable") — reached only when the correct
+ * (pr-sitter) manifest drives `advance`. `triage` has isolation "none", so this
+ * needs no git/worktree.
+ */
+test("drive interprets a pr-sitter loop with the pr-sitter manifest, not engineering", async () => {
+  const sessionID = "sess-pr-sitter"
+  const log: string[] = []
+  // A session.command that records a triage FAIL verdict through the same
+  // channel the loop_verdict tool uses, then returns the stage's text.
+  const client = {
+    tui: { showToast: async () => ({ data: undefined }) },
+    session: {
+      command: async () => {
+        recordVerdict(sessionID, "triage", { verdict: "FAIL", reason: "nothing actionable" })
+        return { data: { parts: [{ type: "text", text: "triaged: no actionable signal" }] } }
+      },
+    },
+  } as unknown as Deps["client"]
+  const deps: Deps = { client, $: makeShellFS({}, log), directory: "/repo", log: () => {} }
+
+  const state: LoopState = {
+    kind: "pr-sitter",
+    goal: "Sit on PR #1",
+    stage: "triage",
+    iteration: 0,
+    artifacts: {},
+  }
+
+  const outcome = await drive(deps, sessionID, testConfig, firstStep(manifestFor("pr-sitter"), state))
+
+  assert.equal(outcome?.kind, "done")
+  assert.match(outcome?.message ?? "", /nothing actionable/i)
 })

@@ -146,7 +146,7 @@ registerEngineeringHooks()
 
 /** Loaded manifests by kind — engineering eagerly, other enabled kinds on first poll. */
 const manifests = new Map<string, LoadedManifest>([["engineering", eng]])
-const manifestFor = (kind: string): LoadedManifest => {
+export const manifestFor = (kind: string): LoadedManifest => {
   let loaded = manifests.get(kind)
   if (!loaded) {
     loaded = loadManifest(LOOPS_DIR, kind)
@@ -614,7 +614,7 @@ const renderMetrics = async (
 
 /** Run the stage chain from `first` until the pure logic yields a gate/done/stop.
  *  Returns the terminal outcome so callers can report it to the work source. */
-const drive = async (
+export const drive = async (
   deps: Deps,
   sessionID: string,
   config: Config,
@@ -697,7 +697,12 @@ const drive = async (
     // the next PLAN/BUILD iteration leads with what actually failed.
     const block = failedCriteriaBlock(record)
     const threaded = block ? `${block}\n\n${output}` : output
-    step = advance(eng, step.state, config, threaded, verdict)
+    // Interpret transitions against the CLAIMED kind's manifest — `loaded`, not
+    // the hardcoded engineering `eng`. A pr-sitter loop (stages triage/fix/
+    // verify/publish) would otherwise crash on its first transition, as
+    // `stageDef(eng.manifest, "triage")` throws. For engineering, `loaded` IS
+    // `eng` (same map entry), so this is byte-identical there.
+    step = advance(loaded, step.state, config, threaded, verdict)
   }
 
   const { state, action } = step
