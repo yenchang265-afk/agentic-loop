@@ -6,6 +6,7 @@ import { type Task } from "@agentic-loop/core/task/schema"
 import { advance, composePrompt, firstStep } from "@agentic-loop/core/loop/engine"
 import { registerEngineeringHooks } from "@agentic-loop/core/kinds/engineering"
 import { loadManifest } from "@agentic-loop/core/manifest/load"
+import { resolveValidateHook } from "@agentic-loop/core/manifest/registry"
 import { stageDef, type LoadedManifest } from "@agentic-loop/core/manifest/schema"
 import { combineSkips, pollOnce } from "@agentic-loop/core/scheduler/scheduler"
 import { platformFor } from "@agentic-loop/core/config"
@@ -160,7 +161,20 @@ export const manifestFor = (kind: string): LoadedManifest => {
  *  command in this session to gather ADO data (see `adoMcpProvider`). */
 const sourcesFor = (deps: Deps, config: Config, sessionID: string): WorkSource[] =>
   enabledLoopKinds(config).flatMap((kind): WorkSource[] => {
-    const loaded = manifestFor(kind)
+    // A typo'd or unavailable `loops.<kind>` (the config schema is an open record)
+    // must not throw here — that would abort the whole flatMap and take every OTHER
+    // enabled source (engineering included) down with it, so no work ever gets
+    // claimed. Skip-and-warn the bad kind instead.
+    let loaded: LoadedManifest
+    try {
+      loaded = manifestFor(kind)
+    } catch (err) {
+      void deps.log(
+        "warn",
+        `loop kind "${kind}" is enabled in config but its loops/${kind}/ manifest could not be loaded — skipping it. ${(err as Error).message}`,
+      )
+      return []
+    }
     if (loaded.manifest.workSource.type === "github-pr") {
       const platform = platformFor(config, kind)
       if (platform === "ado") {
@@ -236,6 +250,35 @@ type Pending =
   | { readonly kind: "recover-state"; readonly state: LoopState }
 
 const pending = new Map<string, Pending>()
+
+/** The task whose on-disk claim marker a pending entry placed before it was queued. */
+const pendingClaim = (p: Pending): { readonly id: string; readonly path: string } | undefined =>
+  p.kind === "recover-state" ? p.state.task : p.task
+
+/**
+ * Release the claim marker an about-to-be-discarded pending placed. Every `pending`
+ * entry is preceded by a `claimTask`, so a pending that is overwritten (a second
+ * `/agent-loop task`) or dropped (`stop`/ESC) before `onIdle` drains it would leave
+ * its task claim-held-but-undriven — invisible to every watcher until the stale-claim
+ * sweep. Best-effort.
+ */
+const releasePendingMarker = async (deps: Deps, prior: Pending | undefined): Promise<void> => {
+  const ref = prior && pendingClaim(prior)
+  if (ref) await releaseClaim(deps.$, { id: ref.id, path: ref.path })
+}
+
+/** Queue a session's pending work, first releasing the marker of any prior unconsumed pending. */
+const setPending = async (deps: Deps, sessionID: string, entry: Pending): Promise<void> => {
+  await releasePendingMarker(deps, pending.get(sessionID))
+  pending.set(sessionID, entry)
+}
+
+/** Drop a session's unconsumed pending work and release its claim marker. */
+const dropPending = async (deps: Deps, sessionID: string): Promise<void> => {
+  const prior = pending.get(sessionID)
+  pending.delete(sessionID)
+  await releasePendingMarker(deps, prior)
+}
 const driving = new Set<string>()
 /** Sessions in `/agent-loop watch` mode — a standing flag, not a one-shot `Pending`,
  *  since it must survive many no-op idle ticks between claims. */
@@ -256,6 +299,15 @@ const watchIntervalsMs = new Map<string, number>()
  * the in-memory guards can't see. Last unwatch/stop releases it.
  */
 const watchLeases = new Map<string, { count: number; deps: Deps; tasksDir: string; intervalMs: number }>()
+/**
+ * The in-flight on-disk acquisition per directory. A second watch session arming the
+ * same clone while the first is still awaiting `acquireLease` would otherwise read an
+ * empty `watchLeases`, race its own `acquireLease` (which the first pid already holds),
+ * and wrongly refuse ITSELF ("another watcher holds the lease"). Joiners await this
+ * single acquisition instead and share the refcount — but never return ok until the
+ * cross-process disk lease is actually held.
+ */
+const watchLeaseAcquiring = new Map<string, Promise<{ ok: true } | { ok: false; message: string }>>()
 
 const leaseOwner = (intervalMs: number) => ({ pid: process.pid, host: os.hostname(), intervalMs })
 
@@ -265,23 +317,42 @@ const acquireWatchLease = async (
   config: Config,
   intervalMs: number,
 ): Promise<{ ok: true } | { ok: false; message: string }> => {
-  const existing = watchLeases.get(deps.directory)
+  const dir = deps.directory
+  const existing = watchLeases.get(dir)
   if (existing) {
     existing.count += 1
     return { ok: true }
   }
-  const res = await acquireLease(deps.$, deps.directory, config.tasksDir, leaseOwner(intervalMs), new Date())
-  if (!res.ok) {
-    const o = res.owner
-    const ago = o && Number.isFinite(Date.parse(o.heartbeatAt)) ? Math.round((Date.now() - Date.parse(o.heartbeatAt)) / 1000) : null
-    const who = o ? ` (pid ${o.pid} on ${o.host}${ago !== null ? `, heartbeat ${ago}s ago` : ""})` : ""
-    return {
-      ok: false,
-      message: `Another watcher${who} holds this clone's watch lease — unwatch it there, or run this watcher in its own clone/worktree.`,
-    }
+  // Coalesce concurrent first-arms: joiners await the one in-flight acquisition, then
+  // take the refcount fast-path on success rather than racing a second `acquireLease`.
+  const inflight = watchLeaseAcquiring.get(dir)
+  if (inflight) {
+    const res = await inflight
+    if (!res.ok) return res
+    const e = watchLeases.get(dir)
+    if (e) e.count += 1
+    return { ok: true }
   }
-  watchLeases.set(deps.directory, { count: 1, deps, tasksDir: config.tasksDir, intervalMs })
-  return { ok: true }
+  const attempt = (async (): Promise<{ ok: true } | { ok: false; message: string }> => {
+    const res = await acquireLease(deps.$, dir, config.tasksDir, leaseOwner(intervalMs), new Date())
+    if (!res.ok) {
+      const o = res.owner
+      const ago = o && Number.isFinite(Date.parse(o.heartbeatAt)) ? Math.round((Date.now() - Date.parse(o.heartbeatAt)) / 1000) : null
+      const who = o ? ` (pid ${o.pid} on ${o.host}${ago !== null ? `, heartbeat ${ago}s ago` : ""})` : ""
+      return {
+        ok: false,
+        message: `Another watcher${who} holds this clone's watch lease — unwatch it there, or run this watcher in its own clone/worktree.`,
+      }
+    }
+    watchLeases.set(dir, { count: 1, deps, tasksDir: config.tasksDir, intervalMs })
+    return { ok: true }
+  })()
+  watchLeaseAcquiring.set(dir, attempt)
+  try {
+    return await attempt
+  } finally {
+    watchLeaseAcquiring.delete(dir)
+  }
 }
 
 /** Drop one watch session's share of the lease; the last one releases it on disk. */
@@ -441,14 +512,42 @@ const teardownIsolation = (deps: Deps, state: LoopState): Promise<void> =>
 /** The working directory a loop's stages operate in: its worktree, else the main tree. */
 const workTree = (deps: Deps, state: LoopState): string => state.git?.worktree ?? deps.directory
 
+/**
+ * Serialize commits per git tree. In worktree mode `serialize` is off, so N in-process
+ * watch drives run concurrently — and a command handler can fire mid-drive in either
+ * mode — all committing the MAIN tree. Concurrent `git commit`s contend on
+ * `.git/index.lock`; the loser's `commitPaths`/`commitAll` hits `.nothrow()`, returns
+ * false, and the change never enters history (the fs task-move still lands, so it looks
+ * committed). A per-tree promise chain makes each tree's commits run one at a time.
+ * Keyed by tree path: a worktree's own index never contends with the main tree's.
+ */
+const commitLocks = new Map<string, Promise<unknown>>()
+const withCommitLock = <T>(treePath: string, fn: () => Promise<T>): Promise<T> => {
+  const prev = commitLocks.get(treePath) ?? Promise.resolve()
+  const run = prev.then(fn, fn) // run regardless of the prior commit's outcome
+  commitLocks.set(
+    treePath,
+    run.then(
+      () => {},
+      () => {},
+    ),
+  )
+  return run
+}
+
 /** Commit everything as a checkpoint on the loop branch/worktree. No-op until isolation ran. */
 const checkpoint = async (deps: Deps, state: LoopState, message: string): Promise<void> => {
   // `isolated` (not `git`): don't `git add -A && commit` the human's main tree for a
   // loop whose pre-set `git` never became real isolation — that would sweep their WIP
   // into a bogus loop commit (pr-sitter `triage` → done on a dirty tree).
   if (!state.isolated) return
-  await commitAll(deps.$, workTree(deps, state), message)
+  const tree = workTree(deps, state)
+  await withCommitLock(tree, () => commitAll(deps.$, tree, message))
 }
+
+/** Commit backlog path changes on the MAIN tree, serialized against other commits there. */
+const commitTasks = (deps: Deps, config: Config, message: string): Promise<boolean> =>
+  withCommitLock(deps.directory, () => commitPaths(deps.$, deps.directory, [config.tasksDir], message))
 
 /**
  * Commit backlog mutations (audit notes, task moves) on the MAIN tree. In
@@ -458,7 +557,7 @@ const checkpoint = async (deps: Deps, state: LoopState, message: string): Promis
  */
 const commitBacklog = async (deps: Deps, config: Config, state: LoopState, message: string): Promise<void> => {
   if (!state.git?.worktree) return
-  await commitPaths(deps.$, deps.directory, [config.tasksDir], message)
+  await commitTasks(deps, config, message)
 }
 
 /** The slash command a stage fires — named by the manifest (e.g. plan → `plan-task`). Pure. */
@@ -614,7 +713,11 @@ const renderMetrics = async (
 ): Promise<void> => {
   const samples = runSamples.get(sessionID) ?? []
   runSamples.delete(sessionID)
-  const summary = renderRunSummary(samples, outcome, detail, config.maxIterations, new Date().toISOString())
+  // Report against the EFFECTIVE cap the engine enforced — a kind's manifest may
+  // override `config.maxIterations` (pr-sitter caps at 3), so `config.maxIterations`
+  // alone would mislabel the footer (e.g. "iterations used: 3/1").
+  const cap = manifestFor(state.kind ?? "engineering").manifest.maxIterations ?? config.maxIterations
+  const summary = renderRunSummary(samples, outcome, detail, cap, new Date().toISOString())
   await appendRunLog(deps.$, deps.directory, config.tasksDir, loopId(state), `run · ${outcome}`, summary, deps.log)
 }
 
@@ -717,6 +820,23 @@ export const drive = async (
   const { state, action } = step
   switch (action.kind) {
     case "park": {
+      // A manifest may name a pre-transition validator for this stage
+      // (`hooks.validateBeforeTransition`); a registered hook returning a reason
+      // vetoes the park. Engineering's plan-landed check needs backlog IO, so it
+      // stays hardcoded below (its ref resolves to null here — harmless skip).
+      const validate = resolveValidateHook(loaded.manifest.hooks.validateBeforeTransition[state.stage])
+      const veto = validate ? await validate(state) : null
+      if (veto) {
+        await deps.log("warn", `loop: ${state.stage} park vetoed by validator — ${veto}`)
+        if (state.task) {
+          const held = await findByIdIn(deps.$, deps.directory, config.tasksDir, "queued", state.task.id)
+          if (held) await releaseClaim(deps.$, held)
+        }
+        await renderMetrics(deps, sessionID, config, state, "error", veto)
+        clearLoop(sessionID)
+        await toast(client, `Park vetoed for "${state.task?.id ?? state.goal}" — ${veto}`, "error")
+        return { kind: "error", message: veto }
+      }
       // PLAN finished. Validate the plan actually landed on disk before
       // parking — a stage that wrote nothing must not put a planless task in
       // front of the human gate.
@@ -739,7 +859,7 @@ export const drive = async (
       }
       await appendNote(deps.$, fresh, auditNote("Plan written — parked for plan review", new Date(), actor), deps.log)
       await moveTask(deps.$, fresh, (action.toStatus ?? "plan-review") as TaskStatus) // also releases the queued/ claim marker
-      await commitPaths(deps.$, deps.directory, [config.tasksDir], `loop(${state.task.id}): plan written — parked for review`)
+      await commitTasks(deps, config, `loop(${state.task.id}): plan written — parked for review`)
       await renderMetrics(deps, sessionID, config, state, "done", "plan parked for review")
       clearLoop(sessionID)
       await toast(
@@ -915,12 +1035,14 @@ const stopWatching = async (deps: Deps, sessionID: string): Promise<boolean> => 
 export const onInterrupt = async (deps: Deps, sessionID: string): Promise<void> => {
   const state = getLoop(sessionID) // still set on the interrupt (the flag path keeps it)
   const hadLoop = state !== undefined
-  pending.delete(sessionID)
+  const priorPending = pending.get(sessionID)
+  pending.delete(sessionID) // synchronous — beat the racing idle; marker released below
   // Only flag when a loop is actually driving — otherwise the flag would linger
   // (no drive to consume it in onIdle's finally) and wrongly halt this session's
   // NEXT loop. A running stage always has getLoop set (drive's setLoop), so the
   // interruptable moment is covered.
   if (hadLoop) interrupted.add(sessionID)
+  await releasePendingMarker(deps, priorPending) // dropped one-shot work must not leave a held claim
   const wasWatching = await stopWatching(deps, sessionID)
   // The interrupt keeps the snapshot, so recover resumes at the interrupted stage —
   // point the user straight at it.
@@ -1173,7 +1295,7 @@ export const handleTaskCommand = async (deps: Deps, _sessionID: string, args: st
       const actor = await gitActor(deps.$, deps.directory)
       await appendNote(deps.$, draft, auditNote("Task approved — queued for planning", new Date(), actor))
       await moveTask(deps.$, draft, "queued")
-      await commitPaths(deps.$, deps.directory, [config.tasksDir], `loop(${id}): task approved — queued for planning`)
+      await commitTasks(deps, config, `loop(${id}): task approved — queued for planning`)
       await toast(
         client,
         `Task approved — "${draft.title}" queued in ${config.tasksDir}/queued/. /agent-loop watch (or /agent-loop task ${id}) will plan it.`,
@@ -1208,7 +1330,7 @@ export const handleTaskCommand = async (deps: Deps, _sessionID: string, args: st
       const actor = await gitActor(deps.$, deps.directory)
       await appendNote(deps.$, task, auditNote("Plan approved — parked for execution", new Date(), actor))
       await moveTask(deps.$, task, "in-progress")
-      await commitPaths(deps.$, deps.directory, [config.tasksDir], `loop(${id}): plan approved — parked for execution`)
+      await commitTasks(deps, config, `loop(${id}): plan approved — parked for execution`)
       await toast(
         client,
         `Plan approved — "${task.title}" parked in ${config.tasksDir}/in-progress/. /agent-loop watch (or /agent-loop task ${id}) will build it.`,
@@ -1239,7 +1361,7 @@ export const handleTaskCommand = async (deps: Deps, _sessionID: string, args: st
     const why = parsed.reason ? ` — ${parsed.reason}` : ""
     await appendNote(deps.$, task, auditNote(`Plan rejected — sent back to queued for re-planning${why}`, new Date(), actor))
     await moveTask(deps.$, task, "queued")
-    await commitPaths(deps.$, deps.directory, [config.tasksDir], `loop(${id}): plan rejected — re-queued for planning`)
+    await commitTasks(deps, config, `loop(${id}): plan rejected — re-queued for planning`)
     await toast(
       client,
       `"${task.title}" sent back to ${config.tasksDir}/queued/ — the next PLAN pass will address the rejection.`,
@@ -1281,7 +1403,7 @@ export const handleCommand = async (
 
   if (lower === "stop" || lower === "abort") {
     const wasWatching = await stopWatching(deps, sessionID)
-    pending.delete(sessionID)
+    await dropPending(deps, sessionID) // release any queued-but-undriven claim marker
     const state = getLoop(sessionID)
     if (state?.task) {
       await appendNote(
@@ -1361,7 +1483,7 @@ export const handleCommand = async (
         task,
         auditNote(`Recovered by /agent-loop recover — resuming from snapshot at ${snap.stage}.`, new Date(), actor),
       )
-      pending.set(sessionID, { kind: "recover-state", state })
+      await setPending(deps, sessionID, { kind: "recover-state", state })
       await toast(
         client,
         `Recovering "${task.title}" from snapshot at ${snap.stage} — check git status/diff for leftovers; resuming…`,
@@ -1374,7 +1496,7 @@ export const handleCommand = async (
       task,
       auditNote("Recovered by /agent-loop recover — resuming BUILD from the persisted plan.", new Date(), actor),
     )
-    pending.set(sessionID, { kind: "recover", task })
+    await setPending(deps, sessionID, { kind: "recover", task })
     await toast(
       client,
       `Recovering "${task.title}" — check git status/diff for leftovers from the interrupted run; building…`,
@@ -1396,7 +1518,7 @@ export const handleCommand = async (
     try {
       await appendNote(deps.$, task, auditNote("Shipped — moved to completed", new Date(), await gitActor(deps.$, deps.directory)))
       await moveTask(deps.$, task, "completed")
-      await commitPaths(deps.$, deps.directory, [config.tasksDir], `loop(${id}): shipped — completed`)
+      await commitTasks(deps, config, `loop(${id}): shipped — completed`)
       await toast(client, `"${task.title}" completed.`, "success")
     } catch (err) {
       await toast(client, `Ship failed for "${id}": ${(err as Error).message}`, "error")
@@ -1419,7 +1541,7 @@ export const handleCommand = async (
           return void (await toast(client, `Task "${id}" was just claimed by another watcher.`, "warning"))
         }
         clearLoop(sessionID)
-        pending.set(sessionID, { kind: "start-plan", task: queued, goal: taskGoal(queued) })
+        await setPending(deps, sessionID, { kind: "start-plan", task: queued, goal: taskGoal(queued) })
         await toast(client, `Loop started on "${queued.title}" — planning… (it will park in plan-review/ for your gate)`, "info")
         return
       }
@@ -1447,7 +1569,7 @@ export const handleCommand = async (
       return void (await toast(client, `Task "${id}" was just claimed by another watcher.`, "warning"))
     }
     clearLoop(sessionID)
-    pending.set(sessionID, { kind: "start-task", task, goal: taskGoal(task) })
+    await setPending(deps, sessionID, { kind: "start-task", task, goal: taskGoal(task) })
     await toast(client, `Loop started on "${task.title}" — building…`, "info")
     return
   }
@@ -1503,7 +1625,7 @@ export const handleCommand = async (
         )
       }
       if (rescued.length) {
-        await commitPaths(deps.$, deps.directory, [config.tasksDir], `loop: doctor rescued ${rescued.length} stray task file(s) to draft/`)
+        await commitTasks(deps, config, `loop: doctor rescued ${rescued.length} stray task file(s) to draft/`)
       }
       const summary = [
         rescued.length ? `rescued ${rescued.length} stray file(s) to draft/` : "",

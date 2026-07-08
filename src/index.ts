@@ -217,14 +217,30 @@ export const AgenticLoop: Plugin = async ({ client, directory, $ }) => {
           if (!verdict.allow) throw new Error(verdict.reason)
         }
       }
-      // Worktree pinning enforcement (best-effort): while a worktree-mode loop
-      // drives this session, a file-writing tool must not touch an absolute
-      // path outside the worktree. Relative paths and non-edit tools pass
-      // through (bash pinning stays prompt-enforced — a documented residual).
+      // Worktree pinning enforcement: while a worktree-mode loop drives this
+      // session, a file-writing tool must not touch anything outside the worktree.
+      // Non-edit tools pass through (bash pinning stays prompt-enforced — a
+      // documented residual).
       const wt = loop?.git?.worktree
       if (!wt || !EDIT_TOOLS.has(input.tool)) return
       const filePath: unknown = output.args?.filePath ?? output.args?.path
-      if (typeof filePath !== "string" || !path.isAbsolute(filePath)) return
+      // Fail CLOSED under isolation. A relative path resolves against the session's
+      // cwd — the MAIN tree, not the worktree — so it would silently dirty the human's
+      // checkout while the loop believes it is isolated; and an edit-shaped tool whose
+      // path we can't read (e.g. a multi-file `patch` payload) is unguardable. Both are
+      // refused rather than passed through.
+      if (typeof filePath !== "string") {
+        throw new Error(
+          `agentic-loop: this loop is isolated to its worktree ${wt}, but ${input.tool}'s target path could not be ` +
+            `determined — pass an absolute path under the worktree.`,
+        )
+      }
+      if (!path.isAbsolute(filePath)) {
+        throw new Error(
+          `agentic-loop: this loop is isolated to its worktree ${wt} — "${filePath}" is a relative path that resolves ` +
+            `against the main tree. Use an absolute path under the worktree.`,
+        )
+      }
       const rel = path.relative(wt, path.resolve(filePath))
       if (rel === "" || rel.startsWith("..")) {
         throw new Error(
