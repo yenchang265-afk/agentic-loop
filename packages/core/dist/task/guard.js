@@ -61,6 +61,22 @@ const READ_ONLY = [
 const MUTATING_TOKENS = [" -exec", " -execdir", " -delete", " -ok "];
 const toRe = (glob) => new RegExp("^" + glob.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$", "s");
 const matchesAny = (cmd, globs) => globs.some((g) => toRe(g).test(cmd.trim()));
+// Protected sub-folders: their presence signals a backlog reference even when the
+// tasksDir prefix was split off by a `cd` (`cd docs && … tasks/queued/…`).
+const PROTECTED_SUBDIRS = [...STATUSES, "runs"];
+/**
+ * Does `command` reference the backlog, even via an aliased path? Strip shell
+ * quotes/backslashes first (so `docs/ta''sks`, `'docs/tasks'`, `docs/ta\sks`
+ * collapse to `docs/tasks`), then match the full tasksDir OR a `<base>/<status>/`
+ * subpath — what a `cd <parent>` split must still name to land in the folder.
+ */
+const referencesBacklog = (command, tasksDir) => {
+    const norm = command.replace(/['"\\]/g, "");
+    if (norm.includes(tasksDir))
+        return true;
+    const base = tasksDir.split("/").pop();
+    return PROTECTED_SUBDIRS.some((s) => new RegExp(`(?:^|[^\\w])${escapeRe(base)}/${escapeRe(s)}(?:/|\\s|$)`).test(norm));
+};
 /**
  * Bash commands. A command that never references the backlog dir is allowed.
  * One that does is default-denied unless every pipeline segment matches the
@@ -69,7 +85,7 @@ const matchesAny = (cmd, globs) => globs.some((g) => toRe(g).test(cmd.trim()));
  * are blocked by construction.
  */
 export const classifyBash = (command, ctx) => {
-    if (!command.includes(ctx.tasksDir))
+    if (!referencesBacklog(command, ctx.tasksDir))
         return ALLOW;
     if (/>/.test(command)) {
         return block(`agentic-loop: redirecting output while referencing ${ctx.tasksDir}/ is blocked — ${HOW_TO_MUTATE}`);
@@ -81,8 +97,10 @@ export const classifyBash = (command, ctx) => {
     // just like `;`, and the read-only globs compile with the dotAll (`s`) flag, so
     // without this a read-only first line ("ls …") would let its `.*` span the newline
     // and swallow a following mutation ("rm -rf …"). Each line/segment must match the
-    // allowlist on its own. (Residual: `$(rm …)` command substitution still evades —
-    // this guard is heuristic defense-in-depth, not a sandbox.)
+    // allowlist on its own. (Residuals — heuristic defense-in-depth, not a sandbox:
+    // a deep `cd docs/tasks/queued && cp x .` then bare relative op, `$(rm …)` command
+    // substitution, and a dir name assembled from shell vars (`ta${x}sks`) still evade;
+    // conversely a genuine unrelated `<base>/<status>/` path can produce a rare false block.)
     const segments = command
         .split(/&&|\|\||;|\||\n|\r/)
         .map((s) => s.trim())

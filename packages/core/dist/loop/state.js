@@ -63,6 +63,15 @@ export const findSessionDriving = (taskId) => {
             return sessionID;
     return undefined;
 };
+/** Task id of the loop currently in its PLAN stage, if any — the only task a
+ *  direct queued/ write is carved out for. Session-independent so a PLAN
+ *  subagent (own sessionID, absent from the store) still resolves it. */
+export const planStageTaskId = () => {
+    for (const state of store.values())
+        if (state.stage === "plan" && state.task?.id)
+            return state.task.id;
+    return null;
+};
 export const setLoop = (sessionID, state) => void store.set(sessionID, state);
 export const clearLoop = (sessionID) => store.delete(sessionID);
 export const hasLoop = (sessionID) => store.has(sessionID);

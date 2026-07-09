@@ -304,6 +304,12 @@ const startPlan = async (t: Task): Promise<{ error: string } | { state: LoopStat
   pending = null
   const state = startAtPlan(taskGoal(t), taskRef(t, t.path), extractPlan(t))
   active = state
+  // Arm the PreToolUse carve-out for the whole PLAN window: {stage:"plan", taskId}
+  // so the loop-plan-author subagent may Edit its own queued/<id>.md. The PLAN
+  // path spawns the author straight off loop_start without a loop_stage call, so
+  // without this the marker never exists and the one write PLAN exists to make is
+  // blocked. loop_advance clears it on park.
+  writeStageMarker("plan")
   return { state }
 }
 
@@ -345,7 +351,7 @@ server.registerTool(
   "loop_start",
   {
     description:
-      "Execute one task now. An in-progress/ task (plan approved via loop_plan_approve) is claimed and started at BUILD with git isolation; a queued/ task (approved via loop_task_approve, planless) is claimed and started at PLAN — it will park in plan-review/ for the human plan gate. Returns the composed stage prompt. Call loop_stage right before spawning the stage subagent.",
+      "Execute one task now. An in-progress/ task (plan approved via loop_plan_approve) is claimed and started at BUILD with git isolation; a queued/ task (approved via loop_task_approve, planless) is claimed and started at PLAN — it will park in plan-review/ for the human plan gate. Returns the composed stage prompt. Entering PLAN arms the stage marker automatically (so the plan-author may write its own queued/ task); call loop_stage right before spawning each later stage subagent.",
     inputSchema: { id: z.string().min(1).describe("The task's id (filename without .md) in in-progress/ or queued/.") },
   },
   async ({ id }) => {
