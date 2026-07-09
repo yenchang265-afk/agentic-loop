@@ -6,7 +6,7 @@ import type { Config } from "./config.ts"
 import * as driver from "./loop/driver.ts"
 import { listWorktrees, pruneWorktrees } from "@agentic-loop/core/loop/git"
 import { listSnapshotIds } from "@agentic-loop/core/loop/persist"
-import { findSessionDriving, getLoop, hasLoop } from "@agentic-loop/core/loop/state"
+import { findSessionDriving, getLoop, hasLoop, planStageTaskId } from "@agentic-loop/core/loop/state"
 import { auditBacklog, formatAnomalies } from "@agentic-loop/core/task/audit"
 import { classifyBash, classifyEdit } from "@agentic-loop/core/task/guard"
 import { isOrphanedPlanClaim, listClaimIds, listInProgress, listQueued, releaseOrphanedClaims, wasInterrupted } from "@agentic-loop/core/task/store"
@@ -202,7 +202,9 @@ export const AgenticLoop: Plugin = async ({ client, directory, $ }) => {
       // draft/*.md and the live PLAN stage writing its own queued/ task.
       const config = await getConfig()
       const loop = getLoop(input.sessionID)
-      const planTaskId = loop?.stage === "plan" ? (loop.task?.id ?? null) : null
+      // Fall back to the store scan so a PLAN subagent (own sessionID, absent from
+      // the store) still resolves the carve-out for its driving loop's queued/ task.
+      const planTaskId = (loop?.stage === "plan" ? (loop.task?.id ?? null) : null) ?? planStageTaskId()
       const guardCtx = { tasksDir: config.tasksDir, planTaskId }
       if (input.tool === "bash") {
         const cmd: unknown = output.args?.command

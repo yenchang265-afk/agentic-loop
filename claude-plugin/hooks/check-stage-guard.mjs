@@ -101,6 +101,20 @@ const BACKLOG_READ_ONLY = [
 
 const MUTATING_TOKENS = [" -exec", " -execdir", " -delete", " -ok "]
 
+// Protected sub-folders: their presence signals a backlog reference even when the
+// tasksDir prefix was split off by a `cd` (mirrors guard.ts PROTECTED_SUBDIRS).
+const PROTECTED_SUBDIRS = ["draft", "queued", "plan-review", "in-progress", "in-review", "completed", "abandoned", "runs"]
+
+// Does `cmd` reference the backlog, even via an aliased path? Strip shell
+// quotes/backslashes first (so `docs/ta''sks`, `'docs/tasks'`, `docs/ta\sks`
+// collapse), then match the full tasksDir OR a `<base>/<status>/` subpath.
+const referencesBacklog = (cmd, tasksDir) => {
+  const norm = cmd.replace(/['"\\]/g, "")
+  if (norm.includes(tasksDir)) return true
+  const base = tasksDir.split("/").pop()
+  return PROTECTED_SUBDIRS.some((s) => new RegExp(`(?:^|[^\\w])${escapeRe(base)}/${escapeRe(s)}(?:/|\\s|$)`).test(norm))
+}
+
 /** {allow:true} | {allow:false, reason}; mirrors guard.ts's classifyMutation. */
 const classifyBacklogMutation = (tool, ti, tasksDir, planTaskId) => {
   if (["Edit", "Write", "MultiEdit", "NotebookEdit"].includes(tool)) {
@@ -123,7 +137,7 @@ const classifyBacklogMutation = (tool, ti, tasksDir, planTaskId) => {
   }
   if (tool === "Bash") {
     const cmd = String(ti.command ?? "")
-    if (!cmd.includes(tasksDir)) return { allow: true }
+    if (!referencesBacklog(cmd, tasksDir)) return { allow: true }
     if (/>/.test(cmd)) {
       return { allow: false, reason: `agentic-loop: redirecting output while referencing ${tasksDir}/ is blocked — ${HOW_TO_MUTATE}` }
     }
@@ -133,6 +147,9 @@ const classifyBacklogMutation = (tool, ti, tasksDir, planTaskId) => {
     // Split on newlines too (mirrors guard.ts): a bare `\n` chains commands like `;`,
     // and the read-only globs are dotAll, so a read-only first line must not swallow a
     // following mutation across the newline. Each non-empty segment must match on its own.
+    // (Residuals — heuristic, not a sandbox: a deep `cd docs/tasks/queued && cp x .`, `$(rm …)`
+    // substitution, and a shell-var-built dir name still evade; a rare unrelated `<base>/<status>/`
+    // path can false-block.)
     const segments = cmd
       .split(/&&|\|\||;|\||\n|\r/)
       .map((s) => s.trim())

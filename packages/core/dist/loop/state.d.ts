@@ -175,6 +175,10 @@ export declare const startAtPlan: (goal: string, task: TaskRef, priorPlan?: stri
 export declare const getLoop: (sessionID: string) => LoopState | undefined;
 /** The session whose live loop is driving the given task id, if any (this plugin instance only). */
 export declare const findSessionDriving: (taskId: string) => string | undefined;
+/** Task id of the loop currently in its PLAN stage, if any — the only task a
+ *  direct queued/ write is carved out for. Session-independent so a PLAN
+ *  subagent (own sessionID, absent from the store) still resolves it. */
+export declare const planStageTaskId: () => string | null;
 export declare const setLoop: (sessionID: string, state: LoopState) => void;
 export declare const clearLoop: (sessionID: string) => boolean;
 export declare const hasLoop: (sessionID: string) => boolean;

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import type { LoopState, TaskRef } from "./state.js"
-import { clearLoop, findSessionDriving, resumeAtBuild, setLoop, startAtPlan } from "./state.js"
+import { clearLoop, findSessionDriving, planStageTaskId, resumeAtBuild, setLoop, startAtPlan } from "./state.js"
 
 // Transition and prompt-composition behavior is covered by the engine parity
 // suite (engine.test.ts); this file covers the constructors and the
@@ -50,5 +50,24 @@ test("findSessionDriving ignores loops with no task ref", () => {
     assert.equal(findSessionDriving("just a goal"), undefined)
   } finally {
     clearLoop("ses-2")
+  }
+})
+
+test("planStageTaskId resolves the PLAN-stage task id from any session, else null", () => {
+  assert.equal(planStageTaskId(), null)
+  const t: TaskRef = { id: "add-foo", path: "/p", acceptance: [] }
+  setLoop("ses-drive", startAtPlan("add foo", t))
+  try {
+    // A subagent's own sessionID isn't in the store, but the carve-out still resolves.
+    assert.equal(planStageTaskId(), "add-foo")
+  } finally {
+    clearLoop("ses-drive")
+  }
+  // A non-PLAN loop (BUILD) does not arm the carve-out.
+  setLoop("ses-build", mk("g", t))
+  try {
+    assert.equal(planStageTaskId(), null)
+  } finally {
+    clearLoop("ses-build")
   }
 })

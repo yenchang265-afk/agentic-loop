@@ -108,6 +108,27 @@ test("classifyBash blocks a mutation on a later LINE, even after a read-only fir
   assert.equal(classifyBash("ls docs/tasks/queued\ncat docs/tasks/queued/a.md", ctx).allow, true)
 })
 
+test("classifyBash closes aliased-path bypasses that dodge the literal tasksDir substring", () => {
+  for (const cmd of [
+    // path split across a `cd` so the literal "docs/tasks" never appears
+    "cd docs && mv a.md tasks/queued/b.md",
+    "cd docs && cp /tmp/x.md tasks/queued/b.md",
+    // quote / backslash insertion that collapses to docs/tasks after normalization
+    "mv a.md docs/ta''sks/queued/b.md",
+    "cp /tmp/x docs/'tasks'/queued/y",
+    "mv a.md docs/ta\\sks/queued/b.md",
+    // aliased redirect (the `>` check sits behind the trigger)
+    "cat plan.md > tasks/queued/b.md",
+  ]) {
+    assert.equal(classifyBash(cmd, ctx).allow, false, cmd)
+  }
+})
+
+test("classifyBash does not false-block an unrelated <base>/<status> file path", () => {
+  // `tasks/queued.ts` is a file (no trailing slash), not the backlog's queued/ folder.
+  assert.equal(classifyBash("mv src/tasks/queued.ts src/x.ts", ctx).allow, true)
+})
+
 // --- classifyMutation routing ---
 
 test("classifyMutation routes edit-shaped tools by filePath and Bash by command", () => {
