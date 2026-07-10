@@ -78,26 +78,29 @@ const BaseConfigSchema = z.object({
     )
     .default({}),
   /**
-   * Which platform PR-shaped work sources talk to: `github` (the `gh` CLI,
-   * the default), `ado` (Azure DevOps via the `az` CLI's `azure-devops`
-   * extension), or `ado-mcp` (the same Azure DevOps, reached through the
-   * Microsoft ADO MCP server from inside agent sessions — for environments
-   * that forbid the `az` CLI). Overridable per kind via
-   * `loops.<kind>.codePlatform`. Auth is delegated to the CLI / MCP server
-   * (`gh auth login` / `az devops login` / the ADO MCP server's own auth),
-   * never handled here.
+   * Which platform PR-shaped work sources talk to: `github` (the `gh` CLI, the
+   * default) or `ado` (Azure DevOps via its REST API). GitHub auth is delegated
+   * to `gh auth login`; ADO auth is a Personal Access Token in the
+   * `AZURE_DEVOPS_EXT_PAT` env var. Overridable per kind via
+   * `loops.<kind>.codePlatform`.
    */
   codePlatform: CodePlatformSchema.default("github"),
-  /** Azure DevOps coordinates; required when any effective platform is `ado`/`ado-mcp`. */
+  /** Azure DevOps coordinates; required when any effective platform is `ado`. */
   ado: z
     .object({
       /** Organization URL, e.g. "https://dev.azure.com/acme". */
       organization: z.string().min(1),
       project: z.string().min(1),
-      /** Repository name; omitted → the az CLI's configured default. */
+      /** Repository name; omitted → all repositories in the project. */
       repository: z.string().min(1).optional(),
-      /** The sitter's own login for comment filtering when `az` can't resolve identity (PAT-only auth). */
+      /** The sitter's own login for comment/author filtering — a PAT can't resolve identity. */
       selfLogin: z.string().min(1).optional(),
+      /**
+       * The PAT in plaintext — a fallback for when AZURE_DEVOPS_EXT_PAT is unset
+       * (the env var wins). Prefer the env var; if set here, keep
+       * `.agentic-loop.json` gitignored so the secret is never committed.
+       */
+      pat: z.string().min(1).optional(),
     })
     .optional(),
   /**
@@ -107,7 +110,7 @@ const BaseConfigSchema = z.object({
   projectManagement: ProjectManagementSchema.optional(),
 })
 
-const isAdo = (p: CodePlatform | undefined): boolean => p === "ado" || p === "ado-mcp"
+const isAdo = (p: CodePlatform | undefined): boolean => p === "ado"
 
 export const ConfigSchema = BaseConfigSchema.superRefine((c, ctx) => {
   const platforms = [c.codePlatform, ...Object.values(c.loops).map((section) => section.codePlatform)]
@@ -116,18 +119,16 @@ export const ConfigSchema = BaseConfigSchema.superRefine((c, ctx) => {
     ctx.addIssue({
       code: "custom",
       path: ["ado"],
-      message: "codePlatform 'ado'/'ado-mcp' requires an 'ado' section with organization and project",
+      message: "codePlatform 'ado' requires an 'ado' section with organization and project",
     })
   }
-  // The MCP server has no reliable whoami tool, so the sitter's own login must
-  // be configured to filter its own PRs/comments — unlike the CLI, which can
-  // resolve identity via `az ad signed-in-user show`.
-  const wantsAdoMcp = platforms.includes("ado-mcp")
-  if (wantsAdoMcp && c.ado && !c.ado.selfLogin) {
+  // A PAT carries no reliable email identity, so the sitter's own login must be
+  // configured to filter its own PRs/comments.
+  if (wantsAdo && c.ado && !c.ado.selfLogin) {
     ctx.addIssue({
       code: "custom",
       path: ["ado", "selfLogin"],
-      message: "codePlatform 'ado-mcp' requires ado.selfLogin (the MCP server cannot resolve the sitter's identity)",
+      message: "codePlatform 'ado' requires ado.selfLogin (a PAT cannot resolve the sitter's identity)",
     })
   }
 })
@@ -160,6 +161,20 @@ export const trackerUrl = (pm: ProjectManagement | undefined, key: string): stri
 
 /** The default `tracker.system` for newly authored tasks, from the PM config. Pure. */
 export const defaultTrackerSystem = (config: Config): TrackerSystem | undefined => config.projectManagement?.system
+
+/**
+ * Best-effort: export config `ado.pat` as `AZURE_DEVOPS_EXT_PAT` when that env
+ * var is unset, so child processes this driver starts — the PR sitter's
+ * stage-agent `curl` calls — can authenticate to Azure DevOps without a
+ * separately-exported PAT. The env var always wins; this never overrides one.
+ * Side-effecting by design; call once after loading config. On hosts where the
+ * stage agents run in a different process than the driver (Claude Code), set
+ * the env var in that environment — this can't cross the process boundary.
+ */
+export const applyAdoPatEnv = (config: { readonly ado?: { readonly pat?: string } }): void => {
+  const pat = config.ado?.pat
+  if (pat && !process.env.AZURE_DEVOPS_EXT_PAT) process.env.AZURE_DEVOPS_EXT_PAT = pat
+}
 
 export const DEFAULT_CONFIG: Config = ConfigSchema.parse({})
 

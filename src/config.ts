@@ -32,3 +32,5 @@ export const parseConfig = (raw: unknown): Config => parseConfigWith(ConfigSchem
 /** Load config from the repo root, falling back to defaults when the file is absent. */
 export const loadConfig = (client: Client, directory: string): Promise<Config> =>
   loadConfigWith(ConfigSchema, client, directory)
+
+export { applyAdoPatEnv } from "@agentic-loop/core/config"

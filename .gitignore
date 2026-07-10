@@ -4,6 +4,9 @@ node_modules/
 .env.*
 *.log
 
+# Local project config — may hold an ADO PAT (ado.pat); never commit it.
+.agentic-loop.json
+
 # Ephemeral loop-state snapshots + stage marker (durable run logs are the *.md files beside them)
 docs/tasks/runs/*.state.json
 docs/tasks/runs/.stage.json
