@@ -99,8 +99,9 @@ task authoring and both gates always go through `/agent-loop-task`.
   the shared workflow-skill library (symlinked, including
   `task-backlog-management`).
 - `hooks/` — a PreToolUse guard enforcing the read-only bash allowlist during
-  VERIFY/REVIEW, worktree pinning, and the stage deadline; and a SessionStart
-  reconciliation that surfaces interrupted loops.
+  VERIFY/REVIEW, worktree pinning, the stage deadline, and the Azure DevOps
+  write backstop; and SessionStart hooks that reconcile interrupted loops and
+  export config `ado.pat` into the session env for the sitter's ADO stages.
 - `mcp-server/` — the `agentic-loop` MCP server (`mcp__agentic-loop__loop_*`
   tools), reusing the original pure state machine and porting its
   git/backlog/persistence IO.

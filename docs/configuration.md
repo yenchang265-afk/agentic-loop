@@ -93,10 +93,12 @@ is resolved from config at wiring time — the manifest is never forked.
 - **`ado.pat`** — optional; the PAT in plaintext, as a fallback for when the
   `AZURE_DEVOPS_EXT_PAT` env var is unset. **The env var wins** when both are
   set. Prefer the env var; if you use `ado.pat`, keep `.agentic-loop.json`
-  gitignored (it is by default) so the secret is never committed. Note the work
-  source reads `ado.pat`, but the triage/publish stage agents authenticate from
-  `AZURE_DEVOPS_EXT_PAT` in their environment — set the env var too if you rely
-  on the sitter's fix/reply stages.
+  gitignored (it is by default) so the secret is never committed. It reaches
+  every consumer: the work source reads it directly, and the triage/publish
+  stage agents (which authenticate via `$AZURE_DEVOPS_EXT_PAT`) get it exported
+  for them — on OpenCode at plugin init (`applyAdoPatEnv`), on Claude Code via a
+  `SessionStart` hook (`inject-ado-pat.mjs`) that writes it to `$CLAUDE_ENV_FILE`.
+  Neither ever overrides a PAT you exported yourself.
 - **Prerequisites for `"ado"`**: a Personal Access Token — in
   `AZURE_DEVOPS_EXT_PAT` (preferred) or `ado.pat` — scoped to Code (read) +
   Pull Request contribute (comment), and `curl`. The token is sent as HTTP Basic
