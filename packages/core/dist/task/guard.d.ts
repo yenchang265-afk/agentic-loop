@@ -38,10 +38,11 @@ export declare const backlogRelPath: (filePath: string, tasksDir: string) => str
 export declare const classifyEdit: (filePath: string, ctx: GuardContext) => GuardVerdict;
 /**
  * Bash commands. A command that never references the backlog dir is allowed.
- * One that does is default-denied unless every pipeline segment matches the
- * read-only allowlist, with no output redirection and no `find -exec`-style
- * escape — so `mv`, `mkdir`, `rm`, `sed -i`, `tee`, and `>` into the backlog
- * are blocked by construction.
+ * One that does is default-denied unless every pipeline segment either matches
+ * the read-only allowlist or is a canonical-status `mkdir` (scaffolding), with no
+ * output redirection and no `find -exec`-style escape — so `mv`, `rm`, `sed -i`,
+ * `tee`, `>`, and any non-canonical `mkdir` into the backlog are blocked by
+ * construction.
  */
 export declare const classifyBash: (command: string, ctx: GuardContext) => GuardVerdict;
 /** Route a tool call to the right classifier. Unknown tools are allowed (not this guard's concern). */
