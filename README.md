@@ -5,7 +5,7 @@ back-and-forth. The repo is a **multi-kind loop framework**: each loop kind is
 a declarative manifest in [`loops/<kind>/`](packages/core/loops/README.md) — stages,
 transitions, and a work source — interpreted by a shared engine and fed by a
 common scheduler. Ships as two parallel plugins — one for **OpenCode**, one
-for **Claude Code** ([`claude-plugin/`](claude-plugin/README.md)) — both built
+for **Claude Code** ([`plugins/claude/`](plugins/claude/README.md)) — both built
 on one core package ([`packages/core`](packages/core)) and sharing the human
 gates, git isolation, trusted verdicts, and audit trail.
 
@@ -98,14 +98,14 @@ npm install             # npm workspaces — also builds @agentic-loop/core (pre
 ```
 
 - `npm install` at the repo root installs all workspaces (the OpenCode plugin,
-  `packages/core`, `claude-plugin/mcp-server`) and builds the core package via
+  `packages/core`, `plugins/claude/mcp-server`) and builds the core package via
   the `prepare` script — both plugins consume core's built `dist/`.
 - `./install.sh opencode` symlinks agents/commands/skills/references into
   `~/.config/opencode/` (or `$OPENCODE_CONFIG_DIR`) and registers the plugin —
   details and flags (`--copy`, custom dir) in [docs/opencode.md](docs/opencode.md).
 - `./install.sh claude` builds the bundled MCP server and links the shared
   skills/references, then prints the load options (`claude --plugin-dir` or
-  marketplace) — details in [`claude-plugin/README.md`](claude-plugin/README.md).
+  marketplace) — details in [`plugins/claude/README.md`](plugins/claude/README.md).
 - After installing, an interactive terminal gets a short **config wizard** that
   seeds `.agentic-loop.json` — see [docs/configuration.md](docs/configuration.md).
 
@@ -127,7 +127,7 @@ Idempotent — re-run after `git pull` for updates.
   the PR sitter's)
 
 Full command reference: [docs/opencode.md](docs/opencode.md) (OpenCode) ·
-[`claude-plugin/README.md`](claude-plugin/README.md) (Claude Code — `/agent-loop claim`
+[`plugins/claude/README.md`](plugins/claude/README.md) (Claude Code — `/agent-loop claim`
 instead of `watch`). Ad-hoc, outside-the-loop requests map to the bundled
 skills library via [AGENTS.md](AGENTS.md).
 
@@ -140,7 +140,7 @@ skills library via [AGENTS.md](AGENTS.md).
   (manifest schema, prompt templates, hooks, work sources)
 - [docs/opencode.md](docs/opencode.md) — OpenCode execution model, commands,
   install detail
-- [`claude-plugin/README.md`](claude-plugin/README.md) — Claude Code install,
+- [`plugins/claude/README.md`](plugins/claude/README.md) — Claude Code install,
   commands, known limitations
 - [docs/configuration.md](docs/configuration.md) — `.agentic-loop.json`
   reference, per-kind `loops` sections, and optional hardening (worktrees,
@@ -170,7 +170,7 @@ link to it; don't copy.
   wiring, the driver that runs the engine on `session.idle`, config extensions
 - `plugins/opencode/agents/`, `plugins/opencode/commands/` — the agent + command definitions (symlinked from `.opencode/` for repo dogfooding)
   behind each stage and slash command; `.opencode/skills` symlinks to `skills/`
-- `claude-plugin/` — the Claude Code plugin: commands, agents, hooks, and the
+- `plugins/claude/` — the Claude Code plugin: commands, agents, hooks, and the
   bundled MCP server that drives the loop (its host shims live in
   `mcp-server/src/shim.ts`)
 - `skills/`, `references/` — the workflow library the stage agents and ad-hoc
@@ -188,7 +188,7 @@ npm install && npm run typecheck:all && npm run test:all
 `typecheck:all` / `test:all` cover every workspace: the core package
 (`packages/core` — engine, manifest, scheduler, sources, store), the OpenCode
 plugin (`src/**/*.test.ts`), and the Claude Code MCP server
-(`claude-plugin/mcp-server`). Plain `npm run typecheck` / `npm test` run just
+(`plugins/claude/mcp-server`). Plain `npm run typecheck` / `npm test` run just
 the OpenCode plugin's suite.
 
 ## License

@@ -13,7 +13,7 @@ behavior-identical to when it was hardcoded), `pr-sitter` is the second.
 flowchart TB
     subgraph hosts["HOSTS — thin adapters over one core"]
         oc["OpenCode plugin (src/)<br/>session.idle + /agent-loop watch timer"]
-        cc["Claude Code MCP server<br/>(claude-plugin/mcp-server/)<br/>loop_claim / loop_start / loop_advance"]
+        cc["Claude Code MCP server<br/>(plugins/claude/mcp-server/)<br/>loop_claim / loop_start / loop_advance"]
     end
 
     subgraph core["@agentic-loop/core (packages/core)"]
@@ -50,7 +50,7 @@ flowchart TB
   SDK; the entire host surface is the interfaces in
   `packages/core/src/host.ts` (Shell, Client, Log, …). The OpenCode plugin
   satisfies them with Bun's `$` and the opencode SDK client; the Claude Code
-  MCP server with Node shims (`claude-plugin/mcp-server/src/shim.ts`) — its
+  MCP server with Node shims (`plugins/claude/mcp-server/src/shim.ts`) — its
   former `src/lib/` fork of the loop logic is gone.
 - **Manifest engine** — a loop kind is `loops/<kind>/loop.json`
   (zod-validated: stages with `work|check` kind, agent, prompt path,
@@ -227,7 +227,7 @@ resource on ADO, via the manifest's per-stage `platformAllowlist`), and failed
 pushes are reported, never forced. See the
 [threat model](design/threat-model.md).
 
-## Claude Code variant (`claude-plugin/`)
+## Claude Code variant (`plugins/claude/`)
 
 Same loop kinds and lifecycles, different driver: Claude Code has no
 background `session.idle` driver, so the main agent drives the loop through a
@@ -248,7 +248,7 @@ Differences worth knowing in a demo: there is no standing `/agent-loop watch`
 — `/agent-loop claim` is the one-shot pull equivalent (one `pollOnce` tick;
 build-ready tasks beat queued ones, engineering beats opted-in kinds); and
 stage guardrails are enforced by a `PreToolUse` hook
-(`claude-plugin/hooks/check-stage-guard.mjs`) rather than by agent
+(`plugins/claude/hooks/check-stage-guard.mjs`) rather than by agent
 permissions. The MCP server writes a stage marker to
 `<tasksDir>/runs/.stage.json` carrying `{kind, stage, taskId, worktree,
 deadline, bashAllowlist}`; the hook enforces the **manifest's** allowlist for
@@ -261,7 +261,7 @@ done (`ship gate`) returns a `gate` field, and the driving agent asks the
 user inline via AskUserQuestion — Approve (continue into BUILD / ship now),
 Replan with a reason, or Park for later (the `/agent-loop` gate verbs — including the
 shorter `/agent-loop approve` / `/agent-loop reject` shortcuts — remain the deferred path). Install and command details live in
-[`claude-plugin/README.md`](../claude-plugin/README.md).
+[`plugins/claude/README.md`](../plugins/claude/README.md).
 
 ## Backlog integrity rails
 

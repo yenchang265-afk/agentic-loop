@@ -3,7 +3,7 @@
 How the OpenCode variant executes, its full command surface, and install
 details. For the shared pipeline picture see
 [architecture.md](architecture.md); for the Claude Code variant see
-[`claude-plugin/README.md`](../claude-plugin/README.md).
+[`plugins/claude/README.md`](../plugins/claude/README.md).
 
 ## Execution model
 

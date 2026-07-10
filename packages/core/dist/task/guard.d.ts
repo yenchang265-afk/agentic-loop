@@ -6,7 +6,7 @@
  * The folder a task file lives in IS its status — a raw `mv`/`mkdir`/`rm` or
  * an in-place Write can silently corrupt the lifecycle (stray folders, stage
  * skips). Both hosts enforce this: the Claude Code plugin via a PreToolUse
- * hook (claude-plugin/hooks/check-stage-guard.mjs — keep its inlined copy in
+ * hook (plugins/claude/hooks/check-stage-guard.mjs — keep its inlined copy in
  * sync), the OpenCode plugin via `tool.execute.before`.
  *
  * This is heuristic defense-in-depth against degraded/confused models, not a

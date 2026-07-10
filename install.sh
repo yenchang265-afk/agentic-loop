@@ -5,7 +5,7 @@
 # config directory (global by default: ~/.config/opencode, or
 # $OPENCODE_CONFIG_DIR if set) so `git pull` in this repo keeps the install up
 # to date, and registers the plugin itself as a local plugin file.
-# Claude Code half: delegates to claude-plugin/install.sh, which builds the
+# Claude Code half: delegates to plugins/claude/install.sh, which builds the
 # bundled MCP server and links the shared skills/references into the plugin.
 # Re-run any time; both halves are idempotent.
 
@@ -129,11 +129,11 @@ install_opencode() {
 }
 
 install_claude() {
-  echo "Installing agentic-loop for Claude Code (claude-plugin/)"
+  echo "Installing agentic-loop for Claude Code (plugins/claude/)"
   if [ "$MODE" = copy ]; then
     echo "note: --copy applies to the OpenCode install only"
   fi
-  "$REPO_DIR/claude-plugin/install.sh"
+  "$REPO_DIR/plugins/claude/install.sh"
 }
 
 # ---------------------------------------------------------------------------

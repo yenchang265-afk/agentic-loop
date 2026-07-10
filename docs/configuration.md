@@ -31,7 +31,7 @@ afterward.
 Both plugins read the same file: the schema lives in the shared core package
 (`packages/core/src/config.ts`), and each host may extend it with fields only
 it can honor (today: OpenCode's `watchIntervalMinutes` — see
-[`claude-plugin/README.md`](../claude-plugin/README.md)).
+[`plugins/claude/README.md`](../plugins/claude/README.md)).
 
 ## Loop kinds (`loops`)
 

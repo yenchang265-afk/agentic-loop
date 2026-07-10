@@ -141,7 +141,7 @@ Engineering names `validateBeforeTransition.plan =
 "engineering.planLandedOnDisk"` ("the PLAN actually landed on disk") but
 deliberately leaves that ref **unregistered** — the check needs backlog IO, so
 the ref resolves to `null` and each host runs the check directly in its park
-handler instead (`claude-plugin/mcp-server/src/server.ts`, `src/loop/driver.ts`
+handler instead (`plugins/claude/mcp-server/src/server.ts`, `src/loop/driver.ts`
 — they re-read the task file and confirm the `## Implementation Plan` heading
 landed). The registry path is there for kinds whose validation is pure.
 
@@ -169,7 +169,7 @@ polls enabled kinds in claim-priority order — engineering's backlog first.
    validation).
 2. Stage **agents** for both plugins: `.opencode/agents/loop-<kind>-*.md`
    (frontmatter bash permissions mirror the manifest allowlists) and
-   `claude-plugin/agents/` (the PreToolUse guard enforces the manifest
+   `plugins/claude/agents/` (the PreToolUse guard enforces the manifest
    allowlist via the stage marker).
 3. OpenCode **commands** for each stage `command` that doesn't already exist
    (`.opencode/commands/<command>.md`, thin `agent:`-frontmatter wrappers).

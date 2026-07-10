@@ -29,13 +29,13 @@ jobs:
       - name: Build and smoke-run the MCP server
         run: |
           npm run build -w agentic-loop-mcp
-          out=$(node claude-plugin/mcp-server/dist/server.js < /dev/null 2>&1 | head -1)
+          out=$(node plugins/claude/mcp-server/dist/server.js < /dev/null 2>&1 | head -1)
           echo "$out"
           echo "$out" | grep -q "MCP server ready"
 
       - name: Install-script check
         run: |
-          bash -n install.sh claude-plugin/install.sh
+          bash -n install.sh plugins/claude/install.sh
           d=$(mktemp -d)
           ./install.sh opencode "$d"
           ./install.sh opencode "$d"
