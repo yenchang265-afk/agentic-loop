@@ -1,5 +1,28 @@
 # Migrating between layouts
 
+## To the single `/agent-loop` command and same-layer plugins
+
+- **`/agent-loop-task` is gone** — all its verbs live on `/agent-loop`:
+  `new <idea>` · `retask <id> [note]` · `approve [id]` (aliases `ok`, `go`;
+  with an explicit id it now also queues a reviewed draft — the unified,
+  folder-driven gate) · `reject [id] [reason]` (aliases `redo`, `replan`) ·
+  `approve-plan <id>` (the explicit plan-gate form survives). New verbs:
+  `claim [kind]` (both hosts — the one-shot pull), `kinds`, the `run` alias
+  for `task`, a bare-id shorthand (`/agent-loop <id>` runs a startable task),
+  and `watch [interval] [kind]` (OpenCode) accepts a loop-kind filter.
+- **Repo layout is same-layer now**: the OpenCode plugin lives in
+  `plugins/opencode/` (was the repo root + `.opencode/`), the Claude Code
+  plugin in `plugins/claude/` (was `claude-plugin/`), and the loop-kind
+  manifests ship inside core (`packages/core/loops/`, was `loops/`).
+  - OpenCode: re-run `./install.sh opencode` — it regenerates the config-dir
+    plugin shim and re-points the symlinks.
+  - Claude Code: re-add the marketplace once (`/plugin marketplace add
+    <repo>`; the plugin source moved to `./plugins/claude`), then reinstall.
+- **Agent prompts are generated** from `prompts/agents/` (`npm run
+  gen:prompts`); the Claude guard hook is bundled from
+  `plugins/claude/hooks/src/` (`npm run build:hooks`). Edit the sources,
+  never the outputs — CI enforces both.
+
 ## To the backlog guard, watch lease, and inline gates
 
 - **Raw backlog edits are now blocked.** Bash `mv`/`mkdir`/`rm`/redirects
