@@ -6,23 +6,19 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { fsClient, sh } from "./shim.js";
 import { DEFAULT_CONFIG, loadConfig } from "@agentic-loop/core/config";
-import { resumeAtBuild, startAtPlan, } from "@agentic-loop/core/loop/state";
 import { advance, composePrompt, firstStep } from "@agentic-loop/core/loop/engine";
 import { registerEngineeringHooks } from "@agentic-loop/core/kinds/engineering";
 import { defaultLoopsDir } from "@agentic-loop/core/manifest/dir";
-import { loadManifest } from "@agentic-loop/core/manifest/load";
 import { effectiveAllowlist, stageDef } from "@agentic-loop/core/manifest/schema";
 import { pollOnce } from "@agentic-loop/core/scheduler/scheduler";
-import { makeAdoPrSource } from "@agentic-loop/core/source/ado-pr";
-import { makeBacklogSource } from "@agentic-loop/core/source/backlog";
-import { makeGithubPrSource } from "@agentic-loop/core/source/github-pr";
+import { buildEntryState, buildWorkSources, loopWorkTree, makeManifestCache, planEntryState, } from "@agentic-loop/core/loop/orchestrate";
 import { enabledLoopKinds, platformFor } from "@agentic-loop/core/config";
 import { failedCriteriaBlock, worstOf } from "@agentic-loop/core/loop/verdict";
 import { renderRunSummary } from "@agentic-loop/core/loop/metrics";
 import { commitAll, commitPaths, currentBranch, gitActor, listWorktrees, pruneWorktrees } from "@agentic-loop/core/loop/git";
 import { ensureIsolation, loopId, teardownIsolation } from "@agentic-loop/core/loop/isolate";
 import { clearState, loadState, saveState } from "@agentic-loop/core/loop/persist";
-import { appendNote, appendRunLog, auditNote, claimTask, extractPlan, findByIdIn, hasPlan, isClaimable, isOrphanedPlanClaim, isRecoverable, listByStatus, listClaimIds, moveTask, pairingCoverage, releaseClaim, releaseOrphanedClaims, rescueStray, STATUSES, summarizeBacklog, } from "@agentic-loop/core/task/store";
+import { appendNote, appendRunLog, auditNote, claimTask, findByIdIn, hasPlan, isClaimable, isOrphanedPlanClaim, isRecoverable, listByStatus, listClaimIds, moveTask, pairingCoverage, releaseClaim, releaseOrphanedClaims, rescueStray, STATUSES, summarizeBacklog, } from "@agentic-loop/core/task/store";
 import { auditBacklog, formatAnomalies, hasAnomalies } from "@agentic-loop/core/task/audit";
 import { isLeaseStale, readLeaseOwner, staleThresholdMs } from "@agentic-loop/core/scheduler/lease";
 /**
@@ -63,18 +59,9 @@ const resolveBase = async () => baseDir ? ((await currentBranch(sh, baseDir)) ??
  *  resolved from core's own install location so the server works from any cwd
  *  and survives plugin relocations. */
 const LOOPS_DIR = defaultLoopsDir();
-const eng = loadManifest(LOOPS_DIR, "engineering");
+const manifestFor = makeManifestCache(LOOPS_DIR, ["engineering"]);
+const eng = manifestFor("engineering");
 registerEngineeringHooks();
-/** Loaded manifests by kind — engineering eagerly, other enabled kinds on first poll. */
-const manifests = new Map([["engineering", eng]]);
-const manifestFor = (kind) => {
-    let loaded = manifests.get(kind);
-    if (!loaded) {
-        loaded = loadManifest(LOOPS_DIR, kind);
-        manifests.set(kind, loaded);
-    }
-    return loaded;
-};
 const log = (level, message) => fsClient.app.log({ body: { service: "agentic-loop", level, message } });
 // --- shared in-process loop state (one active loop per server/session) ---
 let active = null;
@@ -93,13 +80,7 @@ const loadCfg = async () => {
         config = DEFAULT_CONFIG;
     }
 };
-// --- helpers ported from driver.ts ---
-const taskGoal = (t) => (t.body ? `${t.title}\n\n${t.body}` : t.title);
-const taskRef = (t, p) => ({
-    id: t.id,
-    path: p,
-    acceptance: t.acceptance,
-});
+// --- host wiring (shared helpers live in @agentic-loop/core/loop/orchestrate) ---
 const stageMarkerPath = () => path.join(directory, config.tasksDir, "runs", ".stage.json");
 /** Write the current-stage marker the PreToolUse hook reads to scope the
  *  allowlist and enforce the stage deadline. */
@@ -143,7 +124,7 @@ const snapshot = async () => {
     if (active?.task)
         await saveState(sh, directory, config.tasksDir, active.task.id, active);
 };
-const workTree = () => active?.git?.worktree ?? directory;
+const workTree = () => (active ? loopWorkTree(directory, active) : directory);
 /** The manifest driving the active loop (engineering when kind is absent). */
 const activeManifest = () => manifestFor(active?.kind ?? "engineering");
 /** Serialize a value into an MCP text result. */
@@ -160,52 +141,9 @@ const findAnyStatus = async (id) => {
 };
 /** The work sources loop_claim polls, in claim-priority order (config order).
  *  An `only` kind restricts the poll to that one kind. */
-const sourcesFor = (only) => enabledLoopKinds(config)
-    .filter((kind) => !only || kind === only)
-    .flatMap((kind) => {
-    const loaded = manifestFor(kind);
-    if (loaded.manifest.workSource.type === "github-pr") {
-        const platform = platformFor(config, kind);
-        if (platform === "ado") {
-            return [
-                makeAdoPrSource({
-                    $: sh,
-                    client: fsClient,
-                    directory,
-                    tasksDir: config.tasksDir,
-                    log,
-                    loaded,
-                    // Config parse fails fast when platform "ado" lacks the ado section.
-                    ado: config.ado,
-                }),
-            ];
-        }
-        const query = config.loops[kind]?.["query"];
-        return [
-            makeGithubPrSource({
-                $: sh,
-                client: fsClient,
-                directory,
-                tasksDir: config.tasksDir,
-                log,
-                loaded,
-                ...(typeof query === "string" ? { query } : {}),
-            }),
-        ];
-    }
-    return [
-        makeBacklogSource({
-            $: sh,
-            client: fsClient,
-            directory,
-            tasksDir: config.tasksDir,
-            log,
-            loaded,
-            // Single active loop per server; a claim only happens when no loop is live.
-            isDriving: (id) => active?.task?.id === id,
-        }),
-    ];
-});
+const sourcesFor = (only) => buildWorkSources(
+// Single active loop per server; a claim only happens when no loop is live.
+{ $: sh, client: fsClient, directory, log, isDriving: (id) => active?.task?.id === id }, config, manifestFor, only);
 /** Claim an approved in-progress task and construct its build-entry state.
  *  Shared by loop_start and loop_claim. */
 const startTask = async (t) => {
@@ -213,7 +151,7 @@ const startTask = async (t) => {
         return { error: `Task "${t.id}" was just claimed by another session.` };
     samples = [];
     pending = null;
-    let state = resumeAtBuild(taskGoal(t), taskRef(t, t.path), extractPlan(t) ?? "");
+    let state = buildEntryState(t);
     try {
         state = await ensureIsolation(sh, log, directory, config, state, await resolveBase());
     }
@@ -232,7 +170,7 @@ const startPlan = async (t) => {
         return { error: `Task "${t.id}" was just claimed by another session.` };
     samples = [];
     pending = null;
-    const state = startAtPlan(taskGoal(t), taskRef(t, t.path), extractPlan(t));
+    const state = planEntryState(t);
     active = state;
     // Arm the PreToolUse carve-out for the whole PLAN window: {stage:"plan", taskId}
     // so the loop-plan-author subagent may Edit its own queued/<id>.md. The PLAN
@@ -999,7 +937,7 @@ server.registerTool("loop_recover", {
         const step = firstStep(eng, active);
         return ok({ resumedFrom: "snapshot", stage: active.stage, action: step.action, note: "call loop_stage before spawning the subagent" });
     }
-    active = resumeAtBuild(taskGoal(t), taskRef(t, t.path), extractPlan(t) ?? "");
+    active = buildEntryState(t);
     try {
         active = await ensureIsolation(sh, log, directory, config, active, await resolveBase());
     }

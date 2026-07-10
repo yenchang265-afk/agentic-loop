@@ -6,14 +6,17 @@ import { type Task } from "@agentic-loop/core/task/schema"
 import { advance, composePrompt, firstStep } from "@agentic-loop/core/loop/engine"
 import { registerEngineeringHooks } from "@agentic-loop/core/kinds/engineering"
 import { defaultLoopsDir } from "@agentic-loop/core/manifest/dir"
-import { loadManifest } from "@agentic-loop/core/manifest/load"
 import { resolveValidateHook } from "@agentic-loop/core/manifest/registry"
 import { stageDef, type LoadedManifest } from "@agentic-loop/core/manifest/schema"
 import { combineSkips, pollOnce } from "@agentic-loop/core/scheduler/scheduler"
-import { platformFor } from "@agentic-loop/core/config"
-import { makeAdoPrSource } from "@agentic-loop/core/source/ado-pr"
-import { makeBacklogSource } from "@agentic-loop/core/source/backlog"
-import { makeGithubPrSource } from "@agentic-loop/core/source/github-pr"
+import {
+  buildEntryState,
+  buildWorkSources,
+  loopWorkTree,
+  makeManifestCache,
+  planEntryState,
+  taskGoal,
+} from "@agentic-loop/core/loop/orchestrate"
 import type { TerminalOutcome, WorkSource } from "@agentic-loop/core/source/types"
 import {
   ensureIsolation as coreEnsureIsolation,
@@ -26,7 +29,6 @@ import {
   auditNote,
   claimFirst,
   claimTask,
-  extractPlan,
   findByIdIn,
   hasPlan,
   isClaimable,
@@ -76,14 +78,7 @@ import {
 import { enabledLoopKinds } from "@agentic-loop/core/config"
 import type { Config } from "../config.ts"
 import type { Action, LoopState, Stage, TaskRef } from "@agentic-loop/core/loop/state"
-import {
-  clearLoop,
-  findSessionDriving,
-  getLoop,
-  resumeAtBuild,
-  setLoop,
-  startAtPlan,
-} from "@agentic-loop/core/loop/state"
+import { clearLoop, findSessionDriving, getLoop, setLoop } from "@agentic-loop/core/loop/state"
 
 /**
  * Impure orchestration for the agentic loop. Thin glue over the pure helpers in
@@ -137,81 +132,14 @@ import {
 
 /** The loop-kind manifests shipped with core (packages/core/loops/<kind>/). */
 const LOOPS_DIR = defaultLoopsDir()
-const eng = loadManifest(LOOPS_DIR, "engineering")
+export const manifestFor = makeManifestCache(LOOPS_DIR, ["engineering"])
+const eng = manifestFor("engineering")
 registerEngineeringHooks()
-
-/** Loaded manifests by kind — engineering eagerly, other enabled kinds on first poll. */
-const manifests = new Map<string, LoadedManifest>([["engineering", eng]])
-export const manifestFor = (kind: string): LoadedManifest => {
-  let loaded = manifests.get(kind)
-  if (!loaded) {
-    loaded = loadManifest(LOOPS_DIR, kind)
-    manifests.set(kind, loaded)
-  }
-  return loaded
-}
 
 /** The work sources the scheduler polls, in claim-priority order (config order).
  *  An `only` kind restricts the poll to that one kind (claim/watch kind filter). */
 const sourcesFor = (deps: Deps, config: Config, only?: string): WorkSource[] =>
-  enabledLoopKinds(config)
-    .filter((kind) => !only || kind === only)
-    .flatMap((kind): WorkSource[] => {
-    // A typo'd or unavailable `loops.<kind>` (the config schema is an open record)
-    // must not throw here — that would abort the whole flatMap and take every OTHER
-    // enabled source (engineering included) down with it, so no work ever gets
-    // claimed. Skip-and-warn the bad kind instead.
-    let loaded: LoadedManifest
-    try {
-      loaded = manifestFor(kind)
-    } catch (err) {
-      void deps.log(
-        "warn",
-        `loop kind "${kind}" is enabled in config but its loops/${kind}/ manifest could not be loaded — skipping it. ${(err as Error).message}`,
-      )
-      return []
-    }
-    if (loaded.manifest.workSource.type === "github-pr") {
-      const platform = platformFor(config, kind)
-      if (platform === "ado") {
-        return [
-          makeAdoPrSource({
-            $: deps.$,
-            client: deps.client,
-            directory: deps.directory,
-            tasksDir: config.tasksDir,
-            log: deps.log,
-            loaded,
-            // Config parse fails fast when platform "ado" lacks the ado section.
-            ado: config.ado!,
-          }),
-        ]
-      }
-      const query = config.loops[kind]?.["query"]
-      return [
-        makeGithubPrSource({
-          $: deps.$,
-          client: deps.client,
-          directory: deps.directory,
-          tasksDir: config.tasksDir,
-          log: deps.log,
-          loaded,
-          ...(typeof query === "string" ? { query } : {}),
-        }),
-      ]
-    }
-    return [
-      makeBacklogSource({
-        $: deps.$,
-        client: deps.client,
-        directory: deps.directory,
-        tasksDir: config.tasksDir,
-        log: deps.log,
-        loaded,
-        isDriving: (id) => findSessionDriving(id) !== undefined,
-      }),
-    ]
-  })
+  buildWorkSources({ ...deps, isDriving: (id) => findSessionDriving(id) !== undefined }, config, manifestFor, only)
 
 type Client = PluginInput["client"]
 type Shell = PluginInput["$"]
@@ -423,15 +351,6 @@ const takeVerdictRecord = (sessionID: string, stage: CheckStage): VerdictRecord 
 const toast = (client: Client, message: string, variant: "info" | "success" | "warning" | "error") =>
   client.tui.showToast({ body: { message, variant } }).catch(() => {})
 
-/** A task's goal text: title headline plus its body, if any. */
-const taskGoal = (task: Task): string => (task.body ? `${task.title}\n\n${task.body}` : task.title)
-
-const taskRef = (task: Task, path: string): TaskRef => ({
-  id: task.id,
-  path,
-  acceptance: task.acceptance,
-})
-
 /** Git isolation lives in core (`@agentic-loop/core/loop/isolate`); these
  *  wrappers thread this plugin's `Deps` into its host-agnostic signatures. */
 const ensureIsolation = (deps: Deps, config: Config, state: LoopState): Promise<LoopState> =>
@@ -444,7 +363,7 @@ const teardownIsolation = (deps: Deps, state: LoopState): Promise<void> =>
   state.isolated ? coreTeardownIsolation(deps.$, deps.log, deps.directory, state) : Promise.resolve()
 
 /** The working directory a loop's stages operate in: its worktree, else the main tree. */
-const workTree = (deps: Deps, state: LoopState): string => state.git?.worktree ?? deps.directory
+const workTree = (deps: Deps, state: LoopState): string => loopWorkTree(deps.directory, state)
 
 /**
  * Serialize commits per git tree. In worktree mode `serialize` is off, so N in-process
@@ -1040,14 +959,11 @@ export const onIdle = async (deps: Deps, sessionID: string, config: Config): Pro
       // `recover`: a human-forced resume of a started-but-dead task with no
       // valid snapshot. Both re-enter the state machine at build with the
       // persisted plan.
-      const ref = taskRef(work.task, work.task.path)
-      const state = resumeAtBuild(taskGoal(work.task), ref, extractPlan(work.task) ?? "")
-      await drive(deps, sessionID, config, firstStep(eng, state))
+      await drive(deps, sessionID, config, firstStep(eng, buildEntryState(work.task)))
     } else if (work?.kind === "start-plan") {
       // A `/agent-loop task <id>` claim on a queued (planless) task: run the PLAN
       // stage, which writes the plan and parks the task in plan-review/.
-      const state = startAtPlan(work.goal, taskRef(work.task, work.task.path), extractPlan(work.task))
-      await drive(deps, sessionID, config, firstStep(eng, state))
+      await drive(deps, sessionID, config, firstStep(eng, planEntryState(work.task)))
     } else if (work?.kind === "recover-state") {
       // A snapshot-based resume: re-enter at the exact stage the crash caught,
       // with artifacts intact, re-firing that stage from its own inputs.
