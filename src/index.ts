@@ -1,7 +1,7 @@
 import type { Plugin } from "@opencode-ai/plugin"
 import path from "node:path"
 import { tool } from "@opencode-ai/plugin"
-import { DEFAULT_CONFIG, loadConfig } from "./config.ts"
+import { DEFAULT_CONFIG, applyAdoPatEnv, loadConfig } from "./config.ts"
 import type { Config } from "./config.ts"
 import * as driver from "./loop/driver.ts"
 import { listWorktrees, pruneWorktrees } from "@agentic-loop/core/loop/git"
@@ -52,10 +52,17 @@ export const AgenticLoop: Plugin = async ({ client, directory, $ }) => {
   // file degrades rather than breaking the plugin entirely.
   let configPromise: Promise<Config> | undefined
   const getConfig = (): Promise<Config> =>
-    (configPromise ??= loadConfig(client, directory).catch(async (err) => {
-      await log("warn", `using default config: ${(err as Error).message}`)
-      return DEFAULT_CONFIG
-    }))
+    (configPromise ??= loadConfig(client, directory)
+      .catch(async (err) => {
+        await log("warn", `using default config: ${(err as Error).message}`)
+        return DEFAULT_CONFIG
+      })
+      // Export ado.pat → AZURE_DEVOPS_EXT_PAT (when unset) so the sitter's
+      // stage-agent curl calls inherit it; the env var always wins.
+      .then((config) => {
+        applyAdoPatEnv(config)
+        return config
+      }))
 
   // Startup reconciliation runs on the FIRST hook, not during plugin init — any
   // `client` call from the initializer is a circular wait into the still-

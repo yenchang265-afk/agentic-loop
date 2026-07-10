@@ -90,10 +90,17 @@ is resolved from config at wiring time — the manifest is never forked.
 - **`ado.selfLogin`** — **required**; the sitter's own login for filtering its
   own PR comments. A PAT can't resolve the sitter's identity — without it every
   comment (including the sitter's own replies) re-triggers attention.
-- **Prerequisites for `"ado"`**: a Personal Access Token in
-  `AZURE_DEVOPS_EXT_PAT` scoped to Code (read) + Pull Request contribute
-  (comment), and `curl`. The token is sent as HTTP Basic auth
-  (`curl -sS -u :"$AZURE_DEVOPS_EXT_PAT" <url>`); no `az` CLI is needed.
+- **`ado.pat`** — optional; the PAT in plaintext, as a fallback for when the
+  `AZURE_DEVOPS_EXT_PAT` env var is unset. **The env var wins** when both are
+  set. Prefer the env var; if you use `ado.pat`, keep `.agentic-loop.json`
+  gitignored (it is by default) so the secret is never committed. Note the work
+  source reads `ado.pat`, but the triage/publish stage agents authenticate from
+  `AZURE_DEVOPS_EXT_PAT` in their environment — set the env var too if you rely
+  on the sitter's fix/reply stages.
+- **Prerequisites for `"ado"`**: a Personal Access Token — in
+  `AZURE_DEVOPS_EXT_PAT` (preferred) or `ado.pat` — scoped to Code (read) +
+  Pull Request contribute (comment), and `curl`. The token is sent as HTTP Basic
+  auth (`curl -sS -u :"$AZURE_DEVOPS_EXT_PAT" <url>`); no `az` CLI is needed.
 - **Semantics on ADO**: failing checks come from blocking branch policy
   evaluations (`_apis/policy/evaluations`) — a repo with no build policy never
   fires `failing-checks`; comments come from PR threads; a negative reviewer

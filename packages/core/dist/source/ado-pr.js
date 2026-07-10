@@ -13,7 +13,8 @@ export const makeAdoPrSource = (deps) => {
     }
     const now = deps.now ?? (() => new Date().toISOString());
     const http = deps.http ?? defaultHttp;
-    const pat = deps.pat ?? process.env[PAT_ENV] ?? "";
+    // Precedence: explicit dep (tests) → env var → config `ado.pat`.
+    const pat = deps.pat ?? process.env[PAT_ENV] ?? ado.pat ?? "";
     const org = ado.organization.replace(/\/+$/, "");
     const project = encodeURIComponent(ado.project);
     const login = ado.selfLogin ?? "";

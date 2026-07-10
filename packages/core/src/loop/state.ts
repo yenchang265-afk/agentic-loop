@@ -120,6 +120,13 @@ export interface AdoConfig {
    * Enforced in `config.ts`.
    */
   readonly selfLogin?: string
+  /**
+   * The Personal Access Token, in plaintext — a fallback for when the
+   * `AZURE_DEVOPS_EXT_PAT` env var is unset (the env var wins). Prefer the env
+   * var; if you set this, keep `.agentic-loop.json` gitignored so the secret is
+   * never committed.
+   */
+  readonly pat?: string
 }
 
 /** Project-management setup: the team's tracker and how tasks pair to it. */

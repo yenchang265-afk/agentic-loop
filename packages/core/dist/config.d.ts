@@ -57,6 +57,7 @@ export declare const ConfigSchema: z.ZodObject<{
         project: z.ZodString;
         repository: z.ZodOptional<z.ZodString>;
         selfLogin: z.ZodOptional<z.ZodString>;
+        pat: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>>;
     projectManagement: z.ZodOptional<z.ZodObject<{
         system: z.ZodEnum<{
@@ -82,6 +83,20 @@ export declare const platformFor: (config: Config, kind: string) => CodePlatform
 export declare const trackerUrl: (pm: ProjectManagement | undefined, key: string) => string | undefined;
 /** The default `tracker.system` for newly authored tasks, from the PM config. Pure. */
 export declare const defaultTrackerSystem: (config: Config) => TrackerSystem | undefined;
+/**
+ * Best-effort: export config `ado.pat` as `AZURE_DEVOPS_EXT_PAT` when that env
+ * var is unset, so child processes this driver starts — the PR sitter's
+ * stage-agent `curl` calls — can authenticate to Azure DevOps without a
+ * separately-exported PAT. The env var always wins; this never overrides one.
+ * Side-effecting by design; call once after loading config. On hosts where the
+ * stage agents run in a different process than the driver (Claude Code), set
+ * the env var in that environment — this can't cross the process boundary.
+ */
+export declare const applyAdoPatEnv: (config: {
+    readonly ado?: {
+        readonly pat?: string;
+    };
+}) => void;
 export declare const DEFAULT_CONFIG: Config;
 /** A zod schema whose parse produces some host's config shape. */
 type ConfigSchemaLike<T> = {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import {
+  applyAdoPatEnv,
   DEFAULT_CONFIG,
   defaultTrackerSystem,
   enabledLoopKinds,
@@ -128,6 +129,34 @@ test("ado section fields are validated", () => {
       parseConfig({ codePlatform: "ado", ado: { organization: "", project: "p", selfLogin: "sitter@acme.com" } }),
     /Invalid .*ado/,
   )
+})
+
+test("ado.pat is an accepted optional config field", () => {
+  const c = parseConfig({
+    codePlatform: "ado",
+    ado: { organization: "https://dev.azure.com/acme", project: "widgets", selfLogin: "sitter@acme.com", pat: "tok" },
+  })
+  assert.equal(c.ado?.pat, "tok")
+})
+
+test("applyAdoPatEnv exports ado.pat to AZURE_DEVOPS_EXT_PAT only when the env var is unset", () => {
+  const saved = process.env.AZURE_DEVOPS_EXT_PAT
+  try {
+    delete process.env.AZURE_DEVOPS_EXT_PAT
+    applyAdoPatEnv({ ado: { pat: "cfg-pat" } })
+    assert.equal(process.env.AZURE_DEVOPS_EXT_PAT, "cfg-pat")
+    // env var wins: an existing value is never overridden
+    process.env.AZURE_DEVOPS_EXT_PAT = "env-pat"
+    applyAdoPatEnv({ ado: { pat: "cfg-pat" } })
+    assert.equal(process.env.AZURE_DEVOPS_EXT_PAT, "env-pat")
+    // no ado.pat → no-op
+    delete process.env.AZURE_DEVOPS_EXT_PAT
+    applyAdoPatEnv({ ado: {} })
+    assert.equal(process.env.AZURE_DEVOPS_EXT_PAT, undefined)
+  } finally {
+    if (saved === undefined) delete process.env.AZURE_DEVOPS_EXT_PAT
+    else process.env.AZURE_DEVOPS_EXT_PAT = saved
+  }
 })
 
 // --- projectManagement ---

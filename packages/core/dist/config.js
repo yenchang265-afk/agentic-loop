@@ -85,6 +85,12 @@ const BaseConfigSchema = z.object({
         repository: z.string().min(1).optional(),
         /** The sitter's own login for comment/author filtering — a PAT can't resolve identity. */
         selfLogin: z.string().min(1).optional(),
+        /**
+         * The PAT in plaintext — a fallback for when AZURE_DEVOPS_EXT_PAT is unset
+         * (the env var wins). Prefer the env var; if set here, keep
+         * `.agentic-loop.json` gitignored so the secret is never committed.
+         */
+        pat: z.string().min(1).optional(),
     })
         .optional(),
     /**
@@ -139,6 +145,20 @@ export const platformFor = (config, kind) => config.loops[kind]?.codePlatform ??
 export const trackerUrl = (pm, key) => pm?.baseUrl ? `${pm.baseUrl}${key}` : undefined;
 /** The default `tracker.system` for newly authored tasks, from the PM config. Pure. */
 export const defaultTrackerSystem = (config) => config.projectManagement?.system;
+/**
+ * Best-effort: export config `ado.pat` as `AZURE_DEVOPS_EXT_PAT` when that env
+ * var is unset, so child processes this driver starts — the PR sitter's
+ * stage-agent `curl` calls — can authenticate to Azure DevOps without a
+ * separately-exported PAT. The env var always wins; this never overrides one.
+ * Side-effecting by design; call once after loading config. On hosts where the
+ * stage agents run in a different process than the driver (Claude Code), set
+ * the env var in that environment — this can't cross the process boundary.
+ */
+export const applyAdoPatEnv = (config) => {
+    const pat = config.ado?.pat;
+    if (pat && !process.env.AZURE_DEVOPS_EXT_PAT)
+        process.env.AZURE_DEVOPS_EXT_PAT = pat;
+};
 export const DEFAULT_CONFIG = ConfigSchema.parse({});
 const CONFIG_FILE = ".agentic-loop.json";
 /** Validate an already-parsed config object against a host schema; throws a readable error on misconfig. */

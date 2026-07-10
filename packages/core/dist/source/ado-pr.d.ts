@@ -13,7 +13,8 @@ import type { WorkSource } from "./types.js";
  * claim/fetch/terminal mechanics (`pr-shared.ts`) are shared verbatim.
  *
  * Auth is a Personal Access Token sent as HTTP Basic (`Authorization: Basic
- * base64(":" + PAT)`), read from `AZURE_DEVOPS_EXT_PAT`. A PAT carries no
+ * base64(":" + PAT)`), read from `AZURE_DEVOPS_EXT_PAT`, falling back to config
+ * `ado.pat` when that env var is unset (the env var wins). A PAT carries no
  * reliable email identity, so the sitter's own login is config-supplied
  * (`ado.selfLogin`, required for this platform — enforced in `config.ts`).
  * Unlike GitHub's `statusCheckRollup`, check state comes from a per-PR

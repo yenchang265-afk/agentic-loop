@@ -239,6 +239,31 @@ test("a missing PAT skips actionably, naming the env var to set", async () => {
   assert.equal(skip?.actionable, true)
 })
 
+test("config ado.pat is a fallback when neither a dep nor the env var supplies a PAT", async () => {
+  const saved = process.env.AZURE_DEVOPS_EXT_PAT
+  delete process.env.AZURE_DEVOPS_EXT_PAT
+  try {
+    const src = makeAdoPrSource({
+      $: scriptedShell([]),
+      http: scriptedHttp([{ match: "/pullrequests?searchCriteria", body: listBody([pr({ mergeStatus: "conflicts" })]) }]),
+      client: ledgerClient({}),
+      directory: "/r",
+      tasksDir: "docs/tasks",
+      log: () => {},
+      loaded: sitter,
+      // No `pat` dep and no env var → resolution must fall through to ado.pat.
+      ado: { organization: "https://dev.azure.com/acme", project: "widgets", selfLogin: "sitter@acme.com", pat: "cfg-pat" },
+      now: () => "2026-07-05T00:00:00Z",
+    })
+    const { item, skip } = await src.claimNext()
+    assert.doesNotMatch(skip?.message ?? "", /PAT not set/) // the config pat satisfied the requirement
+    assert.equal(item?.id, "pr-7") // and it proceeded to a real claim
+  } finally {
+    if (saved === undefined) delete process.env.AZURE_DEVOPS_EXT_PAT
+    else process.env.AZURE_DEVOPS_EXT_PAT = saved
+  }
+})
+
 test("onTerminal(done) records the post-push head + comment watermark from the REST API", async () => {
   const log: string[] = []
   const src = source([pr({ mergeStatus: "conflicts" })], {

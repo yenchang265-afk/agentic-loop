@@ -245,7 +245,9 @@ configure() {
     ado="$ado,\"selfLogin\":\"$(json_escape "$login")\""
     add_member "\"ado\":{$ado}"
     echo
-    echo "  → Azure DevOps auth: export AZURE_DEVOPS_EXT_PAT with a PAT scoped to Code (read) + Pull Request (contribute)."
+    echo "  → Azure DevOps auth: a PAT scoped to Code (read) + Pull Request (contribute)."
+    echo "    Preferred: export AZURE_DEVOPS_EXT_PAT=<pat>. Or add \"pat\":\"<pat>\" to the"
+    echo "    ado section of the (gitignored) .agentic-loop.json — the env var wins if both are set."
   fi
 
   # Q2 — PR sitter.
