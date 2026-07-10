@@ -11,7 +11,8 @@ type FileRef = {
     readonly id: string;
     readonly path: string;
 };
-export type TaskStatus = "draft" | "queued" | "plan-review" | "in-progress" | "in-review" | "completed" | "abandoned";
+export { STATUSES, type TaskStatus } from "./statuses.js";
+import { type TaskStatus } from "./statuses.js";
 /** All tasks in claim order: lowest priority number first, ties broken by id. Pure. */
 export declare const selectOrder: (tasks: readonly Task[]) => Task[];
 /** Pick the next task: lowest priority number, ties broken by id. Pure. */
@@ -43,8 +44,6 @@ export declare const isRecoverable: (task: Task) => boolean;
  * code. Pure.
  */
 export declare const wasInterrupted: (task: Task) => boolean;
-/** The status folders, in lifecycle order. */
-export declare const STATUSES: readonly TaskStatus[];
 /** A per-status roll-up of the backlog for `/agent-loop status`. Pure. */
 export interface BacklogSummary {
     readonly counts: Readonly<Record<TaskStatus, number>>;
@@ -246,4 +245,3 @@ export declare const writeTask: ($: Shell, client: Client, loc: WriteLocation, i
     id: string;
     path: string;
 }>;
-export {};

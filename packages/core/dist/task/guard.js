@@ -1,4 +1,4 @@
-import { STATUSES } from "./store.js";
+import { STATUSES } from "./statuses.js";
 const ALLOW = { allow: true };
 const block = (reason) => ({ allow: false, reason });
 const HOW_TO_MUTATE = "the folder a backlog file lives in IS its state — mutate it only through the loop tools " +

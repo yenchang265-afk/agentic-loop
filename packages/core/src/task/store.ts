@@ -13,7 +13,8 @@ import { buildTaskFile, isPaired, parseTask, type Task, type TaskInput } from ".
 /** Anything with an id + on-disk path can be moved or annotated. */
 type FileRef = { readonly id: string; readonly path: string }
 
-export type TaskStatus = "draft" | "queued" | "plan-review" | "in-progress" | "in-review" | "completed" | "abandoned"
+export { STATUSES, type TaskStatus } from "./statuses.js"
+import { STATUSES, type TaskStatus } from "./statuses.js"
 
 const isMarkdown = (name: string): boolean => name.toLowerCase().endsWith(".md")
 
@@ -65,17 +66,6 @@ export const wasInterrupted = (task: Task): boolean => {
   const lastFinish = task.body.lastIndexOf("> BUILD finished")
   return lastFinish < lastStart
 }
-
-/** The status folders, in lifecycle order. */
-export const STATUSES: readonly TaskStatus[] = [
-  "draft",
-  "queued",
-  "plan-review",
-  "in-progress",
-  "in-review",
-  "completed",
-  "abandoned",
-]
 
 /** A per-status roll-up of the backlog for `/agent-loop status`. Pure. */
 export interface BacklogSummary {

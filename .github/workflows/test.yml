@@ -31,6 +31,11 @@ jobs:
           node scripts/gen-prompts.mjs
           git diff --exit-code -- plugins/opencode/agents plugins/claude/agents
 
+      - name: Bundled hooks are in sync with hooks/src/ sources
+        run: |
+          node scripts/build-hooks.mjs
+          git diff --exit-code -- plugins/claude/hooks
+
       - name: Build and smoke-run the MCP server
         run: |
           npm run build -w agentic-loop-mcp

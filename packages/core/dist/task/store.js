@@ -1,6 +1,8 @@
 import path from "node:path";
 import { redact } from "./redact.js";
 import { buildTaskFile, isPaired, parseTask } from "./schema.js";
+export { STATUSES } from "./statuses.js";
+import { STATUSES } from "./statuses.js";
 const isMarkdown = (name) => name.toLowerCase().endsWith(".md");
 /** All tasks in claim order: lowest priority number first, ties broken by id. Pure. */
 export const selectOrder = (tasks) => [...tasks].sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id));
@@ -44,16 +46,6 @@ export const wasInterrupted = (task) => {
     const lastFinish = task.body.lastIndexOf("> BUILD finished");
     return lastFinish < lastStart;
 };
-/** The status folders, in lifecycle order. */
-export const STATUSES = [
-    "draft",
-    "queued",
-    "plan-review",
-    "in-progress",
-    "in-review",
-    "completed",
-    "abandoned",
-];
 /**
  * Roll up tasks-by-status into counts and actionable flag lists. `claimedIds`
  * (ids holding a claim marker, see `listClaimIds`) splits body-claimable tasks
