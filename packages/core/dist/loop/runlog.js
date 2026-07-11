@@ -24,7 +24,7 @@ export const parseDuration = (text) => {
 const STAGE_HEADER = /^(?<stage>[a-z][a-z0-9-]*)(?:\s+\(lens:\s*(?<lens>[^)]+)\))?\s+·\s+iteration\s+(?<iter>\d+)\s+·\s+(?<at>\S+)$/;
 const SUMMARY_HEADER = /^Run summary\s+·\s+(?<outcome>[a-z]+)(?::\s+(?<detail>.*?))?\s+·\s+(?<at>\S+)$/;
 const RUN_MARKER = /^run\s+·\s+/;
-const FOOTER = /^iterations used:\s*(\d+)\/(\d+)\s+·\s+total:\s*(.+?)\s+·\s+outcome:/;
+const FOOTER = /^iterations used:\s*(\d+)\/(\d+)\s+·\s+total:\s*([^·]+?)\s+·\s+(?:cost:\s*\$([\d.]+)\s+·\s+)?outcome:/;
 const ROW_STAGE = /^(?<stage>.+?)(?:\s+\((?<lens>[^)]+)\))?$/;
 const splitBlocks = (markdown) => {
     const blocks = [];
@@ -103,6 +103,7 @@ export const parseRunLog = (markdown) => {
                         iterationsUsed: Number(footerLine[1]),
                         cap: Number(footerLine[2]),
                         total: footerLine[3],
+                        ...(footerLine[4] !== undefined ? { cost: Number(footerLine[4]) } : {}),
                     }
                     : {}),
             });

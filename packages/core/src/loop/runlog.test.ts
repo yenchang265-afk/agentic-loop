@@ -121,6 +121,24 @@ test("parseRunLog returns empty structure for empty or non-log markdown", () => 
   assert.deepEqual(parseRunLog("# not a run log\n\nplain text"), { sections: [], summaries: [] })
 })
 
+test("parseRunLog round-trips a token-columned summary including footer cost", () => {
+  const samples: StageSample[] = [
+    {
+      stage: "build",
+      iteration: 0,
+      ms: 20_000,
+      tokens: { input: 10_000, output: 1_800, reasoning: 200, cacheRead: 90_000, cacheWrite: 2_000 },
+      cost: 0.1234,
+    },
+  ]
+  const parsed = parseRunLog(renderRunSummary(samples, "done", "", 3, "t"))
+  const summary = parsed.summaries[0]
+  assert.equal(summary?.rows[0]?.extra["tokens"], "102.0k/2.0k")
+  assert.equal(summary?.rows[0]?.extra["cost"], "$0.1234")
+  assert.equal(summary?.total, "20s")
+  assert.equal(summary?.cost, 0.1234)
+})
+
 test("parseRunLog renders an empty-samples summary as no rows", () => {
   const log = `## Run summary · error: boom · 2026-07-05T13:00:00.000Z\n\n_(no stages ran)_\n\niterations used: 0/3 · total: 0s · outcome: error`
   const parsed = parseRunLog(log)

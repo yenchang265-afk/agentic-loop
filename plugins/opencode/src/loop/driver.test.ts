@@ -768,6 +768,59 @@ test("drive interprets a pr-sitter loop with the pr-sitter manifest, not enginee
 })
 
 /**
+ * Token instrumentation: the assistant message's usage totals (tokens/cost/
+ * model) must land in the run metrics — the summary table gains token/cost
+ * columns and the structured sidecar (`runs/<id>.metrics.json`) records the
+ * samples with the driving sessionID for exact host-storage joins.
+ */
+test("drive records stage token usage into the run summary and metrics sidecar", async () => {
+  const sessionID = "sess-tokens"
+  const log: string[] = []
+  const client = {
+    tui: { showToast: async () => ({ data: undefined }) },
+    session: {
+      command: async () => {
+        recordVerdict(sessionID, "triage", { verdict: "FAIL", reason: "nothing actionable" })
+        return {
+          data: {
+            info: {
+              tokens: { input: 10_000, output: 1_800, reasoning: 200, cache: { read: 90_000, write: 2_000 } },
+              cost: 0.1234,
+              modelID: "claude-sonnet-5",
+            },
+            parts: [{ type: "text", text: "triaged: nothing to do" }],
+          },
+        }
+      },
+    },
+  } as unknown as Deps["client"]
+  const deps: Deps = { client, $: makeShellFS({}, log), directory: "/repo", log: () => {} }
+
+  const state: LoopState = {
+    kind: "pr-sitter",
+    goal: "Sit on PR #2",
+    stage: "triage",
+    iteration: 0,
+    artifacts: {},
+  }
+
+  const outcome = await drive(deps, sessionID, testConfig, firstStep(manifestFor("pr-sitter"), state))
+  assert.equal(outcome?.kind, "done")
+
+  const summaryWrite = log.find((c) => c.startsWith("printf") && c.includes("Run summary"))
+  assert.ok(summaryWrite, "run summary was appended")
+  assert.match(summaryWrite ?? "", /102\.0k\/2\.0k/)
+  assert.match(summaryWrite ?? "", /\$0\.1234/)
+
+  const sidecarWrite = log.find((c) => c.startsWith("printf") && c.includes(".metrics.json"))
+  assert.ok(sidecarWrite, "metrics sidecar was written")
+  assert.match(sidecarWrite ?? "", /"host": "opencode"/)
+  assert.match(sidecarWrite ?? "", /"sessionID": "sess-tokens"/)
+  assert.match(sidecarWrite ?? "", /"input": 10000/)
+  assert.match(sidecarWrite ?? "", /"model": "claude-sonnet-5"/)
+})
+
+/**
  * H2 regression: a real pr-sitter WorkItem pre-sets `state.git = {base, branch}` to
  * name the PR head to isolate onto. On a `triage`-FAIL → done ("nothing actionable"),
  * `triage` has isolation "none" so no isolation ever runs — the driver must NOT

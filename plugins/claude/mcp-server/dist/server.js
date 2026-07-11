@@ -15,6 +15,7 @@ import { buildEntryState, buildWorkSources, loopWorkTree, makeManifestCache, pla
 import { enabledLoopKinds, platformFor } from "@agentic-loop/core/config";
 import { failedCriteriaBlock, worstOf } from "@agentic-loop/core/loop/verdict";
 import { renderRunSummary } from "@agentic-loop/core/loop/metrics";
+import { appendRunMetrics, metricsPath } from "@agentic-loop/core/loop/metrics-file";
 import { commitAll, commitPaths, currentBranch, gitActor, listWorktrees, pruneWorktrees } from "@agentic-loop/core/loop/git";
 import { ensureIsolation, loopId, teardownIsolation } from "@agentic-loop/core/loop/isolate";
 import { clearState, loadState, saveState } from "@agentic-loop/core/loop/persist";
@@ -71,6 +72,22 @@ let samples = []; // per-run metrics
 let lastFireAt = Date.now();
 let stageDeadline = null; // wall-clock cap for the stage in flight
 let config = DEFAULT_CONFIG;
+/**
+ * Structured twin of the run-log summary — `runs/<id>.metrics.json`. The
+ * Claude host never calls the LLM itself (stages run as agent turns), so its
+ * entries carry timing/verdicts only; tokens for these runs are joined from
+ * the session transcripts by consumers. Best-effort.
+ */
+const writeRunMetrics = (id, outcome, detail, endedAt) => {
+    try {
+        const file = metricsPath(directory, config.tasksDir, id);
+        const existing = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null;
+        fs.writeFileSync(file, appendRunMetrics(existing, { endedAt, outcome, detail, host: "claude", samples }));
+    }
+    catch {
+        /* telemetry never fails the loop */
+    }
+};
 const loadCfg = async () => {
     try {
         config = await loadConfig(fsClient, directory);
@@ -454,8 +471,10 @@ const runPark = async (action) => {
             await appendNote(sh, fresh, auditNote(`PLAN stage failed — ${why}; still queued`, new Date(), actor), log);
             await releaseClaim(sh, fresh);
         }
-        const summary = renderRunSummary(samples, "error", why, config.maxIterations, new Date().toISOString());
+        const stamp = new Date().toISOString();
+        const summary = renderRunSummary(samples, "error", why, config.maxIterations, stamp);
         await appendRunLog(sh, directory, config.tasksDir, id, "run · error", summary, log);
+        writeRunMetrics(id, "error", why, stamp);
         activeClaim = null; // the queued claim was already released above
         active = null;
         writeStageMarker(null);
@@ -464,8 +483,10 @@ const runPark = async (action) => {
     await appendNote(sh, fresh, auditNote("Plan written — parked for plan review", new Date(), actor), log);
     const newPath = await moveTask(sh, fresh, (action.toStatus ?? "plan-review")); // also releases the queued/ claim marker
     await commitPaths(sh, directory, [config.tasksDir], `loop(${id}): plan written — parked for review`);
-    const summary = renderRunSummary(samples, "done", "plan parked for review", config.maxIterations, new Date().toISOString());
+    const stamp = new Date().toISOString();
+    const summary = renderRunSummary(samples, "done", "plan parked for review", config.maxIterations, stamp);
     await appendRunLog(sh, directory, config.tasksDir, id, "run · done", summary, log);
+    writeRunMetrics(id, "done", "plan parked for review", stamp);
     if (activeClaim) {
         await activeClaim.source.onTerminal?.(activeClaim.item, { kind: "park", message: action.message });
         activeClaim = null;
@@ -503,8 +524,10 @@ const runTerminal = async (action) => {
     const outcome = action.kind === "done" ? "done" : "stopped";
     const detail = action.kind === "done" ? "review passed" : action.message;
     // metrics summary into the run log
-    const summary = renderRunSummary(samples, outcome, detail, config.maxIterations, new Date().toISOString());
+    const stamp = new Date().toISOString();
+    const summary = renderRunSummary(samples, outcome, detail, config.maxIterations, stamp);
     await appendRunLog(sh, directory, config.tasksDir, loopId(active), `run · ${outcome}`, summary, log);
+    writeRunMetrics(loopId(active), outcome, detail, stamp);
     if (active.task) {
         if (action.kind === "done") {
             // Re-resolve the current path (shell-authoritative) — the claim-time

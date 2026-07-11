@@ -40,6 +40,8 @@ export interface RunLogSummary {
   readonly iterationsUsed?: number
   readonly cap?: number
   readonly total?: string
+  /** Total run cost in dollars, when the footer carries a `cost: $…` segment. */
+  readonly cost?: number
 }
 
 export interface ParsedRunLog {
@@ -62,7 +64,7 @@ export const parseDuration = (text: string): number => {
 const STAGE_HEADER = /^(?<stage>[a-z][a-z0-9-]*)(?:\s+\(lens:\s*(?<lens>[^)]+)\))?\s+·\s+iteration\s+(?<iter>\d+)\s+·\s+(?<at>\S+)$/
 const SUMMARY_HEADER = /^Run summary\s+·\s+(?<outcome>[a-z]+)(?::\s+(?<detail>.*?))?\s+·\s+(?<at>\S+)$/
 const RUN_MARKER = /^run\s+·\s+/
-const FOOTER = /^iterations used:\s*(\d+)\/(\d+)\s+·\s+total:\s*(.+?)\s+·\s+outcome:/
+const FOOTER = /^iterations used:\s*(\d+)\/(\d+)\s+·\s+total:\s*([^·]+?)\s+·\s+(?:cost:\s*\$([\d.]+)\s+·\s+)?outcome:/
 const ROW_STAGE = /^(?<stage>.+?)(?:\s+\((?<lens>[^)]+)\))?$/
 
 interface Block {
@@ -142,6 +144,7 @@ export const parseRunLog = (markdown: string): ParsedRunLog => {
               iterationsUsed: Number(footerLine[1]),
               cap: Number(footerLine[2]),
               total: footerLine[3] as string,
+              ...(footerLine[4] !== undefined ? { cost: Number(footerLine[4]) } : {}),
             }
           : {}),
       })

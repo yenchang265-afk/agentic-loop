@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { formatDuration, renderRunSummary, type StageSample } from "./metrics.js"
+import { formatDuration, formatTokens, renderRunSummary, type StageSample } from "./metrics.js"
 
 test("formatDuration renders sub-minute, minute, and hour scales", () => {
   assert.equal(formatDuration(45_000), "45s")
@@ -48,4 +48,36 @@ test("renderRunSummary handles an empty sample list (crash before any stage)", (
   assert.match(out, /\(no stages ran\)/)
   assert.match(out, /iterations used: 0\/3/)
   assert.match(out, /total: 0s/)
+})
+
+test("renderRunSummary without token samples stays byte-identical to the legacy shape", () => {
+  const out = renderRunSummary(clean, "done", "review passed", 3, "t")
+  assert.ok(!out.includes("tokens"))
+  assert.ok(!out.includes("cost"))
+  assert.match(out, /\| # \| stage \| iter \| verdict \| wall-clock \|\n/)
+})
+
+test("renderRunSummary adds token and cost columns when any sample carries usage", () => {
+  const withUsage: StageSample[] = [
+    {
+      stage: "build",
+      iteration: 0,
+      ms: 20_000,
+      tokens: { input: 10_000, output: 1_800, reasoning: 200, cacheRead: 90_000, cacheWrite: 2_000 },
+      cost: 0.1234,
+      model: "claude-sonnet-5",
+    },
+    { stage: "verify", iteration: 0, ms: 16_000, verdict: "PASS" },
+  ]
+  const out = renderRunSummary(withUsage, "done", "", 3, "t")
+  assert.match(out, /\| # \| stage \| iter \| verdict \| wall-clock \| tokens \| cost \|/)
+  assert.match(out, /\| 1 \| build \| 1 \| — \| 20s \| 102\.0k\/2\.0k \| \$0\.1234 \|/)
+  assert.match(out, /\| 2 \| verify \| 1 \| PASS \| 16s \| — \| — \|/)
+  assert.match(out, /cost: \$0\.1234 · outcome: done/)
+})
+
+test("formatTokens scales counts", () => {
+  assert.equal(formatTokens(456), "456")
+  assert.equal(formatTokens(12_345), "12.3k")
+  assert.equal(formatTokens(2_100_000), "2.1M")
 })

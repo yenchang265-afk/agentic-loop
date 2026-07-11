@@ -37,6 +37,8 @@ export interface RunLogSummary {
     readonly iterationsUsed?: number;
     readonly cap?: number;
     readonly total?: string;
+    /** Total run cost in dollars, when the footer carries a `cost: $…` segment. */
+    readonly cost?: number;
 }
 export interface ParsedRunLog {
     readonly sections: readonly RunLogStageSection[];
