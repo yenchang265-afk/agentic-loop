@@ -131,6 +131,28 @@ export interface ApiError {
   readonly error: string
 }
 
+/** One zod issue from server-side manifest validation. */
+export interface ManifestIssue {
+  readonly path: string
+  readonly message: string
+}
+
+export interface ValidateResponse {
+  readonly valid: boolean
+  readonly issues: readonly ManifestIssue[]
+}
+
+export interface ChecklistItem {
+  readonly done: boolean
+  readonly label: string
+}
+
+export interface SaveKindResponse {
+  readonly written: readonly string[]
+  /** Remaining manual steps the hub cannot (or should not) generate. */
+  readonly checklist: readonly ChecklistItem[]
+}
+
 /** Where a token row's numbers came from. */
 export type TokenSource = "sidecar" | "transcripts" | "opencode-db"
 

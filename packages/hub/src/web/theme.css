@@ -344,6 +344,224 @@ body {
   fill: var(--ok);
 }
 
+/* --- creator --- */
+
+.creator {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 0.6rem;
+}
+
+.creator-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.creator-toolbar .spacer {
+  flex: 1;
+}
+
+.creator-toolbar button,
+.chip-button {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.creator-toolbar button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.creator-toolbar button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.creator-body {
+  display: flex;
+  gap: 0.8rem;
+  flex: 1;
+  min-height: 0;
+}
+
+.creator-canvas {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--panel);
+}
+
+.creator-panel {
+  width: 340px;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.8rem;
+}
+
+.panel-form h3 {
+  font-size: 0.9rem;
+  margin: 0 0 0.6rem;
+}
+
+.form-field {
+  display: block;
+  margin-bottom: 0.6rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.form-field span {
+  display: block;
+  margin-bottom: 0.2rem;
+}
+
+.form-field input[type="text"],
+.form-field input:not([type]),
+.form-field input[type="number"],
+.form-field select,
+.form-field textarea {
+  width: 100%;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.83rem;
+  font-family: inherit;
+}
+
+.form-field textarea {
+  font-family: ui-monospace, monospace;
+  font-size: 0.76rem;
+}
+
+.check-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-right: 0.7rem;
+}
+
+button.danger {
+  border: 1px solid var(--warn);
+  color: var(--warn);
+  background: none;
+  border-radius: 6px;
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.issues,
+.checklist {
+  margin-top: 1rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.6rem;
+  font-size: 0.82rem;
+}
+
+.issue {
+  color: var(--warn);
+  margin-bottom: 0.3rem;
+}
+
+.issue code {
+  color: var(--text);
+}
+
+.check-item {
+  margin-bottom: 0.3rem;
+  color: var(--gate);
+}
+
+.check-item.done {
+  color: var(--ok);
+}
+
+/* React Flow node skins */
+
+.flow-stage {
+  background: var(--panel);
+  border: 2px solid var(--accent);
+  border-radius: 10px;
+  padding: 0.5rem 0.8rem;
+  min-width: 130px;
+  font-size: 0.8rem;
+}
+
+.flow-stage.check {
+  border-style: dashed;
+  border-color: var(--gate);
+}
+
+.flow-stage.selected {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.flow-stage-name {
+  font-weight: 700;
+}
+
+.flow-stage-meta {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.flow-terminal {
+  border-radius: 999px;
+  padding: 0.35rem 0.9rem;
+  font-size: 0.75rem;
+  border: 2px solid var(--muted);
+  background: var(--bg);
+}
+
+.flow-terminal.done {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+.flow-terminal.park {
+  border-color: var(--gate);
+  color: var(--gate);
+}
+
+.flow-terminal.stop {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.flow-terminal.selected {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.handle-pass {
+  background: var(--ok) !important;
+}
+
+.handle-fail {
+  background: var(--gate) !important;
+}
+
+.handle-error {
+  background: var(--warn) !important;
+}
+
+.creator-start {
+  max-width: 640px;
+}
+
 .stage-section pre {
   background: var(--bg);
   border: 1px solid var(--border);

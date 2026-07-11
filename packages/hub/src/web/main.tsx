@@ -1,5 +1,6 @@
 import { StrictMode, useState } from "react"
 import { createRoot } from "react-dom/client"
+import { Creator } from "./creator/Creator.js"
 import { EventsProvider, useEvents } from "./events.js"
 import { ActivePanel } from "./monitor/ActivePanel.js"
 import { Board } from "./monitor/Board.js"
@@ -56,7 +57,7 @@ const App = () => {
             <Runs />
           </div>
         )}
-        {tab === "creator" && <div className="placeholder">Loop creator — coming in a later phase.</div>}
+        {tab === "creator" && <Creator />}
         {tab === "manual" && <div className="placeholder">User manual — coming in a later phase.</div>}
       </main>
     </div>

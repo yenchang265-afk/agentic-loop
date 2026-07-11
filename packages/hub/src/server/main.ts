@@ -11,7 +11,7 @@ import { makeListener, type RawRoute, type Route } from "./http.js"
 import { startWatcher } from "./watch.js"
 import { getActive } from "./routes/active.js"
 import { getBacklog, getTaskDetail } from "./routes/backlog.js"
-import { getKind, getKinds } from "./routes/kinds.js"
+import { getKind, getKinds, saveKind, validateKind } from "./routes/kinds.js"
 import { getRunDetail, getRuns } from "./routes/runs.js"
 import { getRunTokens, getTokensSummary } from "./routes/tokens.js"
 import { defaultOpencodeDbPath } from "./tokens/opencodedb.js"
@@ -54,6 +54,8 @@ const routes: Route[] = [
   { method: "GET", pattern: "/api/active", handler: () => getActive(deps) },
   { method: "GET", pattern: "/api/tokens", handler: () => getTokensSummary(deps) },
   { method: "GET", pattern: "/api/tokens/:id", handler: (req) => getRunTokens(deps, req) },
+  { method: "POST", pattern: "/api/kinds/validate", handler: (req) => validateKind(deps, req) },
+  { method: "POST", pattern: "/api/kinds/:kind", handler: (req) => saveKind(deps, req), mutating: true },
 ]
 
 const events = makeEventHub()
