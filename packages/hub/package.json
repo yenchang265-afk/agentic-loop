@@ -1,0 +1,29 @@
+{
+  "name": "@agentic-loop/hub",
+  "version": "0.0.1",
+  "description": "Local admin hub for agentic-loop — user manual, visual loop creator, loop monitor",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/build-web.mjs",
+    "start": "node dist/server/main.js",
+    "dev": "node scripts/build-web.mjs --watch",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.web.json",
+    "test": "node --import tsx --test src/server/*.test.ts src/server/routes/*.test.ts"
+  },
+  "dependencies": {
+    "@agentic-loop/core": "*",
+    "zod": "^4.1.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@xyflow/react": "^12.8.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tsx": "^4.22.4",
+    "typescript": "^5.6.0"
+  }
+}
