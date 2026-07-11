@@ -206,3 +206,103 @@ body {
   color: var(--ok);
   border-color: var(--ok);
 }
+
+/* --- active panel + run history --- */
+
+.active-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.section-title {
+  font-size: 0.95rem;
+  margin: 1.4rem 0 0.6rem;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.runs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-bottom: 0.8rem;
+}
+
+.run-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 0.45rem 0.7rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+.run-row.active {
+  border-color: var(--accent);
+}
+
+.run-id {
+  font-weight: 600;
+}
+
+.run-detail {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.8rem 1rem;
+}
+
+.run-summary {
+  margin-bottom: 1rem;
+}
+
+.run-summary-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-bottom: 0.4rem;
+  font-size: 0.85rem;
+}
+
+.stage-table {
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.stage-table th,
+.stage-table td {
+  border: 1px solid var(--border);
+  padding: 0.3rem 0.6rem;
+  text-align: left;
+}
+
+.stage-table th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.stage-section {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.stage-section pre {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  font-size: 0.78rem;
+}

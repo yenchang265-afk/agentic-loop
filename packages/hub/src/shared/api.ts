@@ -1,6 +1,9 @@
 import type { BacklogSummary, TaskStatus } from "@agentic-loop/core/task/store"
 import type { BacklogAnomalies } from "@agentic-loop/core/task/audit"
 import type { LoopManifest } from "@agentic-loop/core/manifest/schema"
+import type { ParsedRunLog } from "@agentic-loop/core/loop/runlog"
+
+export type { ParsedRunLog, RunLogStageSection, RunLogSummary, RunSummaryRow } from "@agentic-loop/core/loop/runlog"
 
 /**
  * The hub's wire types, shared verbatim by the node server and the browser
@@ -57,6 +60,69 @@ export interface KindsResponse {
 export interface KindDetailResponse {
   readonly manifest: LoopManifest
   readonly prompts: Readonly<Record<string, string>>
+}
+
+/** One run-log file in `runs/` — id plus its latest terminal summary, if any. */
+export interface RunListItem {
+  readonly id: string
+  readonly outcome?: string
+  readonly detail?: string
+  readonly at?: string
+  /** Number of terminal summaries recorded in the log (plan run + build run…). */
+  readonly runs: number
+}
+
+export interface RunsResponse {
+  readonly runs: readonly RunListItem[]
+}
+
+/** Display-only view of a `runs/<id>.state.json` crash-resume snapshot. */
+export interface SnapshotView {
+  readonly kind?: string
+  readonly goal: string
+  readonly stage: string
+  readonly iteration: number
+  readonly taskId?: string
+  readonly branch?: string
+  readonly worktree?: string
+}
+
+export interface RunDetailResponse {
+  readonly id: string
+  readonly log: ParsedRunLog
+  readonly snapshot: SnapshotView | null
+}
+
+/** The Claude host's live-stage marker (`runs/.stage.json`); opencode writes none. */
+export interface StageMarker {
+  readonly kind?: string
+  readonly stage: string
+  readonly taskId?: string | null
+  readonly worktree?: string | null
+  readonly deadline?: number | null
+}
+
+export interface LeaseView {
+  readonly pid: number
+  readonly host: string
+  readonly startedAt: string
+  readonly heartbeatAt: string
+  readonly stale: boolean
+}
+
+/** Raw pr-sitter dedup ledger entry (`runs/pr-sitter/pr-<n>.json`), passed through. */
+export interface PrLedgerView {
+  readonly pr: number
+  readonly updatedAt?: string
+  readonly headShaHandled?: string
+  readonly failedAttempts: number
+}
+
+export interface ActiveResponse {
+  readonly stage: StageMarker | null
+  readonly lease: LeaseView | null
+  readonly snapshotIds: readonly string[]
+  readonly prLedgers: readonly PrLedgerView[]
 }
 
 export interface ApiError {

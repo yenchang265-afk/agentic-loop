@@ -6,8 +6,10 @@ import { defaultLoopsDir } from "@agentic-loop/core/manifest/dir"
 import type { HubDeps } from "./deps.js"
 import { fsClient, sh } from "./fsclient.js"
 import { makeListener, type Route } from "./http.js"
+import { getActive } from "./routes/active.js"
 import { getBacklog, getTaskDetail } from "./routes/backlog.js"
 import { getKind, getKinds } from "./routes/kinds.js"
+import { getRunDetail, getRuns } from "./routes/runs.js"
 
 /**
  * Hub server entry. Binds 127.0.0.1 only — this is a local admin tool, never
@@ -39,6 +41,9 @@ const routes: Route[] = [
   { method: "GET", pattern: "/api/tasks/:status/:id", handler: (req) => getTaskDetail(deps, req) },
   { method: "GET", pattern: "/api/kinds", handler: () => getKinds(deps) },
   { method: "GET", pattern: "/api/kinds/:kind", handler: (req) => getKind(deps, req) },
+  { method: "GET", pattern: "/api/runs", handler: () => getRuns(deps) },
+  { method: "GET", pattern: "/api/runs/:id", handler: (req) => getRunDetail(deps, req) },
+  { method: "GET", pattern: "/api/active", handler: () => getActive(deps) },
 ]
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "web")

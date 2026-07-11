@@ -1,6 +1,8 @@
 import { StrictMode, useState } from "react"
 import { createRoot } from "react-dom/client"
+import { ActivePanel } from "./monitor/ActivePanel.js"
 import { Board } from "./monitor/Board.js"
+import { Runs } from "./monitor/Runs.js"
 import "./theme.css"
 
 type Tab = "monitor" | "creator" | "manual"
@@ -30,7 +32,14 @@ const App = () => {
         </nav>
       </header>
       <main className="hub-main">
-        {tab === "monitor" && <Board />}
+        {tab === "monitor" && (
+          <div>
+            <ActivePanel />
+            <Board />
+            <h2 className="section-title">Run history</h2>
+            <Runs />
+          </div>
+        )}
         {tab === "creator" && <div className="placeholder">Loop creator — coming in a later phase.</div>}
         {tab === "manual" && <div className="placeholder">User manual — coming in a later phase.</div>}
       </main>
