@@ -78,7 +78,7 @@ import {
 } from "@agentic-loop/core/loop/verdict"
 import { enabledLoopKinds, triggerFor } from "@agentic-loop/core/config"
 import type { Config } from "../config.ts"
-import { armCron, armIdle, armPoll, claimsOnIdle, type TriggerMode, type WatchTimerHandle } from "./trigger.js"
+import { armCron, armIdle, armPoll, claimsOnIdle, cronError, type TriggerMode, type WatchTimerHandle } from "./trigger.js"
 import type { Action, LoopState, Stage, TaskRef } from "@agentic-loop/core/loop/state"
 import { clearLoop, findSessionDriving, getLoop, setLoop } from "@agentic-loop/core/loop/state"
 
@@ -1097,20 +1097,47 @@ const parseIntervalSpec = (s: string): { intervalMs: number } | null => {
   return { intervalMs: Math.max(ms, MIN_WATCH_INTERVAL_MS) }
 }
 
+/** A per-session trigger override parsed from `watch` arguments. */
+export type WatchOverride =
+  | { readonly type: "poll"; readonly intervalMs?: number }
+  | { readonly type: "cron"; readonly schedule: string }
+  | { readonly type: "idle" }
+
 /**
- * Parse the interval spec of `watch [interval]`. Accepts `""` (use the config
- * default), `30s`, `5m`, `2h`, a bare number (minutes), and an optional
- * `--interval ` prefix. Clamped to at least 10 seconds. The kind is no longer
- * an argument — each per-kind command scopes its own watch. Pure.
+ * Parse the arguments of `watch [poll [interval] | cron <schedule> | idle |
+ * <interval>]`. `""` → {} (the kind's configured trigger decides); everything
+ * else is a per-session trigger override: `idle`, `cron <5-field schedule>`
+ * (validated here), `poll [interval]`, or a bare interval (`30s`, `5m`, `2h`,
+ * bare minutes — the long-standing poll shorthand, optional `--interval `
+ * prefix). Intervals clamp to at least 10 seconds. The kind is no longer an
+ * argument — each per-kind command scopes its own watch. Pure.
  */
-export const parseWatchArgs = (spec: string): { intervalMs?: number } | { error: string } => {
+export const parseWatchArgs = (spec: string): { trigger?: WatchOverride } | { error: string } => {
   const s = spec.trim().replace(/^--interval\s+/i, "")
   if (!s) return {}
+  if (/^idle$/i.test(s)) return { trigger: { type: "idle" } }
+  const cron = /^cron\s+(.+)$/i.exec(s)
+  if (cron) {
+    const schedule = (cron[1] as string).trim().replace(/^"(.*)"$/, "$1")
+    const error = cronError(schedule)
+    if (error) return { error: `Not a valid cron schedule "${schedule}" — ${error}` }
+    return { trigger: { type: "cron", schedule } }
+  }
+  const poll = /^poll(?:\s+(.+))?$/i.exec(s)
+  if (poll) {
+    const rest = (poll[1] ?? "").trim()
+    if (!rest) return { trigger: { type: "poll" } }
+    const parsed = parseIntervalSpec(rest)
+    if (!parsed) return { error: `Unrecognized poll interval "${rest}" — use e.g. 30s, 5m, 2h, or a bare number of minutes.` }
+    return { trigger: { type: "poll", intervalMs: parsed.intervalMs } }
+  }
   const parsed = parseIntervalSpec(s)
   if (!parsed) {
-    return { error: `Unrecognized watch interval "${spec.trim()}" — use e.g. 30s, 5m, 2h, or a bare number of minutes.` }
+    return {
+      error: `Unrecognized watch argument "${spec.trim()}" — use an interval (30s, 5m, 2h), poll [interval], cron <schedule>, or idle.`,
+    }
   }
-  return parsed
+  return { trigger: { type: "poll", intervalMs: parsed.intervalMs } }
 }
 
 /** Clear one session's watch trigger timer, if any. */
@@ -1477,10 +1504,12 @@ export const handleCommand = async (
   if (lower === "watch" || lower.startsWith("watch ")) {
     const parsed = parseWatchArgs(arg.slice("watch".length))
     if ("error" in parsed) return void (await toast(client, parsed.error, "warning"))
-    // An explicit `watch <interval>` is a per-session poll override; without
-    // one, the kind's configured trigger (loops.<kind>.trigger) decides.
-    const trigger = triggerFor(config, kind)
-    const mode: TriggerMode = parsed.intervalMs !== undefined ? "poll" : trigger.type
+    // The kind's configured trigger (loops.<kind>.trigger) is the default; any
+    // `watch` argument — poll [interval], cron <schedule>, idle, or a bare
+    // interval — overrides it for this session only.
+    const configured = triggerFor(config, kind)
+    const trigger = parsed.trigger ?? configured
+    const mode: TriggerMode = trigger.type
     // Only one watcher process per clone: acquire the on-disk lease before
     // arming (a re-arm by an already-watching session keeps its share).
     if (!watching.has(sessionID)) {
@@ -1491,7 +1520,7 @@ export const handleCommand = async (
     watchKindFilter.set(sessionID, kind) // the command IS the kind — every tick scopes to it
     stopWatchTimer(sessionID) // replace any prior timer instead of stacking
     let handle: WatchTimerHandle
-    if (mode === "cron" && trigger.type === "cron") {
+    if (trigger.type === "cron") {
       // A schedule fire is a one-shot claim: watchTick claims only when the
       // session is actually idle, so a fire landing mid-drive is skipped and
       // the next fire retries. The finally-cleanup keeps a skipped fire's
@@ -1500,14 +1529,14 @@ export const handleCommand = async (
         claimRequested.set(sessionID, kind)
         void watchTick(deps, sessionID, config).finally(() => claimRequested.delete(sessionID))
       })
-    } else if (mode === "idle") {
+    } else if (trigger.type === "idle") {
       handle = armIdle() // the session.idle event stream alone drives claims
     } else {
-      const configured = trigger.type === "poll" ? trigger.intervalMinutes : undefined
-      const intervalMs = Math.max(
-        parsed.intervalMs ?? (configured ?? config.watchIntervalMinutes) * 60_000,
-        MIN_WATCH_INTERVAL_MS,
-      )
+      // Interval resolution: the override's own interval, else the configured
+      // poll trigger's, else the host default.
+      const overrideMs = "intervalMs" in trigger ? trigger.intervalMs : undefined
+      const configuredMin = configured.type === "poll" ? configured.intervalMinutes : undefined
+      const intervalMs = Math.max(overrideMs ?? (configuredMin ?? config.watchIntervalMinutes) * 60_000, MIN_WATCH_INTERVAL_MS)
       handle = armPoll(intervalMs, () => void watchTick(deps, sessionID, config))
     }
     watchTimers.set(sessionID, handle)
@@ -1515,8 +1544,8 @@ export const handleCommand = async (
     lastSkipReason.delete(sessionID) // a fresh arm re-toasts whatever reason comes next
     const scope = engineering ? "approved tasks to plan and build" : `${kind} work`
     const overrideNote =
-      parsed.intervalMs !== undefined && trigger.type !== "poll"
-        ? ` (explicit interval overrides the configured ${trigger.type} trigger for this session)`
+      parsed.trigger !== undefined && parsed.trigger.type !== configured.type
+        ? ` (this session only — config default is ${configured.type})`
         : ""
     await toast(client, `Watching for ${scope} (${handle.describe})${overrideNote}.`, "info")
     // Immediate first pull — don't make the user wait for the next idle event

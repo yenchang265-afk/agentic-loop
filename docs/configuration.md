@@ -120,8 +120,10 @@ config order.
     session goes idle, chaining loops back to back ("webhook-style" immediacy —
     no HTTP endpoint is involved).
 
-  An explicit `/agentic-loop:<kind> watch <interval>` is a per-session poll
-  override of the configured trigger.
+  The config value is the **default**; `/agentic-loop:<kind> watch` with an
+  argument overrides it for that session only:
+  `watch poll [interval]` (or a bare interval), `watch cron "<schedule>"`,
+  or `watch idle`.
 
 ## Admin hub (`hub` — user scope only)
 
