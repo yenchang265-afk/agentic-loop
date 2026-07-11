@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import type { ActiveResponse } from "../../shared/api.js"
 import { fetchJson } from "../api.js"
+import { useEvents } from "../events.js"
 
 /** Live activity strip: current stage (Claude host), watch lease, resumable snapshots, PR ledgers. */
 
@@ -18,12 +19,13 @@ const Deadline = ({ deadline }: { deadline: number | null | undefined }) => {
 
 export const ActivePanel = () => {
   const [data, setData] = useState<ActiveResponse | null>(null)
+  const { versions } = useEvents()
 
   useEffect(() => {
     fetchJson<ActiveResponse>("/api/active")
       .then(setData)
       .catch(() => setData(null))
-  }, [])
+  }, [versions.active])
 
   if (!data) return null
   const idle = !data.stage && !data.lease && data.snapshotIds.length === 0 && data.prLedgers.length === 0

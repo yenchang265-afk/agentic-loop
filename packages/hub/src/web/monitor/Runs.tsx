@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import type { RunDetailResponse, RunsResponse } from "../../shared/api.js"
 import { fetchJson } from "../api.js"
+import { useEvents } from "../events.js"
 
 /** Run history: list of run logs; expanding one shows stage sections + summary tables. */
 
@@ -94,12 +95,13 @@ const RunDetail = ({ id }: { id: string }) => {
 export const Runs = () => {
   const [data, setData] = useState<RunsResponse | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
+  const { versions } = useEvents()
 
   useEffect(() => {
     fetchJson<RunsResponse>("/api/runs")
       .then(setData)
       .catch(() => setData({ runs: [] }))
-  }, [])
+  }, [versions.run])
 
   if (!data) return null
   if (data.runs.length === 0) return <div className="placeholder">No run logs yet.</div>

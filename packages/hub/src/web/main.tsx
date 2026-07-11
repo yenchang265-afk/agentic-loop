@@ -1,5 +1,6 @@
 import { StrictMode, useState } from "react"
 import { createRoot } from "react-dom/client"
+import { EventsProvider, useEvents } from "./events.js"
 import { ActivePanel } from "./monitor/ActivePanel.js"
 import { Board } from "./monitor/Board.js"
 import { Runs } from "./monitor/Runs.js"
@@ -12,6 +13,20 @@ const TABS: readonly { id: Tab; label: string }[] = [
   { id: "creator", label: "Loop creator" },
   { id: "manual", label: "User manual" },
 ]
+
+const HeaderStatus = () => {
+  const { connected, notifications, requestNotifications } = useEvents()
+  return (
+    <div className="header-status">
+      <span className={`live-dot${connected ? " on" : ""}`} title={connected ? "live updates on" : "reconnecting…"} />
+      {notifications !== "unsupported" && notifications !== "granted" && (
+        <button className="hub-tab" title="Notify me when a task parks at a gate" onClick={requestNotifications}>
+          🔔 notify
+        </button>
+      )}
+    </div>
+  )
+}
 
 const App = () => {
   const [tab, setTab] = useState<Tab>("monitor")
@@ -30,6 +45,7 @@ const App = () => {
             </button>
           ))}
         </nav>
+        <HeaderStatus />
       </header>
       <main className="hub-main">
         {tab === "monitor" && (
@@ -48,4 +64,11 @@ const App = () => {
 }
 
 const root = document.getElementById("root")
-if (root) createRoot(root).render(<StrictMode><App /></StrictMode>)
+if (root)
+  createRoot(root).render(
+    <StrictMode>
+      <EventsProvider>
+        <App />
+      </EventsProvider>
+    </StrictMode>,
+  )

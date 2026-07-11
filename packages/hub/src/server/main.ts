@@ -3,9 +3,12 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { loadConfig } from "@agentic-loop/core/config"
 import { defaultLoopsDir } from "@agentic-loop/core/manifest/dir"
+import { STATUSES } from "@agentic-loop/core/task/store"
 import type { HubDeps } from "./deps.js"
+import { makeEventHub } from "./events.js"
 import { fsClient, sh } from "./fsclient.js"
-import { makeListener, type Route } from "./http.js"
+import { makeListener, type RawRoute, type Route } from "./http.js"
+import { startWatcher } from "./watch.js"
 import { getActive } from "./routes/active.js"
 import { getBacklog, getTaskDetail } from "./routes/backlog.js"
 import { getKind, getKinds } from "./routes/kinds.js"
@@ -46,8 +49,23 @@ const routes: Route[] = [
   { method: "GET", pattern: "/api/active", handler: () => getActive(deps) },
 ]
 
+const events = makeEventHub()
+const stopWatcher = startWatcher({ directory, tasksDir: config.tasksDir, statuses: STATUSES }, (evts) =>
+  events.broadcast(evts),
+)
+
+const rawRoutes: RawRoute[] = [{ method: "GET", pattern: "/api/events", handle: (req, res) => events.handle(req, res) }]
+
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "web")
-const server = http.createServer(makeListener(routes, webRoot))
+const server = http.createServer(makeListener(routes, webRoot, rawRoutes))
 server.listen(port, "127.0.0.1", () => {
   console.log(`agentic-loop hub: http://127.0.0.1:${port} (watching ${directory})`)
 })
+
+const shutdown = (): void => {
+  stopWatcher()
+  events.close()
+  server.close(() => process.exit(0))
+}
+process.on("SIGINT", shutdown)
+process.on("SIGTERM", shutdown)

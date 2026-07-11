@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import type { BacklogResponse, TaskCard } from "../../shared/api.js"
 import { fetchJson } from "../api.js"
+import { useEvents } from "../events.js"
 
 /**
  * The backlog board: one column per status folder, task cards from
@@ -31,12 +32,13 @@ const Card = ({ task, gated, claimed }: { task: TaskCard; gated: boolean; claime
 export const Board = () => {
   const [data, setData] = useState<BacklogResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const { versions } = useEvents()
 
   useEffect(() => {
     fetchJson<BacklogResponse>("/api/backlog")
       .then((d) => setData(d))
       .catch((e: Error) => setError(e.message))
-  }, [])
+  }, [versions.backlog, versions.gate])
 
   if (error) return <div className="error-banner">Could not load backlog: {error}</div>
   if (!data) return <div className="placeholder">Loading backlog…</div>

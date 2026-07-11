@@ -128,3 +128,10 @@ export interface ActiveResponse {
 export interface ApiError {
   readonly error: string
 }
+
+/** One live-update event on the `/api/events` SSE stream. */
+export type HubEvent =
+  | { readonly type: "backlog" }
+  | { readonly type: "run"; readonly id: string }
+  | { readonly type: "active" }
+  | { readonly type: "gate"; readonly taskId: string; readonly toStatus: string }

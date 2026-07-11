@@ -83,6 +83,25 @@ body {
   font-weight: 600;
 }
 
+.header-status {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.live-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--muted);
+  display: inline-block;
+}
+
+.live-dot.on {
+  background: var(--ok);
+}
+
 .hub-main {
   flex: 1;
   overflow: auto;

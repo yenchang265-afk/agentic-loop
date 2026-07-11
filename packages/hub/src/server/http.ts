@@ -37,6 +37,13 @@ export interface Route {
   readonly mutating?: boolean
 }
 
+/** A route that owns the raw response (SSE streams, non-JSON payloads). */
+export interface RawRoute {
+  readonly method: "GET"
+  readonly pattern: string
+  readonly handle: (req: IncomingMessage, res: ServerResponse, params: Readonly<Record<string, string>>) => void
+}
+
 export const json = (status: number, body: unknown): JsonResponse => ({ status, body })
 export const ok = (body: unknown): JsonResponse => json(200, body)
 export const notFound = (what: string): JsonResponse => json(404, { error: `${what} not found` })
@@ -120,7 +127,7 @@ const readBody = (req: IncomingMessage): Promise<unknown> =>
  * root. Unknown /api paths get JSON 404; everything else falls through to
  * static serving (SPA shell at /).
  */
-export const makeListener = (routes: readonly Route[], webRoot: string) => {
+export const makeListener = (routes: readonly Route[], webRoot: string, rawRoutes: readonly RawRoute[] = []) => {
   const root = path.resolve(webRoot)
   return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     if (!isLocalHost(req.headers.host)) {
@@ -129,6 +136,14 @@ export const makeListener = (routes: readonly Route[], webRoot: string) => {
     }
     const url = new URL(req.url ?? "/", "http://localhost")
     const method = req.method === "POST" ? "POST" : "GET"
+
+    for (const route of rawRoutes) {
+      if (route.method !== method) continue
+      const params = matchRoute(route.pattern, url.pathname)
+      if (!params) continue
+      route.handle(req, res, params)
+      return
+    }
 
     for (const route of routes) {
       if (route.method !== method) continue
