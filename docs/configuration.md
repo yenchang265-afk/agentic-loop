@@ -207,9 +207,15 @@ Impact on the commands:
 - On a terminal event the run log gets a **`## Run summary`** table — per-stage
   wall-clock, verdict history, and iterations used.
 
-## Environment (Claude Code MCP host)
+## Environment
 
-The Claude Code MCP server reads two directory pointers from the environment.
+One variable applies to **every host**:
+
+- **`AGENTIC_LOOP_USER_CONFIG`** — path of the user-scope config file
+  (default `~/.agentic-loop.json`); set to `""` to disable the layer. See
+  [Layers & precedence](#layers--precedence).
+
+The Claude Code MCP server additionally reads two directory pointers.
 Neither applies to the OpenCode host, which takes its directory from the
 project you opened.
 
