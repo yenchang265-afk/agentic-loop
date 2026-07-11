@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { Client } from "./host.js";
-import { type Config } from "./loop/state.js";
+import { type Config, type LoopTrigger } from "./loop/state.js";
 import { type TrackerSystem } from "./task/schema.js";
 /**
  * Loop configuration, layered from two optional files: a user-scope
@@ -38,6 +38,21 @@ export declare const ProjectManagementSchema: z.ZodObject<{
     defaultType: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
 export type ProjectManagement = z.infer<typeof ProjectManagementSchema>;
+/**
+ * How a watching host schedules claims for a loop kind — see the `LoopTrigger`
+ * type in loop/state.ts for semantics. Core validates shape only; cron
+ * `schedule` syntax is validated by the host that honors it (the OpenCode
+ * plugin), and the pull-only Claude host ignores the field entirely.
+ */
+export declare const LoopTriggerSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
+    type: z.ZodLiteral<"poll">;
+    intervalMinutes: z.ZodOptional<z.ZodNumber>;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"cron">;
+    schedule: z.ZodString;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"idle">;
+}, z.core.$strip>], "type">;
 export declare const ConfigSchema: z.ZodObject<{
     maxIterations: z.ZodDefault<z.ZodNumber>;
     tasksDir: z.ZodDefault<z.ZodString>;
@@ -52,6 +67,16 @@ export declare const ConfigSchema: z.ZodObject<{
             github: "github";
             ado: "ado";
         }>>;
+        /** How a watching host schedules claims for this kind (default: poll). */
+        trigger: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            type: z.ZodLiteral<"poll">;
+            intervalMinutes: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strip>, z.ZodObject<{
+            type: z.ZodLiteral<"cron">;
+            schedule: z.ZodString;
+        }, z.core.$strip>, z.ZodObject<{
+            type: z.ZodLiteral<"idle">;
+        }, z.core.$strip>], "type">>;
     }, z.core.$loose>>>;
     codePlatform: z.ZodDefault<z.ZodEnum<{
         github: "github";
@@ -80,6 +105,8 @@ export declare const ConfigSchema: z.ZodObject<{
 export declare const enabledLoopKinds: (config: Config) => string[];
 /** The code platform a loop kind's PR source talks to: per-kind override, else the global default. Pure. */
 export declare const platformFor: (config: Config, kind: string) => CodePlatform;
+/** How a watching host schedules claims for a loop kind: configured trigger, else poll. Pure. */
+export declare const triggerFor: (config: Config, kind: string) => LoopTrigger;
 /**
  * Build a tracker deep link from a task's `tracker.key` and the configured
  * `projectManagement.baseUrl` — the base URL with the key appended. Returns

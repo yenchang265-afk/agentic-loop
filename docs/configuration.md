@@ -95,6 +95,33 @@ config order.
 - **`loops.<kind>.codePlatform`** — per-kind override of the global
   `codePlatform` (e.g. run the sitter against ADO while everything else
   defaults to GitHub).
+- **`loops.<kind>.trigger`** — how a watching host schedules claims for this
+  kind (OpenCode `watch` mode only; the pull-only Claude host ignores it):
+
+  ```json
+  {
+    "loops": {
+      "engineering": { "trigger": { "type": "idle" } },
+      "pr-sitter": {
+        "enabled": true,
+        "trigger": { "type": "cron", "schedule": "0 9 * * 1-5" }
+      }
+    }
+  }
+  ```
+
+  - `{ "type": "poll", "intervalMinutes"?: n }` — the default: a standing
+    timer (falls back to `watchIntervalMinutes`), plus claims on idle events.
+  - `{ "type": "cron", "schedule": "<5-field cron>" }` — claims fire **only**
+    when the schedule fires; plain idle events never claim. A fire landing
+    while the session is busy is skipped — the next fire retries. Syntax is
+    validated at config load.
+  - `{ "type": "idle" }` — no timer; a new loop starts as soon as the watching
+    session goes idle, chaining loops back to back ("webhook-style" immediacy —
+    no HTTP endpoint is involved).
+
+  An explicit `/agentic-loop:<kind> watch <interval>` is a per-session poll
+  override of the configured trigger.
 
 ## Admin hub (`hub` — user scope only)
 
