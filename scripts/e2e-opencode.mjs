@@ -266,9 +266,37 @@ const main = async () => {
     if (sessionErr) throw new Error(`session.create failed: ${JSON.stringify(sessionErr)}`)
     log(`session created: ${session.id}`)
 
-    // Step 1: new — real LLM turn (interview-me + loop-plan-author).
+    // Step 1: new — real LLM turn (interview-me + loop-plan-author). The
+    // interview always ends the first turn on a restate-and-confirm question,
+    // so a headless run must answer it: nudge with a confirmation prompt
+    // whenever the draft hasn't appeared yet.
     log("step 1/6: agentic-loop:engineering new ...")
     await runCommand(client, session.id, scratchRepo, "agentic-loop:engineering", `new ${idea.newPromptSpec}`)
+    for (let nudge = 0; nudge < 3 && !findSoleDraftId(scratchRepo); nudge++) {
+      try {
+        await pollUntil("step 1 (interview turn)", () => (findSoleDraftId(scratchRepo) ? "pass" : "pending"), {
+          timeoutMs: 90_000,
+        })
+      } catch {
+        log(`step 1: no draft yet — answering the interview (confirmation ${nudge + 1}/3)`)
+        await client.session
+          .prompt({
+            path: { id: session.id },
+            query: { directory: scratchRepo },
+            body: {
+              parts: [
+                {
+                  type: "text",
+                  text:
+                    "Yes — confirmed. The restated goal and acceptance criteria are exactly right; " +
+                    "no changes. Proceed now: keep it a single draft and write it to docs/tasks/draft/.",
+                },
+              ],
+            },
+          })
+          .catch((err) => log(`WARN: confirmation prompt dropped (${err?.message}) — continuing on disk-state polling`))
+      }
+    }
     await pollUntil("step 1 (new)", () => (findSoleDraftId(scratchRepo) ? "pass" : "pending"), { timeoutMs: 5 * 60_000 })
     id = findSoleDraftId(scratchRepo)
     log(`task id: ${id}`)
