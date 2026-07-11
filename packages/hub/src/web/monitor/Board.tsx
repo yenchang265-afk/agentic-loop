@@ -1,0 +1,90 @@
+import { useEffect, useState } from "react"
+import type { BacklogResponse, TaskCard } from "../../shared/api.js"
+import { fetchJson } from "../api.js"
+import { useEvents } from "../events.js"
+
+/**
+ * The backlog board: one column per status folder, task cards from
+ * frontmatter, gate folders (plan-review / in-review) highlighted — those are
+ * where the loop is waiting on a human.
+ */
+
+const GATE_STATUSES: readonly string[] = ["plan-review", "in-review"]
+
+const Card = ({ task, gated, claimed }: { task: TaskCard; gated: boolean; claimed: boolean }) => (
+  <div className={`card${gated ? " gated" : ""}`} title={task.acceptance.join("\n")}>
+    <div className="card-title">{task.title}</div>
+    <div className="card-meta">
+      <span className="badge">{task.id}</span>
+      {task.type && <span className="badge">{task.type}</span>}
+      {task.hasPlan && <span className="badge ok">plan</span>}
+      {claimed && <span className="badge gate">claimed</span>}
+      {gated && <span className="badge gate">awaiting you</span>}
+      {task.labels.map((l) => (
+        <span key={l} className="badge">
+          {l}
+        </span>
+      ))}
+    </div>
+  </div>
+)
+
+export const Board = () => {
+  const [data, setData] = useState<BacklogResponse | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const { versions } = useEvents()
+
+  useEffect(() => {
+    fetchJson<BacklogResponse>("/api/backlog")
+      .then((d) => setData(d))
+      .catch((e: Error) => setError(e.message))
+  }, [versions.backlog, versions.gate])
+
+  if (error) return <div className="error-banner">Could not load backlog: {error}</div>
+  if (!data) return <div className="placeholder">Loading backlog…</div>
+
+  const { summary } = data
+  const gateCount = summary.gated.length + summary.awaitingReview.length
+  const claimed = new Set(data.claimedIds)
+
+  return (
+    <div>
+      <div className="summary-chips">
+        {gateCount > 0 && (
+          <span className="chip gate">
+            <strong>{gateCount}</strong> awaiting your review
+          </span>
+        )}
+        <span className="chip">
+          queued <strong>{summary.counts["queued"]}</strong>
+        </span>
+        <span className="chip">
+          in progress <strong>{summary.counts["in-progress"]}</strong>
+        </span>
+        {summary.interrupted.length > 0 && (
+          <span className="chip gate">
+            interrupted <strong>{summary.interrupted.length}</strong>
+          </span>
+        )}
+        {data.anomalies && <span className="chip gate">backlog anomalies — run doctor</span>}
+      </div>
+      <div className="board">
+        {data.statuses.map((status) => {
+          const tasks = data.tasks[status] ?? []
+          const gate = GATE_STATUSES.includes(status)
+          return (
+            <div key={status} className={`column${gate ? " gate-column" : ""}`}>
+              <div className="column-title">
+                <span>{status}</span>
+                <span>{tasks.length}</span>
+              </div>
+              {tasks.map((t) => (
+                <Card key={t.id} task={t} gated={gate} claimed={claimed.has(t.id)} />
+              ))}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}

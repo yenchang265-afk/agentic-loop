@@ -65,7 +65,8 @@ import {
   worktreeForBranch,
 } from "@agentic-loop/core/loop/git"
 import { clearState, loadState, saveState } from "@agentic-loop/core/loop/persist"
-import { type Outcome, renderRunSummary, type StageSample } from "@agentic-loop/core/loop/metrics"
+import { type Outcome, renderRunSummary, type StageSample, type StageTokens } from "@agentic-loop/core/loop/metrics"
+import { appendRunMetrics, metricsPath } from "@agentic-loop/core/loop/metrics-file"
 import {
   failedCriteriaBlock,
   LOOP_REVIEW_TAG,
@@ -310,6 +311,13 @@ type CheckStage = string
  */
 const recordedVerdicts = new Map<string, { readonly stage: CheckStage; readonly record: VerdictRecord }>()
 
+/** Usage observed for one stage pass — the assistant message's totals. */
+interface StageUsage {
+  readonly tokens: StageTokens
+  readonly cost: number
+  readonly model: string
+}
+
 /** Per-session run metrics, accumulated across a drive and rendered on termination. */
 const runSamples = new Map<string, StageSample[]>()
 
@@ -417,10 +425,11 @@ const commitBacklog = async (deps: Deps, config: Config, state: LoopState, messa
 const stageCommand = (loaded: LoadedManifest, stage: Stage): string => stageDef(loaded.manifest, stage).command
 
 /**
- * Fire a stage command and return the assistant text it produced. Throws when
- * the stage exceeds the configured wall-clock cap — a hung stage must fail
- * the loop (and release its locks via onIdle's catch) rather than wedge the
- * driver forever.
+ * Fire a stage command and return the assistant text it produced, plus the
+ * usage totals (tokens/cost/model) the assistant message reports — previously
+ * discarded, now recorded into the run metrics. Throws when the stage exceeds
+ * the configured wall-clock cap — a hung stage must fail the loop (and
+ * release its locks via onIdle's catch) rather than wedge the driver forever.
  */
 const runStage = async (
   client: Client,
@@ -428,7 +437,7 @@ const runStage = async (
   stage: string,
   args: string,
   timeoutMinutes: number,
-): Promise<string> => {
+): Promise<{ text: string; usage?: StageUsage }> => {
   const command = client.session.command({
     path: { id: sessionID },
     body: { command: stage, arguments: args },
@@ -443,11 +452,26 @@ const runStage = async (
   try {
     const res = await Promise.race([command, timeout])
     const parts = res.data?.parts ?? []
-    return parts
+    const text = parts
       .filter((p): p is Extract<typeof p, { type: "text" }> => p.type === "text")
       .map((p) => p.text)
       .join("\n")
       .trim()
+    const info = res.data?.info
+    const usage: StageUsage | undefined = info?.tokens
+      ? {
+          tokens: {
+            input: info.tokens.input,
+            output: info.tokens.output,
+            reasoning: info.tokens.reasoning,
+            cacheRead: info.tokens.cache.read,
+            cacheWrite: info.tokens.cache.write,
+          },
+          cost: info.cost,
+          model: info.modelID,
+        }
+      : undefined
+    return { text, ...(usage ? { usage } : {}) }
   } finally {
     clearTimeout(timer)
   }
@@ -508,7 +532,13 @@ const runStageWithLenses = async (
       : baseArgs
     recordedVerdicts.delete(sessionID) // no stale verdict may leak into this pass
     const t0 = Date.now()
-    const out = await runStage(client, sessionID, stageCommand(loaded, stage), args, config.stageTimeoutMinutes)
+    const { text: out, usage } = await runStage(
+      client,
+      sessionID,
+      stageCommand(loaded, stage),
+      args,
+      config.stageTimeoutMinutes,
+    )
     const ms = Date.now() - t0
     const stamp = new Date().toISOString()
     const header = lens
@@ -524,6 +554,8 @@ const runStageWithLenses = async (
       ms,
       ...(isCheck ? { verdict: passRecord?.verdict ?? "none" } : {}),
       ...(lens ? { lens } : {}),
+      startedAt: new Date(t0).toISOString(),
+      ...(usage ? { tokens: usage.tokens, cost: usage.cost, model: usage.model } : {}),
     })
     if (!getLoop(sessionID)) break // stop mid-pass — don't fire the rest
   }
@@ -570,8 +602,22 @@ const renderMetrics = async (
   // override `config.maxIterations` (pr-sitter caps at 3), so `config.maxIterations`
   // alone would mislabel the footer (e.g. "iterations used: 3/1").
   const cap = manifestFor(state.kind ?? "engineering").manifest.maxIterations ?? config.maxIterations
-  const summary = renderRunSummary(samples, outcome, detail, cap, new Date().toISOString())
+  const stamp = new Date().toISOString()
+  const summary = renderRunSummary(samples, outcome, detail, cap, stamp)
   await appendRunLog(deps.$, deps.directory, config.tasksDir, loopId(state), `run · ${outcome}`, summary, deps.log)
+  // Structured twin of the summary table — the machine-readable record token
+  // dashboards join against. sessionID lets host storage be joined exactly.
+  const file = metricsPath(deps.directory, config.tasksDir, loopId(state))
+  const existing = await deps.$`cat ${file}`.quiet().nothrow()
+  const doc = appendRunMetrics(existing.exitCode === 0 ? existing.stdout.toString() : null, {
+    endedAt: stamp,
+    outcome,
+    detail,
+    host: "opencode",
+    sessionID,
+    samples,
+  })
+  await deps.$`printf '%s' ${doc} > ${file}`.quiet().nothrow()
 }
 
 /** Run the stage chain from `first` until the pure logic yields a gate/done/stop.

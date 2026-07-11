@@ -17,3 +17,6 @@ claude-plugin/mcp-server/dist/
 
 # Codegraph MCP local index (machine-local, not committed)
 .codegraph/
+
+# Hub build output (bundled locally by packages/hub/scripts/build-web.mjs)
+packages/hub/dist/
