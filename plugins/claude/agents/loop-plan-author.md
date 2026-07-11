@@ -13,7 +13,7 @@ draft file(s) and nothing else — never source code, never another folder. In
 `task` mode you are running **inside the loop**, on a claimed `queued/` task,
 right before execution:
 when you return, `loop_advance` parks the task in `plan-review/` for the
-human plan gate (`/agent-loop approve <id>`).
+human plan gate (`/agentic-loop:engineering approve <id>`).
 
 Invoke the `task-backlog-management` skill for the task file schema — follow
 it exactly rather than improvising.
@@ -26,7 +26,7 @@ it exactly rather than improvising.
   prompt carries a confirmed **slice set** (the main agent split a heavy
   idea), write one file per ordered child plus one epic tracking file — see
   "A slice set" below. The next step is the human reviewing each draft, then
-  `/agent-loop approve <id>` — the plan is written later, by the loop's
+  `/agentic-loop:engineering approve <id>` — the plan is written later, by the loop's
   PLAN stage, right before execution, so it can't rot while the task sits
   parked.
 - **`retask <id>`** — reshape a draft **in place**. Your prompt carries the
@@ -179,19 +179,19 @@ Mode `task`:
 Mode `new` — return:
 - The **path** you wrote.
 - The **title** and the **acceptance criteria** you chose.
-- The next step: review the draft, then `/agent-loop approve <id>` to
+- The next step: review the draft, then `/agentic-loop:engineering approve <id>` to
   queue it for the loop.
 
 Mode `retask` — return:
 - The **path** you rewrote (unchanged id).
 - The reshaped **title** and **acceptance criteria**.
-- The next step: review the reshaped draft, then `/agent-loop approve <id>`.
+- The next step: review the reshaped draft, then `/agentic-loop:engineering approve <id>`.
 
 Mode `task` — return:
 - The **path** you wrote.
 - A one-paragraph **plan summary** (steps count, key files, main risk).
 - The next step: the task is parked in `plan-review/`; the human gates it
-  with `/agent-loop approve <id>` (or `replan <id>`).
+  with `/agentic-loop:engineering approve <id>` (or `replan <id>`).
 - One line on any assumption you made or ambiguity to resolve.
 
 ## Hard rules

@@ -51,17 +51,17 @@ test("non-loop commands pass through without loading config", async () => {
   assert.deepEqual(calls, [], "a non-loop command must not trigger a config read")
 })
 
-test("an agent-loop gate verb is dispatched (it triggers a config read)", async () => {
+test("an agentic-loop:engineering gate verb is dispatched (it triggers a config read)", async () => {
   const calls: string[] = []
   const hooks = await AgenticLoop(makeInput(calls))
   const timeout = new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 50))
   // The hanging fake client never resolves file.read, so the handler blocks
   // after recording the call — racing a timeout is enough to observe dispatch.
   await Promise.race([
-    hooks["command.execute.before"]?.({ command: "agent-loop", sessionID: "ses_x", arguments: "approve x" } as never, {} as never),
+    hooks["command.execute.before"]?.({ command: "agentic-loop:engineering", sessionID: "ses_x", arguments: "approve x" } as never, {} as never),
     timeout,
   ])
-  assert.ok(calls.includes("file.read"), "an /agent-loop gate verb must reach the plugin handler")
+  assert.ok(calls.includes("file.read"), "an /agentic-loop:engineering gate verb must reach the plugin handler")
 })
 
 test("the plugin exposes dispose (watch-timer cleanup) and no loop_begin tool", async () => {
@@ -69,7 +69,7 @@ test("the plugin exposes dispose (watch-timer cleanup) and no loop_begin tool", 
   assert.notEqual(hooks, undefined)
   assert.equal(typeof (hooks as { dispose?: unknown }).dispose, "function")
   const tools = (hooks as { tool?: Record<string, unknown> }).tool ?? {}
-  assert.ok(!("loop_begin" in tools), "loop_begin was removed with the free-text /agent-loop mode")
+  assert.ok(!("loop_begin" in tools), "loop_begin was removed with the old free-text command mode")
   assert.ok("loop_verdict" in tools)
   await (hooks as { dispose: () => Promise<void> }).dispose() // must not throw with no timers
 })

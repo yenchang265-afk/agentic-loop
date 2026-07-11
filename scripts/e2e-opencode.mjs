@@ -12,7 +12,7 @@
 // - `stageTimeoutMinutes` inside the driver is a logical abandonment, not a
 //   hard kill of the underlying LLM/tool call — this script's own outer
 //   timeout is the real safety net and force-kills the server on expiry.
-// - `/agent-loop task <id>` is asynchronous (arms `pending`, does the real
+// - `plan <id>`/`claim` are asynchronous (they arm `pending`, do the real
 //   work off the next `session.idle`) — this script owns a long-lived
 //   `opencode serve` via `createOpencode()` and polls task-file state on
 //   disk, rather than trusting any CLI process's exit code.
@@ -158,6 +158,23 @@ const assertPluginLoaded = async (client) => {
         `Check npm install / ./install.sh ran cleanly.`,
     )
   }
+  // The per-kind commands are registered via a frontmatter `name:` override
+  // (a literal colon can't live in an NTFS filename) — verify the running
+  // opencode honors it BEFORE the expensive LLM steps. If this throws, the
+  // installed opencode ignores frontmatter names: fall back to the subdir
+  // layout (commands/agentic-loop/engineering.md → /agentic-loop/engineering).
+  const cmds = await client.command.list()
+  if (cmds.error) throw new Error(`command.list() failed: ${JSON.stringify(cmds.error)}`)
+  const cmdNames = new Set((cmds.data ?? []).map((c) => c.name))
+  for (const required of ["agentic-loop:engineering", "agentic-loop:pr-sitter"]) {
+    if (!cmdNames.has(required)) {
+      throw new Error(
+        `command "${required}" is not registered — the installed opencode ignored the frontmatter name override. ` +
+          `Registered: ${[...cmdNames].filter((n) => n.includes("agentic")).join(", ") || "(none matching)"}. ` +
+          `Fall back to the subdir command layout (see plugins/opencode/commands/).`,
+      )
+    }
+  }
 }
 
 const runCommand = async (client, sessionId, repoDir, command, commandArgs) => {
@@ -230,22 +247,22 @@ const main = async () => {
     log(`session created: ${session.id}`)
 
     // Step 1: new — real LLM turn (interview-me + loop-plan-author).
-    log("step 1/6: agent-loop new ...")
-    await runCommand(client, session.id, scratchRepo, "agent-loop", `new ${idea.newPromptSpec}`)
+    log("step 1/6: agentic-loop:engineering new ...")
+    await runCommand(client, session.id, scratchRepo, "agentic-loop:engineering", `new ${idea.newPromptSpec}`)
     await pollUntil("step 1 (new)", () => (findSoleDraftId(scratchRepo) ? "pass" : "pending"), { timeoutMs: 5 * 60_000 })
     id = findSoleDraftId(scratchRepo)
     log(`task id: ${id}`)
 
     // Step 2: approve — deterministic.
-    log("step 2/6: agent-loop approve")
-    await runCommand(client, session.id, scratchRepo, "agent-loop", `approve ${id}`)
+    log("step 2/6: agentic-loop:engineering approve")
+    await runCommand(client, session.id, scratchRepo, "agentic-loop:engineering", `approve ${id}`)
     await pollUntil("step 2 (approve)", () => (existsSync(taskPath(scratchRepo, "queued", id)) ? "pass" : "pending"), {
       timeoutMs: 30_000,
     })
 
     // Step 3: task <id> — async PLAN stage.
-    log("step 3/6: agent-loop task (PLAN)")
-    await runCommand(client, session.id, scratchRepo, "agent-loop", `task ${id}`)
+    log("step 3/6: agentic-loop:engineering plan (PLAN)")
+    await runCommand(client, session.id, scratchRepo, "agentic-loop:engineering", `plan ${id}`)
     await pollUntil(
       "step 3 (PLAN)",
       () => {
@@ -259,18 +276,19 @@ const main = async () => {
     )
     log("PLAN parked in plan-review/")
 
-    // Step 4: approve-plan — deterministic.
-    log("step 4/6: agent-loop approve-plan")
-    await runCommand(client, session.id, scratchRepo, "agent-loop", `approve-plan ${id}`)
+    // Step 4: approve (plan gate) — deterministic.
+    log("step 4/6: agentic-loop:engineering approve (plan gate)")
+    await runCommand(client, session.id, scratchRepo, "agentic-loop:engineering", `approve ${id}`)
     await pollUntil(
-      "step 4 (approve-plan)",
+      "step 4 (plan gate)",
       () => (existsSync(taskPath(scratchRepo, "in-progress", id)) ? "pass" : "pending"),
       { timeoutMs: 30_000 },
     )
 
-    // Step 5: task <id> — async BUILD -> VERIFY -> REVIEW chain.
-    log("step 5/6: agent-loop task (BUILD -> VERIFY -> REVIEW)")
-    await runCommand(client, session.id, scratchRepo, "agent-loop", `task ${id}`)
+    // Step 5: claim — async BUILD -> VERIFY -> REVIEW chain (building is
+    // claim/watch's job; `plan <id>` only runs the PLAN stage).
+    log("step 5/6: agentic-loop:engineering claim (BUILD -> VERIFY -> REVIEW)")
+    await runCommand(client, session.id, scratchRepo, "agentic-loop:engineering", `claim`)
     await pollUntil(
       "step 5 (BUILD chain)",
       () => {
@@ -284,9 +302,9 @@ const main = async () => {
     )
     log("BUILD chain parked in in-review/")
 
-    // Step 6: ship — deterministic.
-    log("step 6/6: agent-loop ship")
-    await runCommand(client, session.id, scratchRepo, "agent-loop", `ship ${id}`)
+    // Step 6: approve (ship gate) — deterministic.
+    log("step 6/6: agentic-loop:engineering approve (ship)")
+    await runCommand(client, session.id, scratchRepo, "agentic-loop:engineering", `approve ${id}`)
     await pollUntil("step 6 (ship)", () => (existsSync(taskPath(scratchRepo, "completed", id)) ? "pass" : "pending"), {
       timeoutMs: 30_000,
     })

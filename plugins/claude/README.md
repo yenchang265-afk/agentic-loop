@@ -3,15 +3,15 @@
 Drives backlog tasks through **PLAN / BUILD → VERIFY → REVIEW** as a
 supervised, main-agent-driven loop, with git isolation, a trusted verdict
 channel, a filesystem task backlog, and an audit trail. Tasks are authored
-and gated in `/agent-loop`: a mandatory interview (`new <idea>`) turns your idea into a
-draft and `approve` queues it; the loop plans it **right before execution**
-(so plans don't rot while tasks sit parked) and parks the plan in
-`plan-review/` for the explicit `approve-plan` gate — it never blocks on
-you.
+and gated in `/agentic-loop:engineering`: a mandatory interview (`new <idea>`) turns your idea into a
+draft and `approve <id>` queues it; the loop plans it **right before
+execution** (so plans don't rot while tasks sit parked) and parks the plan in
+`plan-review/` for the plan gate — the same `approve` verb releases it — and
+never blocks on you.
 
 This is the Claude Code port of the OpenCode `agentic-loop` plugin. Because
 Claude Code has no autonomous background-driver primitive, the loop is
-**driven by the main agent**: `/agent-loop task <id>` makes the agent spawn each
+**driven by the main agent**: `/agentic-loop:engineering plan <id>` / `claim` make the agent spawn each
 stage as a subagent (via the Task tool) while a bundled **MCP server** owns
 the state machine, git isolation, verdicts, backlog moves, snapshots, and
 metrics. See `skills/loop-orchestration/SKILL.md` for the exact protocol.
@@ -49,52 +49,71 @@ does not include the wizard.
 
 ## Commands
 
-Authoring + gates (`/agent-loop`):
+Authoring + gates (`/agentic-loop:engineering`):
 
-- `/agent-loop new <idea>` — the main agent **always interviews you** (at
+- `/agentic-loop:engineering new <idea>` — the main agent **always interviews you** (at
   minimum a restate-and-confirm) to pin down the goal and testable acceptance
   criteria, then writes a **planless draft** into `docs/tasks/draft/`.
-- `/agent-loop retask <id> [note]` — reshape a `draft/` task before you
+- `/agentic-loop:engineering retask <id> [note]` — reshape a `draft/` task before you
   approve it: the main agent re-interviews you (seeded by the optional note)
   and rewrites the same draft in place — same id, no plan. Drafts only.
-- `/agent-loop approve <id>` — the task gate: queue the reviewed draft
-  in `docs/tasks/queued/` (audited + committed). No plan yet, by design.
-- `/agent-loop approve <id>` — the plan gate: validate the parked
-  plan and move the task to `docs/tasks/in-progress/` (the build-ready
-  queue), audited + committed.
-- `/agent-loop reject <id> [reason]` — reject a parked plan or send a
-  cap-tripped task back to `queued/`, with the reason audited.
-- **`/agent-loop approve [id]`** · **`/agent-loop reject [id] [reason]`** — the ergonomic gate
-  shortcut: `/agent-loop approve` advances the one task the loop is waiting on
-  (plan → in-progress, or in-review → completed — not drafts, which use
-  `/agent-loop approve <id>`); `/agent-loop reject` sends a parked plan back to
-  `queued/`. Id optional — only to disambiguate
-  when two or more tasks wait; the explicit verbs above stay the
-  always-unambiguous path. (Also exposed as the `loop_approve` / `loop_reject`
-  MCP tools.)
+- `/agentic-loop:engineering approve [id]` — THE gate verb, unified and folder-driven
+  (handled deterministically by a hook before the agent's turn). With an
+  explicit `<id>`: a reviewed `draft/` → `queued/` (the task gate — no plan
+  yet, by design), a parked `plan-review/` plan → `in-progress/` (the plan
+  gate, `## Implementation Plan` required), or a finished `in-review/` task →
+  `completed/` (ship — only after you review the branch diff). Each move is
+  audited + committed; a task lives in exactly one folder, so the gate is
+  never ambiguous. Without an id it advances the single task at a loop
+  wait-gate (`plan-review/` or `in-review/`) — drafts always need the
+  explicit id. (Also exposed as the `loop_approve` MCP tool.)
+- `/agentic-loop:engineering replan [id] [reason]` — the sole rejection verb: send a
+  parked plan (or a cap-tripped `in-progress/` task, by id) back to
+  `queued/`, with the reason audited. (Also exposed as the `loop_reject` MCP
+  tool.)
 
-The loop (`/agent-loop`):
+The loop (`/agentic-loop:engineering`):
 
-- `/agent-loop task <id>` — run one task now: a `queued/` task enters at PLAN
-  (writes the plan, parks it in `plan-review/`, and the loop ends there); an
-  `in-progress/` task enters at BUILD.
-- `/agent-loop claim` — claim the next task (build-ready `in-progress/` tasks
-  beat planless `queued/` ones; lowest priority number first) — the pull
-  equivalent of the OpenCode `/agent-loop watch`.
-- `/agent-loop status` — the active loop plus a whole-backlog roll-up.
-- `/agent-loop ship <id>` — move a reviewed task from `in-review/` to `completed/` (audited).
-- `/agent-loop recover <id>` — resume an interrupted loop from its state snapshot.
-- `/agent-loop doctor [fix]` — audit the backlog for structural damage (stray
+- `/agentic-loop:engineering plan <id>` — run the PLAN stage on one approved `queued/`
+  task now: it writes the plan, parks the task in `plan-review/`, and the
+  loop ends there (the driving agent then offers the gate inline via
+  AskUserQuestion). Building is not reachable from `plan` — `claim` drives
+  builds.
+- `/agentic-loop:engineering claim` — one-shot pull of the next engineering item
+  (build-ready `in-progress/` tasks beat planless `queued/` ones; lowest
+  priority number first) — the pull
+  equivalent of the OpenCode `/agentic-loop:engineering watch`; there is no
+  standing watch on this host.
+- `/agentic-loop:engineering status` — the active loop plus a whole-backlog roll-up
+  (bare `/agentic-loop:engineering` does the same).
+- `/agentic-loop:engineering kinds` — list the loop kinds and their enabled state.
+- `/agentic-loop:engineering recover <id>` — resume an interrupted loop from its state snapshot.
+- `/agentic-loop:engineering doctor [fix]` — audit the backlog for structural damage (stray
   folders, task files outside every status folder, duplicate ids, held claim
   markers); with `fix` it applies the unambiguous repairs.
-- `/agent-loop stop` — abort the active loop (partial work stays on the loop branch).
+- `/agentic-loop:engineering stop` (alias `abort`) — abort the active loop (partial work
+  stays on the loop branch).
+
+The PR sitter (`/agentic-loop:pr-sitter`, opt-in via `loops.pr-sitter` in
+`.agentic-loop.json`):
+
+- `/agentic-loop:pr-sitter claim` — one-shot pull (maps to
+  `loop_claim({kind: "pr-sitter"})`): poll the configured PR source for the
+  next actionable open PR (failing checks, unanswered review threads, a merge
+  conflict) and drive it through triage → fix → verify → publish. No standing
+  watch on this host — `claim` is the pull.
+- `/agentic-loop:pr-sitter status` · `stop` — report / abort the active loop (bare
+  `/agentic-loop:pr-sitter` = status).
 
 Ancillary:
 
 - `/plan <goal>` — ad-hoc read-only plan, relayed as chat, nothing persisted.
 
-The old `/agent-loop <goal>` free-text mode, `/agent-loop next`, and `/task new` are gone —
-task authoring and both gates live on `/agent-loop` (`new`, `retask`, `approve`, `reject`).
+The old umbrella `/agent-loop` command is gone — its free-text mode and its
+`task <id>`, `ship <id>`, `approve-plan <id>`, and `reject` verbs with it.
+The whole engineering lifecycle lives on `/agentic-loop:engineering` (`new`,
+`retask`, `approve`, `replan`, `plan`, `claim`), and the PR sitter on
+`/agentic-loop:pr-sitter`.
 
 ## What's inside
 
@@ -124,13 +143,14 @@ silently ignored.
 
 ## Known limitations
 
-- **No `/agent-loop watch`** — watch needs an autonomous driver firing stages on
-  idle events and timers; in this port the main agent is the driver and the
-  MCP server cannot spawn subagents. `/agent-loop claim` is the pull equivalent:
-  one human trigger claims and drives the next approved task. Within a turn,
+- **No standing `watch` (either command)** — watch needs an autonomous driver
+  firing stages on idle events and timers; in this port the main agent is the
+  driver and the MCP server cannot spawn subagents. `/agentic-loop:engineering claim` /
+  `/agentic-loop:pr-sitter claim` are the pull equivalents:
+  one human trigger claims and drives the next item. Within a turn,
   BUILD → VERIFY → REVIEW still advance without human input.
 - **The interview runs in the main agent** — Task subagents cannot converse
-  with you, so `/agent-loop new`'s mandatory interview happens in the main
+  with you, so `/agentic-loop:engineering new`'s mandatory interview happens in the main
   conversation before the author subagent writes the file.
 - Skill/reference symlinks resolve on Unix/WSL; on Windows without symlink
   support, copy them instead.

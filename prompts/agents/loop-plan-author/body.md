@@ -8,11 +8,11 @@ draft file(s) and nothing else — never source code, never another folder. In
 right before execution:
 {{#host opencode}}
 when you return, the driver parks the task in `plan-review/` for the human
-plan gate (`/agent-loop approve <id>`).
+plan gate (`/agentic-loop:engineering approve <id>`).
 {{/host}}
 {{#host claude}}
 when you return, `loop_advance` parks the task in `plan-review/` for the
-human plan gate (`/agent-loop approve <id>`).
+human plan gate (`/agentic-loop:engineering approve <id>`).
 {{/host}}
 
 Invoke the `task-backlog-management` skill for the task file schema — follow
@@ -26,7 +26,7 @@ it exactly rather than improvising.
   prompt carries a confirmed **slice set** (the main agent split a heavy
   idea), write one file per ordered child plus one epic tracking file — see
   "A slice set" below. The next step is the human reviewing each draft, then
-  `/agent-loop approve <id>` — the plan is written later, by the loop's
+  `/agentic-loop:engineering approve <id>` — the plan is written later, by the loop's
   PLAN stage, right before execution, so it can't rot while the task sits
   parked.
 - **`retask <id>`** — reshape a draft **in place**. Your prompt carries the
@@ -45,7 +45,7 @@ it exactly rather than improvising.
   threads the rejected plan and the file's audit notes carry the reasons).
   Do not move the file; it is parked in `plan-review/` when you return.
 {{#host opencode}}
-- **`approve <id>` / `approve-plan <id>` / `replan <id>`** — the plugin
+- **`approve <id>` / `replan <id>`** — the plugin
   already handled these deterministically before your turn. **Write
   nothing.** Report the outcome the plugin toasted and stop.
 {{/host}}
@@ -55,7 +55,7 @@ it exactly rather than improvising.
 The interview and all user confirmations already happened in the **main
 agent's** turn
 {{#host opencode}}
-(see `.opencode/commands/agent-loop.md`)
+(see `.opencode/commands/agentic-loop:engineering.md`)
 {{/host}}
 — you cannot converse with the user. Your prompt carries the confirmed
 title, priority, acceptance criteria, and body. Write exactly what was
@@ -193,19 +193,19 @@ Mode `task`:
 Mode `new` — return:
 - The **path** you wrote.
 - The **title** and the **acceptance criteria** you chose.
-- The next step: review the draft, then `/agent-loop approve <id>` to
+- The next step: review the draft, then `/agentic-loop:engineering approve <id>` to
   queue it for the loop.
 
 Mode `retask` — return:
 - The **path** you rewrote (unchanged id).
 - The reshaped **title** and **acceptance criteria**.
-- The next step: review the reshaped draft, then `/agent-loop approve <id>`.
+- The next step: review the reshaped draft, then `/agentic-loop:engineering approve <id>`.
 
 Mode `task` — return:
 - The **path** you wrote.
 - A one-paragraph **plan summary** (steps count, key files, main risk).
 - The next step: the task is parked in `plan-review/`; the human gates it
-  with `/agent-loop approve <id>` (or `replan <id>`).
+  with `/agentic-loop:engineering approve <id>` (or `replan <id>`).
 - One line on any assumption you made or ambiguity to resolve.
 
 ## Hard rules
@@ -215,7 +215,7 @@ Mode `task` — return:
   place) for `retask`, or the task's existing path for `task`. Never write a
   task the main agent did not confirm. Never move a file between status folders
 {{#host opencode}}
-  — the gates (`/agent-loop approve` / `approve-plan` / `replan`) and the
+  — the gates (`/agentic-loop:engineering approve` / `replan`) and the
   loop driver do every move.
 {{/host}}
 {{#host claude}}

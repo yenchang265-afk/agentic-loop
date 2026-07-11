@@ -1,6 +1,6 @@
 ---
 name: loop-orchestration
-description: The protocol for driving the agentic loop inside Claude Code — declarative loop kinds under loops/<kind>/, with the engineering kind (plan → build → verify → review) as the default. Use when running /agent-loop — it tells the main agent the exact sequence of agentic-loop MCP tool calls and loop-* subagent spawns, the PLAN park-at-gate flow, the loop_verdict contract, loop kinds (e.g. pr-sitter), and how the loop terminates. Task authoring and the human gates are /agent-loop verbs (new, retask, approve, reject).
+description: The protocol for driving the agentic loop inside Claude Code — declarative loop kinds under loops/<kind>/, with the engineering kind (plan → build → verify → review) as the default. Use when running /agentic-loop:engineering — it tells the main agent the exact sequence of agentic-loop MCP tool calls and loop-* subagent spawns, the PLAN park-at-gate flow, the loop_verdict contract, loop kinds (e.g. pr-sitter), and how the loop terminates. Task authoring and the human gates are /agentic-loop:engineering verbs (new, retask, the unified folder-driven approve, replan).
 ---
 
 # Driving the agentic loop (Claude Code)
@@ -22,14 +22,16 @@ sections in `.agentic-loop.json` — see "Loop kinds" at the end.
 ## The pipeline
 
 ```
-authoring + gates (interactive /agent-loop verbs, BEFORE the loop):
-  /agent-loop new <idea>       ──▶ interview (main agent) ──▶ planless draft in draft/
-  /agent-loop retask <id> [note] ▶ re-interview (main agent) ──▶ draft rewritten in place (same id)
-  /agent-loop approve <id>     ──▶ loop_task_approve parks in queued/        ← the task gate
-  /agent-loop approve <id> ─▶ loop_plan_approve: plan-review/ ▶ in-progress/  ← the plan gate
-  /agent-loop reject <id> [why] ─▶ loop_replan: back to queued/ (audited rejection)
+authoring + gates (interactive /agentic-loop:engineering verbs, BEFORE the loop):
+  /agentic-loop:engineering new <idea>       ──▶ interview (main agent) ──▶ planless draft in draft/
+  /agentic-loop:engineering retask <id> [note] ▶ re-interview (main agent) ──▶ draft rewritten in place (same id)
+  /agentic-loop:engineering approve [id]     ──▶ the one folder-driven gate (hook / loop_approve):
+                                         draft/ → queued/            ← the task gate
+                                         plan-review/ → in-progress/ ← the plan gate
+                                         in-review/ → completed/     ← ship
+  /agentic-loop:engineering replan [id] [why] ─▶ loop_replan: back to queued/ (audited rejection)
 
-the loop (/agent-loop task <id> or /agent-loop claim — this skill):
+the loop (/agentic-loop:engineering plan <id> or /agentic-loop:engineering claim — this skill):
   queued task (planless):
     loop_start/loop_claim ─▶ loop_stage(plan) ─▶ spawn loop-plan-author (task mode)
         ─▶ loop_advance ─▶ park (task → plan-review/, loop over — never blocks on a human)
@@ -51,11 +53,12 @@ human gate and the loop ends there — an unapproved plan cannot reach BUILD.
 ## Step by step
 
 1. **Start.** `mcp__agentic-loop__loop_start({id})` for one task, or
-   `mcp__agentic-loop__loop_claim()` for the next — it polls **all enabled
-   loop kinds** in claim-priority order: the engineering backlog first
-   (build-ready `in-progress/` tasks beat planless `queued/` ones; lowest
-   priority number first within each pool), then opted-in kinds (e.g.
-   pr-sitter PRs). An in-progress task is claimed, isolated (the `feature/<id>`
+   `mcp__agentic-loop__loop_claim()` for the next item — scoped to the
+   calling command's kind: `/agentic-loop:engineering claim` pulls from the
+   engineering backlog (build-ready `in-progress/` tasks beat planless
+   `queued/` ones; lowest priority number first within each pool), and
+   `/agentic-loop:pr-sitter claim` passes `{kind: "pr-sitter"}` to poll its
+   PRs instead. An in-progress task is claimed, isolated (the `feature/<id>`
    branch, or a git worktree when `worktreesDir` is configured), and entered
    at BUILD; a queued task is claimed and entered at PLAN with **no git
    isolation** (it writes only the task file, in the main tree). The composed
@@ -73,8 +76,8 @@ human gate and the loop ends there — an unapproved plan cannot reach BUILD.
      (BUILD) in this same session.
    - **Replan** (with the user's reason) → `loop_replan({id, reason})`; the
      next PLAN pass addresses it.
-   - **Park for later** → stop here; `/agent-loop approve <id>`
-     (or just `/agent-loop approve`) resumes it whenever the user is ready.
+   - **Park for later** → stop here; `/agentic-loop:engineering approve <id>`
+     (or just `/agentic-loop:engineering approve`) resumes it whenever the user is ready.
    Never call `loop_plan_approve` without an explicit user answer — the gate
    exists so no unapproved plan reaches BUILD.
 3. **Build.** Call `mcp__agentic-loop__loop_stage({stage:"build"})` — it arms
@@ -102,11 +105,11 @@ human gate and the loop ends there — an unapproved plan cannot reach BUILD.
    short summary of the loop branch's diff, then ask with **AskUserQuestion**:
    - **Ship** → `loop_ship({id})` — the task completes.
    - **Replan** (with the user's reason) → `loop_replan({id, reason})`.
-   - **Leave in in-review** → stop here; `/agent-loop ship <id>` (or `/agent-loop approve`)
+   - **Leave in in-review** → stop here; `/agentic-loop:engineering approve <id>` (or `/agentic-loop:engineering approve`)
      ships it later.
    On `{stop}` the task stays in `in-progress/` with an audit note — report
    why. When the iteration cap tripped, the plan itself is suspect: the fix is
-   `/agent-loop reject <id> <why>` (or `/agent-loop reject <id> <why>`) — the next
+   `/agentic-loop:engineering replan <id> <why>` — the next
    PLAN pass addresses the failure and parks a fresh plan for review.
 
 ## The verdict contract
@@ -140,7 +143,7 @@ rejects anything else.
 ## Termination summary
 
 - **REVIEW PASS** → done; task in `in-review/`; human reviews the diff and runs
-  `/agent-loop ship <id>`.
+  `/agentic-loop:engineering approve <id>`.
 - **VERIFY or REVIEW FAIL** within `maxIterations` → re-build with the feedback.
 - **FAIL** at the cap, **ERROR**, or a stage past its deadline → stop; task
   stays in `in-progress/` with a note.
@@ -176,12 +179,12 @@ the stage prompt says which to use.
 
 ## What is different from the OpenCode version
 
-- **No `/agent-loop watch`.** Watch needs an autonomous driver firing stages on idle
+- **No `/agentic-loop:engineering watch`.** Watch needs an autonomous driver firing stages on idle
   events and timers; here the main agent is the driver and the MCP server
-  cannot spawn subagents. `/agent-loop claim` is the pull equivalent — one human
+  cannot spawn subagents. `/agentic-loop:engineering claim` is the pull equivalent — one human
   trigger claims and drives the next approved task. Within your turn,
   BUILD → VERIFY → REVIEW still advance without human turns.
-- **The interview runs in the main agent.** `/agent-loop new` interviews
+- **The interview runs in the main agent.** `/agentic-loop:engineering new` interviews
   the user directly (Task subagents can't converse); the `loop-plan-author`
   subagent only writes the confirmed file(s). A **heavy idea is split** during
   that interview into sibling drafts (vertical, independently shippable slices
@@ -192,13 +195,13 @@ the stage prompt says which to use.
 
 ## Red flags
 
-- Building a task whose plan never went through `/agent-loop
-  approve-plan` — impossible via the tools (BUILD entry only reads
-  `in-progress/`); never work around it.
+- Building a task whose plan never went through the plan gate
+  (`/agentic-loop:engineering approve <id>` on the parked plan) — impossible via the
+  tools (BUILD entry only reads `in-progress/`); never work around it.
 - Continuing into BUILD after a `{kind:"park"}` without the user's explicit
   Approve answer — the plan gate sits between PLAN and BUILD. The ONLY path
   through it is `loop_plan_approve` + `loop_start` after the user approves
-  (inline via AskUserQuestion, or later via `/agent-loop approve`).
+  (inline via AskUserQuestion, or later via `/agentic-loop:engineering approve`).
 - Spawning a stage subagent without first calling `loop_stage` — the
   allowlist and deadline won't be armed, and BUILD's audit note won't exist.
 - Treating a stage's prose "PASS"/"FAIL" as the verdict — only the `loop_verdict`

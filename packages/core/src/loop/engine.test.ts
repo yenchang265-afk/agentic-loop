@@ -107,7 +107,7 @@ const oracleAdvance = (
         state: s,
         action: {
           kind: "park",
-          message: "Plan written — parked in plan-review/ for human review. Approve with /agent-loop approve.",
+          message: "Plan written — parked in plan-review/ for human review. Approve with /agentic-loop:engineering approve.",
         },
       }
     case "build":
@@ -120,7 +120,7 @@ const oracleAdvance = (
           action: {
             kind: "stop",
             message:
-              "✗ Loop stopped — verify could not run (environment/infrastructure error). Fix the environment, then /agent-loop recover the task.",
+              "✗ Loop stopped — verify could not run (environment/infrastructure error). Fix the environment, then /agentic-loop:engineering recover the task.",
           },
         }
       }
@@ -132,7 +132,7 @@ const oracleAdvance = (
         state: s,
         action: {
           kind: "stop",
-          message: `✗ Loop stopped — verify failed after ${cfg.maxIterations} iterations. If the plan itself is wrong, send it back to the PLAN stage with /agent-loop reject <id>.`,
+          message: `✗ Loop stopped — verify failed after ${cfg.maxIterations} iterations. If the plan itself is wrong, send it back to the PLAN stage with /agentic-loop:engineering replan <id>.`,
         },
       }
     }
@@ -146,7 +146,7 @@ const oracleAdvance = (
           action: {
             kind: "stop",
             message:
-              "✗ Loop stopped — review could not run (environment/infrastructure error). Fix the environment, then /agent-loop recover the task.",
+              "✗ Loop stopped — review could not run (environment/infrastructure error). Fix the environment, then /agentic-loop:engineering recover the task.",
           },
         }
       }
@@ -158,7 +158,7 @@ const oracleAdvance = (
         state: s,
         action: {
           kind: "stop",
-          message: `✗ Loop stopped — review failed after ${cfg.maxIterations} iterations. If the plan itself is wrong, send it back to the PLAN stage with /agent-loop reject <id>.`,
+          message: `✗ Loop stopped — review failed after ${cfg.maxIterations} iterations. If the plan itself is wrong, send it back to the PLAN stage with /agentic-loop:engineering replan <id>.`,
         },
       }
     }

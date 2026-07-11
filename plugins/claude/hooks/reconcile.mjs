@@ -104,8 +104,8 @@ const main = async () => {
   const duplicates = [...idsSeen.entries()].filter(([, statuses]) => statuses.length > 1)
 
   const lines = []
-  if (notes.length) lines.push(`agentic-loop: interrupted task(s) in ${tasksDir}/in-progress: ${notes.join(", ")} — run \`/agent-loop recover <id>\` to resume.`)
-  if (snapshots.length) lines.push(`agentic-loop: loop state snapshot(s) present: ${snapshots.join(", ")} — \`/agent-loop recover <id>\` resumes at the exact stage.`)
+  if (notes.length) lines.push(`agentic-loop: interrupted task(s) in ${tasksDir}/in-progress: ${notes.join(", ")} — run \`/agentic-loop:engineering recover <id>\` to resume.`)
+  if (snapshots.length) lines.push(`agentic-loop: loop state snapshot(s) present: ${snapshots.join(", ")} — \`/agentic-loop:engineering recover <id>\` resumes at the exact stage.`)
   if (planClaims.length) lines.push(`agentic-loop: leftover plan-claim marker(s) in ${tasksDir}/queued/.claims: ${planClaims.join(", ")} — a prior run died mid-PLAN; \`loop_doctor\` (fix:true) releases stale markers so the task can be claimed again.`)
   if (unknownDirs.length) lines.push(`agentic-loop: unknown folder(s) under ${tasksDir}: ${unknownDirs.join(", ")} — not status folders; \`loop_doctor\` reports and repairs.`)
   if (strayFiles.length) lines.push(`agentic-loop: stray task file(s) outside every status folder: ${strayFiles.join(", ")} — invisible to the loop; \`loop_doctor\` (fix:true) rescues them to draft/.`)

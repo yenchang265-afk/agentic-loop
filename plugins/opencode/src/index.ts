@@ -2,6 +2,7 @@ import type { Plugin } from "@opencode-ai/plugin"
 import path from "node:path"
 import { tool } from "@opencode-ai/plugin"
 import { DEFAULT_CONFIG, applyAdoPatEnv, loadConfig } from "./config.ts"
+import { enabledLoopKinds } from "@agentic-loop/core/config"
 import type { Config } from "./config.ts"
 import * as driver from "./loop/driver.ts"
 import { listWorktrees, pruneWorktrees } from "@agentic-loop/core/loop/git"
@@ -21,16 +22,16 @@ const EDIT_TOOLS = new Set(["edit", "write", "patch", "multiedit"])
  *
  *   build → verify → review
  *
- * Everything is one command: `/agent-loop new <idea>` interviews the user
- * into a draft, and the deterministic `approve <id>` parks it planless in
- * `queued/`. The loop plans right before execution: a claimed queued task runs
- * the PLAN stage, writes its `## Implementation Plan`, and parks in
- * `plan-review/`; `/agent-loop approve <id>` releases it to `in-progress/`,
- * the build-ready queue. `/agent-loop task <id>` (or the bare-id shorthand)
- * claims one task (planning or building it as its folder dictates);
- * `/agent-loop claim [kind]` pulls the next item once; `/agent-loop watch
- * [interval] [kind]` polls for work — on every `session.idle` event plus a
- * per-session interval timer. A verify or review FAIL re-builds within the
+ * One command per loop kind: `/agentic-loop:engineering` carries the backlog
+ * lifecycle — `new <idea>` interviews the user into a draft, the deterministic
+ * unified `approve <id>` parks it planless in `queued/`, the loop plans right
+ * before execution (a claimed queued task runs the PLAN stage, writes its
+ * `## Implementation Plan`, and parks in `plan-review/`), `approve <id>`
+ * again releases it to `in-progress/`, the build-ready queue. `plan <id>`
+ * plans one approved task now; `claim` pulls the next item once; `watch
+ * [interval]` polls for work — on every `session.idle` event plus a
+ * per-session interval timer. Other kinds (`/agentic-loop:pr-sitter`) get the
+ * minimal watcher verb set, scoped to their kind. A verify or review FAIL re-builds within the
  * iteration cap. The control surface lives in `loop/driver.ts`; the pure
  * state machine in `loop/state.ts`.
  */
@@ -77,21 +78,21 @@ export const AgenticLoop: Plugin = async ({ client, directory, $ }) => {
     // A restart mid-BUILD leaves a task in in-progress/ with an unmatched
     // "BUILD started" note that no watcher will ever claim — surface those, plus
     // any leftover state snapshot (the strongest "this died mid-run" signal;
-    // /agent-loop recover resumes it at the exact stage).
+    // the recover verb resumes it at the exact stage).
     try {
       const tasks = await listInProgress(client, directory, config.tasksDir, log)
       const interrupted = tasks.filter(wasInterrupted).map((t) => t.id)
       if (interrupted.length) {
         await log(
           "warn",
-          `interrupted loop task(s) in ${config.tasksDir}/in-progress: ${interrupted.join(", ")} — run /agent-loop recover <id> to resume`,
+          `interrupted loop task(s) in ${config.tasksDir}/in-progress: ${interrupted.join(", ")} — run /agentic-loop:engineering recover <id> to resume`,
         )
       }
       const snapshots = await listSnapshotIds(client, directory, config.tasksDir)
       if (snapshots.length) {
         await log(
           "warn",
-          `loop state snapshot(s) present: ${snapshots.join(", ")} — /agent-loop recover <id> resumes at the exact stage`,
+          `loop state snapshot(s) present: ${snapshots.join(", ")} — /agentic-loop:engineering recover <id> resumes at the exact stage`,
         )
       }
       // Claim-marker sweep: a run that died between claiming and its first
@@ -128,10 +129,10 @@ export const AgenticLoop: Plugin = async ({ client, directory, $ }) => {
       }
       // Structural anomaly sweep: stray folders, task files outside every
       // status folder, duplicate ids — damage a confused agent can cause.
-      // Report-only here; /agent-loop doctor [fix] repairs.
+      // Report-only here; the doctor verb repairs.
       const anomalies = await auditBacklog(client, directory, config.tasksDir)
       for (const line of formatAnomalies(anomalies, config.tasksDir)) {
-        await log("warn", `backlog anomaly: ${line} — /agent-loop doctor reports and repairs`)
+        await log("warn", `backlog anomaly: ${line} — /agentic-loop:engineering doctor reports and repairs`)
       }
     } catch (err) {
       await log("warn", `startup task reconciliation failed: ${(err as Error).message}`)
@@ -148,7 +149,7 @@ export const AgenticLoop: Plugin = async ({ client, directory, $ }) => {
         for (const w of stale) {
           await log(
             "warn",
-            `stale loop worktree ${w.path} (branch ${w.branch ?? "?"}) — /agent-loop recover will reuse it, or 'git worktree remove' it`,
+            `stale loop worktree ${w.path} (branch ${w.branch ?? "?"}) — /agentic-loop:engineering recover will reuse it, or 'git worktree remove' it`,
           )
         }
       } catch (err) {
@@ -178,21 +179,31 @@ export const AgenticLoop: Plugin = async ({ client, directory, $ }) => {
     },
 
     "command.execute.before": async (input) => {
-      if (input.command !== "agent-loop") return
+      // One command per loop kind: /agentic-loop:engineering, /agentic-loop:pr-sitter, …
+      const match = /^agentic-loop:(.+)$/.exec(input.command)
+      if (!match) return
+      const kind = match[1]!
       const config = await getConfig()
-      // The gate verbs (approve / ok / go / approve-plan / reject / redo /
-      // replan) are pure task-file moves with no dependency on reconciliation —
-      // run the move FIRST, then reconcile. On the first-ever command
-      // reconcileOnce() does heavy git/fs work (claim sweeps, worktree prune,
-      // backlog audit); doing it before the move delayed the move past
-      // opencode's command-hook window, so the model read the task as "still in
-      // draft" until a retry (reconcile is guarded to run once, so later
-      // attempts were fast — the "works after a few tries" symptom). Move first
-      // keeps the gate deterministic on attempt 1.
+      if (!enabledLoopKinds(config).includes(kind)) {
+        await client.tui
+          .showToast({
+            body: { message: `Unknown loop kind "${kind}" — enabled: ${enabledLoopKinds(config).join(", ")}.`, variant: "warning" },
+          })
+          .catch(() => {})
+        return
+      }
+      // The engineering gate verbs (approve / replan) are pure task-file moves
+      // with no dependency on reconciliation — run the move FIRST, then
+      // reconcile. On the first-ever command reconcileOnce() does heavy git/fs
+      // work (claim sweeps, worktree prune, backlog audit); doing it before the
+      // move delayed the move past opencode's command-hook window, so the model
+      // read the task as "still in draft" until a retry (reconcile is guarded
+      // to run once, so later attempts were fast — the "works after a few
+      // tries" symptom). Move first keeps the gate deterministic on attempt 1.
       const verb = input.arguments.trim().split(/\s+/)[0]?.toLowerCase() ?? ""
-      const gateFirst = ["approve", "ok", "go", "approve-plan", "reject", "redo", "replan"].includes(verb)
+      const gateFirst = kind === "engineering" && ["approve", "replan"].includes(verb)
       if (!gateFirst) await reconcileOnce()
-      await driver.handleCommand(deps, input.sessionID, input.arguments, config)
+      await driver.handleCommand(deps, input.sessionID, input.arguments, config, kind)
       if (gateFirst) await reconcileOnce()
     },
 

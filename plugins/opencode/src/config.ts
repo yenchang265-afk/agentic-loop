@@ -13,9 +13,9 @@ import type { Config as CoreConfig } from "@agentic-loop/core/loop/state"
 // "ado" requires the `ado` section), which plain `.extend()` would reject.
 export const ConfigSchema = CoreConfigSchema.safeExtend({
   /**
-   * Default polling cadence for `/agent-loop watch`: a timer at this interval scans
+   * Default polling cadence for `/agentic-loop:engineering watch`: a timer at this interval scans
    * `in-progress/` for claimable approved tasks while the session is idle.
-   * Overridable per-session via `/agent-loop watch <interval>` (e.g. `30s`, `2h`).
+   * Overridable per-session via `/agentic-loop:engineering watch <interval>` (e.g. `30s`, `2h`).
    */
   watchIntervalMinutes: z.number().positive().max(1440).default(5),
 })

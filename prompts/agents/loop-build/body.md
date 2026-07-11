@@ -27,7 +27,7 @@ Either:
   feedback to address:` block (REVIEW FAIL): fix exactly what the check
   flagged, without redoing unrelated parts of the implementation. If the
   failure shows the plan itself is wrong, stop and say so — a human sends it
-  back to planning with `/agent-loop reject <id>`.
+  back to planning with `/agentic-loop:engineering replan <id>`.
 
 **Worktree isolation:** when your input contains a `Worktree:` line, that
 directory is the entire universe of this task: read and edit files with absolute

@@ -29,7 +29,7 @@ import { isLeaseStale, readLeaseOwner, staleThresholdMs } from "@agentic-loop/co
  * driver is gone (no Claude Code equivalent) — the agent is the driver; this
  * server is the trusted state + git/backlog substrate.
  *
- * Task authoring happens before the loop, via `/agent-loop new`: it interviews
+ * Task authoring happens before the loop, via `/agentic-loop:engineering new`: it interviews
  * the user into a draft (main-agent turn) and `loop_approve` (unified gate)
  * parks it planless in `queued/`. Planning happens inside the loop, right before
  * execution: `loop_start`/`loop_claim` on a queued task enter at PLAN (no git
@@ -39,7 +39,7 @@ import { isLeaseStale, readLeaseOwner, staleThresholdMs } from "@agentic-loop/co
  * sends a rejected or cap-tripped task back to `queued/`. From `in-progress/`
  * — the build-ready queue — claims enter at BUILD.
  *
- * There is no `/agent-loop watch` here, deliberately: watch needs an autonomous
+ * There is no `/agentic-loop:engineering watch` here, deliberately: watch needs an autonomous
  * driver firing stages on idle events/timers, and the MCP server can't spawn
  * subagents. `loop_claim` is the pull equivalent — one human trigger claims
  * the next approved task.
@@ -248,7 +248,7 @@ server.registerTool("loop_start", {
     return ok({ ...firePayload(started.state, id), ...(warnings.length ? { warnings } : {}) });
 });
 server.registerTool("loop_claim", {
-    description: "Claim the next item and start it — the pull equivalent of the OpenCode plugin's /agent-loop watch. Polls all enabled loop kinds in claim-priority order; pass `kind` to restrict the pull to one kind (e.g. /agent-loop claim pr-sitter). Build-ready in-progress/ tasks win over planless queued/ ones (finish work in flight before planning new work); within each pool, lowest priority number first. Returns null when nothing is claimable.",
+    description: "Claim the next item and start it — the pull equivalent of the OpenCode plugin's /agentic-loop:engineering watch. Polls all enabled loop kinds in claim-priority order; pass `kind` to restrict the pull to one kind (e.g. /agentic-loop:engineering claim pr-sitter). Build-ready in-progress/ tasks win over planless queued/ ones (finish work in flight before planning new work); within each pool, lowest priority number first. Returns null when nothing is claimable.",
     inputSchema: { kind: z.string().optional().describe("Restrict the pull to one enabled loop kind (e.g. pr-sitter).") },
 }, async ({ kind }) => {
     await loadCfg();
@@ -376,7 +376,7 @@ server.registerTool("loop_advance", {
     if (isOverdue(stageDeadline, Date.now())) {
         const action = {
             kind: "stop",
-            message: `✗ Loop stopped — ${stage} exceeded stageTimeoutMinutes (${config.stageTimeoutMinutes}m). Fix what hung it, then /agent-loop recover the task.`,
+            message: `✗ Loop stopped — ${stage} exceeded stageTimeoutMinutes (${config.stageTimeoutMinutes}m). Fix what hung it, then /agentic-loop:engineering recover the task.`,
         };
         samples.push({ stage, iteration: active.iteration, ms: Date.now() - lastFireAt });
         await runTerminal(action);
@@ -432,7 +432,7 @@ server.registerTool("loop_advance", {
                 gate: { kind: "ship", id: taskId },
                 next: `ship gate: show the user the loop branch's diff summary, then ask with AskUserQuestion — ` +
                     `Ship (loop_ship("${taskId}")), Replan with a reason (loop_replan("${taskId}", reason)), ` +
-                    `or Leave in in-review (stop here; /agent-loop ship ${taskId} ships it later).`,
+                    `or Leave in in-review (stop here; /agentic-loop:engineering approve ${taskId} ships it later).`,
             }
             : {}),
     });
@@ -479,7 +479,7 @@ const runPark = async (action) => {
         next: `plan gate: show the user the plan summary, then ask with AskUserQuestion — ` +
             `Approve (loop_plan_approve("${id}") then loop_start("${id}") continues into BUILD now), ` +
             `Replan with a reason (loop_replan("${id}", reason)), ` +
-            `or Park for later (stop here; /agent-loop approve ${id} resumes it).`,
+            `or Park for later (stop here; /agentic-loop:engineering approve ${id} resumes it).`,
     };
 };
 server.registerTool("loop_stop", {
@@ -490,7 +490,7 @@ server.registerTool("loop_stop", {
         return ok({ stopped: false, note: "no active loop" });
     const action = {
         kind: "stop",
-        message: `Loop stopped by /agent-loop stop at ${active.stage} (iteration ${active.iteration + 1}).`,
+        message: `Loop stopped by /agentic-loop:engineering stop at ${active.stage} (iteration ${active.iteration + 1}).`,
     };
     await runTerminal(action);
     return ok({ stopped: true });
@@ -723,7 +723,7 @@ const approvePlan = async (id) => {
  */
 const replanTask = async (id, reason, liveTaskId) => {
     if (liveTaskId === id)
-        return { ok: false, message: `Task "${id}" is being driven by a live loop — stop it first (/agent-loop stop).` };
+        return { ok: false, message: `Task "${id}" is being driven by a live loop — stop it first (/agentic-loop:engineering stop).` };
     const task = (await findByIdIn(sh, directory, config.tasksDir, "plan-review", id)) ??
         (await findByIdIn(sh, directory, config.tasksDir, "in-progress", id));
     if (!task) {
@@ -813,7 +813,7 @@ const approveAny = async (id) => {
     const folders = id ? ["plan-review", "in-review", "draft"] : ["plan-review", "in-review"];
     const pick = await resolveGateTask(id, folders);
     if (!pick.ok) {
-        return { ok: false, message: pick.kind === "none" ? "Nothing awaiting approval at a loop gate. (Approve a draft with /agent-loop approve <id>.)" : pick.message };
+        return { ok: false, message: pick.kind === "none" ? "Nothing awaiting approval at a loop gate. (Approve a draft with /agentic-loop:engineering approve <id>.)" : pick.message };
     }
     if (pick.from === "draft")
         return approveTask(pick.id);
@@ -851,7 +851,7 @@ const rejectAny = async (arg, liveTaskId) => {
     return replanTask(pick.id, arg.trim() || undefined, liveTaskId);
 };
 server.registerTool("loop_task_approve", {
-    description: "Deterministic /agent-loop approve <id> on a draft — the task gate: move a reviewed draft/ task to queued/ (audited note + commit). No plan is required or expected; the loop's PLAN stage writes it right before execution. The agent writes nothing. Prefer loop_approve (the unified gate) unless you specifically need the draft-only form.",
+    description: "Deterministic /agentic-loop:engineering approve <id> on a draft — the task gate: move a reviewed draft/ task to queued/ (audited note + commit). No plan is required or expected; the loop's PLAN stage writes it right before execution. The agent writes nothing. Prefer loop_approve (the unified gate) unless you specifically need the draft-only form.",
     inputSchema: { id: z.string().min(1) },
 }, async ({ id }) => {
     await loadCfg();
@@ -859,7 +859,7 @@ server.registerTool("loop_task_approve", {
     return r.ok ? ok(r.data) : fail(r.message);
 });
 server.registerTool("loop_plan_approve", {
-    description: "Deterministic /agent-loop approve-plan <id> — the plan gate: validate the plan-review/ task has an ## Implementation Plan, move it to in-progress/ (the build-ready queue), append an audited note, and commit. Refuses planless tasks. The agent writes nothing. Prefer loop_approve (the unified gate).",
+    description: "Deterministic /agentic-loop:engineering approve <id> — the plan gate: validate the plan-review/ task has an ## Implementation Plan, move it to in-progress/ (the build-ready queue), append an audited note, and commit. Refuses planless tasks. The agent writes nothing. Prefer loop_approve (the unified gate).",
     inputSchema: { id: z.string().min(1) },
 }, async ({ id }) => {
     await loadCfg();
@@ -867,7 +867,7 @@ server.registerTool("loop_plan_approve", {
     return r.ok ? ok(r.data) : fail(r.message);
 });
 server.registerTool("loop_replan", {
-    description: "Deterministic /agent-loop reject <id> [reason] (aliases redo, replan): reject a parked plan (plan-review/) or send a cap-tripped in-progress/ task back to queued/ with an audited note, so the next PLAN pass addresses why the old plan failed. Refuses tasks a live loop is driving.",
+    description: "Deterministic /agentic-loop:engineering replan <id> [reason] (aliases redo, replan): reject a parked plan (plan-review/) or send a cap-tripped in-progress/ task back to queued/ with an audited note, so the next PLAN pass addresses why the old plan failed. Refuses tasks a live loop is driving.",
     inputSchema: { id: z.string().min(1), reason: z.string().max(500).optional() },
 }, async ({ id, reason }) => {
     await loadCfg();
@@ -875,7 +875,7 @@ server.registerTool("loop_replan", {
     return r.ok ? ok(r.data) : fail(r.message);
 });
 server.registerTool("loop_approve", {
-    description: "/agent-loop approve [id] (aliases ok, go) — the unified, folder-driven gate. With an explicit id it advances that task by its folder's gate: draft/ → queued (task gate), plan-review/ → in-progress (plan gate, requires an ## Implementation Plan), or in-review/ → completed (ship). The id is OPTIONAL — omit it to advance the single task at a loop wait-gate (plan-review/ or in-review/; drafts always need the explicit id). Prefer this over the specific loop_task_approve / loop_plan_approve / loop_ship tools. The agent writes nothing.",
+    description: "/agentic-loop:engineering approve [id] (aliases ok, go) — the unified, folder-driven gate. With an explicit id it advances that task by its folder's gate: draft/ → queued (task gate), plan-review/ → in-progress (plan gate, requires an ## Implementation Plan), or in-review/ → completed (ship). The id is OPTIONAL — omit it to advance the single task at a loop wait-gate (plan-review/ or in-review/; drafts always need the explicit id). Prefer this over the specific loop_task_approve / loop_plan_approve / loop_ship tools. The agent writes nothing.",
     inputSchema: { id: z.string().optional() },
 }, async ({ id }) => {
     await loadCfg();
@@ -883,7 +883,7 @@ server.registerTool("loop_approve", {
     return r.ok ? ok(r.data) : fail(r.message);
 });
 server.registerTool("loop_reject", {
-    description: "/agent-loop reject [id] [reason] — the folder-driven rejection shortcut. Sends a parked plan back to queued/ for re-planning (the counterpart of loop_approve at the plan gate). Auto-targets the single plan-review/ task when no id is given; an explicit id may also name a cap-tripped in-progress/ task. The reason is recorded in the audit note. Refuses a task a live loop is driving.",
+    description: "/agentic-loop:engineering replan [id] [reason] — the folder-driven rejection shortcut. Sends a parked plan back to queued/ for re-planning (the counterpart of loop_approve at the plan gate). Auto-targets the single plan-review/ task when no id is given; an explicit id may also name a cap-tripped in-progress/ task. The reason is recorded in the audit note. Refuses a task a live loop is driving.",
     inputSchema: { id: z.string().optional(), reason: z.string().max(500).optional() },
 }, async ({ id, reason }) => {
     await loadCfg();
@@ -900,7 +900,7 @@ server.registerTool("loop_move", { description: "Move a task file to another sta
     const newPath = await moveTask(sh, { id, path: found.path }, status);
     return ok({ moved: newPath });
 });
-server.registerTool("loop_ship", { description: "Ship a reviewed task: move it in-review/ → completed/ with an audited note and commit. The final human gate action. The id is OPTIONAL — omit it to ship the single in-review/ task; pass it only to disambiguate. /agent-loop approve (loop_approve) does the same when the only awaiting task is in in-review/.", inputSchema: { id: z.string().optional() } }, async ({ id }) => {
+server.registerTool("loop_ship", { description: "Ship a reviewed task: move it in-review/ → completed/ with an audited note and commit. The final human gate action. The id is OPTIONAL — omit it to ship the single in-review/ task; pass it only to disambiguate. /agentic-loop:engineering approve (loop_approve) does the same when the only awaiting task is in in-review/.", inputSchema: { id: z.string().optional() } }, async ({ id }) => {
     await loadCfg();
     const r = await shipAny((id ?? "").trim());
     return r.ok ? ok(r.data) : fail(r.message);
@@ -1011,7 +1011,7 @@ async function main() {
         await pruneWorktrees(sh, directory);
         const worktrees = (await listWorktrees(sh, directory)).filter((w) => w.branch?.startsWith("feature/"));
         for (const w of worktrees)
-            await log("info", `leftover loop worktree: ${w.path} (${w.branch}) — /agent-loop recover its task or remove it`);
+            await log("info", `leftover loop worktree: ${w.path} (${w.branch}) — /agentic-loop:engineering recover its task or remove it`);
     }
     await log("info", `agentic-loop MCP server ready (directory=${directory})`);
     const transport = new StdioServerTransport();

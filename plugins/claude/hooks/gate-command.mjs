@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 /**
  * UserPromptSubmit hook for the agentic-loop plugin. Makes the gate verbs
- * `/agent-loop approve|approve-plan|reject [id] [reason]` (aliases ok/go and
- * redo/replan) move the task file DETERMINISTICALLY — in the harness, before
- * the model runs — so the move happens even when a degraded model would not
- * call the equivalent MCP tool.
+ * `/agentic-loop:engineering approve|replan [id] [reason]` move the task file
+ * DETERMINISTICALLY — in the harness, before the model runs — so the move
+ * happens even when a degraded model would not call the equivalent MCP tool.
  *
  * On a gate command it shells to `node mcp-server/dist/server.js gate <verb> <id>`
  * (the same core move logic the MCP tools call), then BLOCKS the turn so the model

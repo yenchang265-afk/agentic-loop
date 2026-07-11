@@ -62,8 +62,8 @@ Return the plan as markdown:
 - **Risks / open questions**, if any.
 
 The plan is relayed to the user as chat — nothing is persisted. If they want
-it executable, the path is `/agent-loop new <idea>` → `approve <id>` → the
-loop plans it → `approve-plan <id>` → `/agent-loop` builds it.
+it executable, the path is `/agentic-loop:engineering new <idea>` → `approve <id>` → the
+loop plans it → `approve <id>` (the plan gate) → `claim`/`watch` builds it.
 
 ## Hard rules
 

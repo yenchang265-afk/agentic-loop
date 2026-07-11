@@ -10,9 +10,8 @@ import {
   claimSkipReason,
   drive,
   handleApprove,
-  handleApprovePlan,
   handleCommand,
-  handleReject,
+  handleReplan,
   manifestFor,
   onInterrupt,
   parseWatchArgs,
@@ -62,20 +61,7 @@ test("garbage yields an error, not a silent default", () => {
   }
 })
 
-test("a loop kind is accepted alone or with an interval, in either order", () => {
-  const kinds = ["engineering", "pr-sitter"]
-  assert.deepEqual(parseWatchArgs("pr-sitter", kinds), { kind: "pr-sitter" })
-  assert.deepEqual(parseWatchArgs("30s pr-sitter", kinds), { intervalMs: 30_000, kind: "pr-sitter" })
-  assert.deepEqual(parseWatchArgs("pr-sitter 30s", kinds), { intervalMs: 30_000, kind: "pr-sitter" })
-  assert.deepEqual(parseWatchArgs("PR-Sitter", kinds), { kind: "pr-sitter" })
-})
 
-test("a token that is neither an interval nor an enabled kind errors", () => {
-  const parsed = parseWatchArgs("30s bogus-kind", ["engineering"])
-  assert.ok("error" in parsed)
-  assert.match(parsed.error, /bogus-kind/)
-  assert.match(parsed.error, /engineering/)
-})
 
 /**
  * `claimSkipReason`: every no-claim tick must explain itself. Held markers
@@ -101,11 +87,11 @@ test("held markers outrank the already-started case", () => {
   assert.match(r.message, /claim marker held/)
 })
 
-test("started-but-unclaimed tasks point at /agent-loop recover", () => {
+test("started-but-unclaimed tasks point at the recover verb", () => {
   const r = claimSkipReason(2, 0, 0, ["crashed-a", "crashed-b"], [])
   assert.equal(r.actionable, true)
   assert.match(r.message, /crashed-a, crashed-b/)
-  assert.match(r.message, /\/agent-loop recover <id>/)
+  assert.match(r.message, /\/agentic-loop:engineering recover <id>/)
 })
 
 test("a backlog with neither started nor held tasks falls back to the no-plan hint", () => {
@@ -115,7 +101,7 @@ test("a backlog with neither started nor held tasks falls back to the no-plan hi
 })
 
 /**
- * Verb classification of the merged `/agent-loop` command: `new` and `retask`
+ * Verb classification of the `/agentic-loop:engineering` command: `new` and `retask`
  * are agent work (interview + draft write) and must pass through silently —
  * no toast, no move — so the command template's model turn runs.
  */
@@ -194,7 +180,7 @@ test("onInterrupt is a silent no-op when not driving and not watching", async ()
 })
 
 /**
- * The deterministic gate verbs of the merged `/agent-loop` command.
+ * The deterministic gate verbs of the `/agentic-loop:engineering` command.
  * `findByIdIn` resolves through the shell (`cat` on the real FS), so the task
  * content lives in the shell FS mock, not the client — `makeClient` only
  * serves toasts. A refusal is proven by the absence of an `mv` in the
@@ -289,17 +275,6 @@ test("approve <id> moves a draft to queued/ without requiring a plan (unified ga
   assert.ok(log.some((cmd) => cmd.includes("mv") && cmd.includes("queued")))
 })
 
-test("ok is an alias for approve", async () => {
-  const draft = serializeTask({ title: "Do the thing", body: "Some context." })
-  const { client, toasts } = makeClient()
-  const log: string[] = []
-  const deps: Deps = { client, $: makeShellFS({ "docs/tasks/draft/my-task.md": draft }, log), directory: "/repo", log: () => {} }
-
-  await handleCommand(deps, "sess", "ok my-task", testConfig)
-
-  assert.equal(toasts[0]?.variant, "success")
-  assert.ok(log.some((cmd) => cmd.includes("mv") && cmd.includes("queued")))
-})
 
 test("approve <id> is idempotent when the task is already queued (retry after a prior success)", async () => {
   const queued = serializeTask({ title: "Do the thing", body: "Some context." })
@@ -328,20 +303,20 @@ test("approve <id> on a task at no gate (in-progress) reports info, no move", as
   assert.ok(!log.some((cmd) => cmd.startsWith("mv ")), "no move on a refusal")
 })
 
-test("approve-plan refuses a queued task that the loop has not planned yet", async () => {
-  const queued = serializeTask({ title: "Do the thing", body: "Some context." })
+test("plan <id> on a plan-review task points at the gate verbs, no move", async () => {
+  const planned = serializeTask({ title: "Do the thing", body: `${PLAN_HEADING}\n\n1. Step.` })
   const { client, toasts } = makeClient()
   const log: string[] = []
-  const deps: Deps = { client, $: makeShellFS({ "docs/tasks/queued/my-task.md": queued }, log), directory: "/repo", log: () => {} }
+  const deps: Deps = { client, $: makeShellFS({ "docs/tasks/plan-review/my-task.md": planned }, log), directory: "/repo", log: () => {} }
 
-  await handleApprovePlan(deps, "sess", "my-task", testConfig)
+  await handleCommand(deps, "sess", "plan my-task", testConfig)
 
   assert.equal(toasts.length, 1)
-  assert.match(toasts[0]?.message ?? "", /still queued/)
+  assert.match(toasts[0]?.message ?? "", /parked for review/)
   assert.ok(!log.some((cmd) => cmd.startsWith("mv ")), "no move on a refusal")
 })
 
-test("approve-plan refuses a plan-review task whose plan heading is missing", async () => {
+test("approve <id> refuses a plan-review task whose plan heading is missing", async () => {
   const planless = serializeTask({ title: "Do the thing", body: "Some context, no plan." })
   const { client, toasts } = makeClient()
   const log: string[] = []
@@ -352,14 +327,14 @@ test("approve-plan refuses a plan-review task whose plan heading is missing", as
     log: () => {},
   }
 
-  await handleCommand(deps, "sess", "approve-plan my-task", testConfig)
+  await handleCommand(deps, "sess", "approve my-task", testConfig)
 
   assert.equal(toasts.length, 1)
   assert.match(toasts[0]?.message ?? "", /no Implementation Plan/)
   assert.ok(!log.some((cmd) => cmd.startsWith("mv ")), "no move on a refusal")
 })
 
-test("approve-plan moves a planned plan-review task to in-progress/", async () => {
+test("approve <id> moves a planned plan-review task to in-progress/", async () => {
   const planned = serializeTask({ title: "Do the thing", body: `${PLAN_HEADING}\n\n1. Step.` })
   const { client, toasts } = makeClient()
   const log: string[] = []
@@ -370,13 +345,13 @@ test("approve-plan moves a planned plan-review task to in-progress/", async () =
     log: () => {},
   }
 
-  await handleCommand(deps, "sess", "approve-plan my-task", testConfig)
+  await handleCommand(deps, "sess", "approve my-task", testConfig)
 
   assert.equal(toasts[0]?.variant, "success")
   assert.ok(log.some((cmd) => cmd.includes("mv") && cmd.includes("in-progress")))
 })
 
-test("replan (alias of reject) sends a plan-review task back to queued/ with the reason noted", async () => {
+test("replan sends a plan-review task back to queued/ with the reason noted", async () => {
   const planned = serializeTask({ title: "Do the thing", body: `${PLAN_HEADING}\n\n1. Step.` })
   const { client, toasts } = makeClient()
   const log: string[] = []
@@ -394,7 +369,7 @@ test("replan (alias of reject) sends a plan-review task back to queued/ with the
   assert.ok(log.some((cmd) => cmd.includes("misses the cache layer")))
 })
 
-test("redo (alias of reject) also accepts a cap-tripped in-progress task", async () => {
+test("replan also accepts a cap-tripped in-progress task", async () => {
   const planned = serializeTask({ title: "Do the thing", body: `${PLAN_HEADING}\n\n1. Step.` })
   const { client, toasts } = makeClient()
   const log: string[] = []
@@ -405,7 +380,7 @@ test("redo (alias of reject) also accepts a cap-tripped in-progress task", async
     log: () => {},
   }
 
-  await handleCommand(deps, "sess", "redo my-task", testConfig)
+  await handleCommand(deps, "sess", "replan my-task", testConfig)
 
   assert.equal(toasts[0]?.variant, "success")
   assert.ok(log.some((cmd) => cmd.includes("mv") && cmd.includes("queued")))
@@ -472,7 +447,7 @@ test("/approve with no id ships the single in-review task to completed/", async 
   assert.ok(log.some((cmd) => cmd.includes("mv") && cmd.includes("completed")))
 })
 
-test("id-less /agent-loop approve ignores drafts — a lone draft is not queued (drafts need an explicit id)", async () => {
+test("id-less approve ignores drafts — a lone draft is not queued (drafts need an explicit id)", async () => {
   const files = { "docs/tasks/draft/my-task.md": serializeTask({ title: "Do the thing", body: "no plan yet" }) }
   const { client, toasts } = makeClientFS(files)
   const log: string[] = []
@@ -486,7 +461,7 @@ test("id-less /agent-loop approve ignores drafts — a lone draft is not queued 
   assert.ok(!log.some((cmd) => cmd.startsWith("mv ")), "a draft is not approved without an explicit id")
 })
 
-test("/agent-loop approve ignores a draft and advances the single parked plan (not ambiguous)", async () => {
+test("id-less approve ignores a draft and advances the single parked plan (not ambiguous)", async () => {
   const files = {
     "docs/tasks/draft/task-a.md": serializeTask({ title: "A", body: "x" }),
     "docs/tasks/plan-review/task-b.md": serializeTask({ title: "B", body: `${PLAN_HEADING}\n\n1. Step.` }),
@@ -502,7 +477,7 @@ test("/agent-loop approve ignores a draft and advances the single parked plan (n
   assert.ok(!log.some((cmd) => cmd.includes("task-a") && cmd.includes("mv")), "the draft is untouched")
 })
 
-test("/agent-loop approve refuses to guess between two wait-gate tasks", async () => {
+test("id-less approve refuses to guess between two wait-gate tasks", async () => {
   const files = {
     "docs/tasks/plan-review/task-a.md": serializeTask({ title: "A", body: `${PLAN_HEADING}\n\n1. Step.` }),
     "docs/tasks/in-review/task-b.md": serializeTask({ title: "B", body: "reviewed" }),
@@ -520,7 +495,7 @@ test("/agent-loop approve refuses to guess between two wait-gate tasks", async (
   assert.ok(!log.some((cmd) => cmd.startsWith("mv ")), "no move when ambiguous")
 })
 
-test("/agent-loop approve with no candidates says nothing is awaiting approval", async () => {
+test("id-less approve with no candidates says nothing is awaiting approval", async () => {
   const { client, toasts } = makeClientFS({})
   const log: string[] = []
   const deps: Deps = { client, $: makeShellFS({}, log), directory: "/repo", log: () => {} }
@@ -531,7 +506,7 @@ test("/agent-loop approve with no candidates says nothing is awaiting approval",
   assert.match(toasts[0]?.message ?? "", /Nothing awaiting approval/)
 })
 
-test("/approve refuses a planless plan-review task and points at /reject", async () => {
+test("id-less approve refuses a planless plan-review task and points at replan", async () => {
   const files = { "docs/tasks/plan-review/my-task.md": serializeTask({ title: "Do the thing", body: "no plan heading" }) }
   const { client, toasts } = makeClientFS(files)
   const log: string[] = []
@@ -541,11 +516,11 @@ test("/approve refuses a planless plan-review task and points at /reject", async
 
   assert.equal(toasts.length, 1)
   assert.match(toasts[0]?.message ?? "", /no Implementation Plan/)
-  assert.match(toasts[0]?.message ?? "", /\/agent-loop reject/)
+  assert.match(toasts[0]?.message ?? "", /\/agentic-loop:engineering replan/)
   assert.ok(!log.some((cmd) => cmd.startsWith("mv ")), "no move for a planless task")
 })
 
-test("/agent-loop approve <id> advances that task by its folder's gate", async () => {
+test("approve <id> advances that task by its folder's gate", async () => {
   const files = { "docs/tasks/plan-review/my-task.md": serializeTask({ title: "Do the thing", body: `${PLAN_HEADING}\n\n1. Step.` }) }
   const { client, toasts } = makeClientFS(files)
   const log: string[] = []
@@ -557,7 +532,7 @@ test("/agent-loop approve <id> advances that task by its folder's gate", async (
   assert.ok(log.some((cmd) => cmd.includes("mv") && cmd.includes("in-progress")))
 })
 
-test("/agent-loop approve <draft-id> queues the draft — the unified task gate", async () => {
+test("approve <draft-id> queues the draft — the unified task gate", async () => {
   const files = { "docs/tasks/draft/my-task.md": serializeTask({ title: "Do the thing", body: "x" }) }
   const { client, toasts } = makeClientFS(files)
   const log: string[] = []
@@ -589,7 +564,7 @@ test("/reject with no id sends the single plan-review task back, whole arg as re
   const log: string[] = []
   const deps: Deps = { client, $: makeShellFS(files, log), directory: "/repo", log: () => {} }
 
-  await handleReject(deps, "sess", "the migration order is unsafe", testConfig)
+  await handleReplan(deps, "sess", "the migration order is unsafe", testConfig)
 
   assert.equal(toasts[0]?.variant, "success")
   assert.ok(log.some((cmd) => cmd.includes("mv") && cmd.includes("queued")))
@@ -602,7 +577,7 @@ test("/reject <id> [reason] captures the id and the trailing reason", async () =
   const log: string[] = []
   const deps: Deps = { client, $: makeShellFS(files, log), directory: "/repo", log: () => {} }
 
-  await handleReject(deps, "sess", "my-task misses the cache layer", testConfig)
+  await handleReplan(deps, "sess", "my-task misses the cache layer", testConfig)
 
   assert.equal(toasts[0]?.variant, "success")
   assert.ok(log.some((cmd) => cmd.includes("mv") && cmd.includes("queued")))
@@ -614,14 +589,14 @@ test("/reject with no plan awaiting is a harmless info toast", async () => {
   const log: string[] = []
   const deps: Deps = { client, $: makeShellFS({}, log), directory: "/repo", log: () => {} }
 
-  await handleReject(deps, "sess", "some reason", testConfig)
+  await handleReplan(deps, "sess", "some reason", testConfig)
 
   assert.equal(toasts[0]?.variant, "info")
   assert.match(toasts[0]?.message ?? "", /No plan awaiting rejection/)
   assert.ok(!log.some((cmd) => cmd.startsWith("mv ")), "no move when nothing awaits")
 })
 
-test("/agent-loop approve routes the gate move (subcommand, not top-level)", async () => {
+test("approve routes the gate move (subcommand, not top-level)", async () => {
   const files = { "docs/tasks/plan-review/my-task.md": serializeTask({ title: "Do the thing", body: `${PLAN_HEADING}\n\n1. Step.` }) }
   const { client, toasts } = makeClientFS(files)
   const log: string[] = []
@@ -633,67 +608,61 @@ test("/agent-loop approve routes the gate move (subcommand, not top-level)", asy
   assert.ok(log.some((cmd) => cmd.includes("mv") && cmd.includes("in-progress")))
 })
 
-test("/agent-loop reject <why> routes the rejection, reason noted", async () => {
+test("replan <why> routes the rejection, reason noted", async () => {
   const files = { "docs/tasks/plan-review/my-task.md": serializeTask({ title: "Do the thing", body: `${PLAN_HEADING}\n\n1. Step.` }) }
   const { client, toasts } = makeClientFS(files)
   const log: string[] = []
   const deps: Deps = { client, $: makeShellFS(files, log), directory: "/repo", log: () => {} }
 
-  await handleCommand(deps, "sess", "reject the migration order is unsafe", testConfig)
+  await handleCommand(deps, "sess", "replan the migration order is unsafe", testConfig)
 
   assert.equal(toasts[0]?.variant, "success")
   assert.ok(log.some((cmd) => cmd.includes("mv") && cmd.includes("queued")))
   assert.ok(log.some((cmd) => cmd.includes("the migration order is unsafe")))
 })
 
-test("/agent-loop ship with no id ships the single in-review task", async () => {
+test("id-less approve ships the single in-review task (ship verb is gone)", async () => {
   const files = { "docs/tasks/in-review/my-task.md": serializeTask({ title: "Ship it", body: "reviewed" }) }
   const { client, toasts } = makeClientFS(files)
   const log: string[] = []
   const deps: Deps = { client, $: makeShellFS(files, log), directory: "/repo", log: () => {} }
 
-  await handleCommand(deps, "sess", "ship", testConfig)
+  await handleCommand(deps, "sess", "approve", testConfig)
 
   assert.equal(toasts[0]?.variant, "success")
   assert.ok(log.some((cmd) => cmd.includes("mv") && cmd.includes("completed")))
 })
 
-test("/agent-loop ship with no in-review task is a harmless info toast", async () => {
-  const { client, toasts } = makeClientFS({})
-  const log: string[] = []
-  const deps: Deps = { client, $: makeShellFS({}, log), directory: "/repo", log: () => {} }
 
-  await handleCommand(deps, "sess", "ship", testConfig)
-
-  assert.equal(toasts[0]?.variant, "info")
-  assert.match(toasts[0]?.message ?? "", /Nothing awaiting ship/)
-  assert.ok(!log.some((cmd) => cmd.startsWith("mv ")), "no move when nothing awaits")
-})
-
-test("/agent-loop claim with an unknown kind is refused with the enabled list", async () => {
-  const { client, toasts } = makeClientFS({})
-  const log: string[] = []
-  const deps: Deps = { client, $: makeShellFS({}, log), directory: "/repo", log: () => {} }
-
-  await handleCommand(deps, "sess-claim-bad", "claim bogus", testConfig)
-
-  assert.equal(toasts[0]?.variant, "warning")
-  assert.match(toasts[0]?.message ?? "", /Unknown loop kind "bogus"/)
-  assert.match(toasts[0]?.message ?? "", /engineering/)
-})
-
-test("/agent-loop claim queues a one-shot pull for the next idle", async () => {
+test("claim queues a one-shot pull scoped to the command's kind", async () => {
   const { client, toasts } = makeClientFS({})
   const log: string[] = []
   const deps: Deps = { client, $: makeShellFS({}, log), directory: "/repo", log: () => {} }
 
   await handleCommand(deps, "sess-claim", "claim", testConfig)
+  await handleCommand(deps, "sess-claim-pr", "claim", testConfig, "pr-sitter")
 
-  assert.equal(toasts[0]?.variant, "info")
-  assert.match(toasts[0]?.message ?? "", /Claiming the next available item/)
+  assert.match(toasts[0]?.message ?? "", /Claiming the next engineering item/)
+  assert.match(toasts[1]?.message ?? "", /Claiming the next pr-sitter item/)
 })
 
-test("/agent-loop kinds lists known kinds with their enabled state", async () => {
+test("engineering-only verbs on another kind's command get that kind's usage", async () => {
+  const { client, toasts } = makeClientFS({})
+  const log: string[] = []
+  const deps: Deps = { client, $: makeShellFS({}, log), directory: "/repo", log: () => {} }
+
+  await handleCommand(deps, "sess", "new add rate limiting", testConfig, "pr-sitter")
+  await handleCommand(deps, "sess", "approve my-task", testConfig, "pr-sitter")
+
+  assert.equal(toasts.length, 2)
+  for (const t of toasts) {
+    assert.equal(t.variant, "warning")
+    assert.match(t.message, /agentic-loop:pr-sitter claim · watch/)
+  }
+  assert.ok(!log.some((cmd) => cmd.startsWith("mv ")), "no gate move from a foreign kind command")
+})
+
+test("kinds lists known kinds with their enabled state", async () => {
   const { client, toasts } = makeClientFS({})
   const log: string[] = []
   const deps: Deps = { client, $: makeShellFS({}, log), directory: "/repo", log: () => {} }
@@ -705,31 +674,45 @@ test("/agent-loop kinds lists known kinds with their enabled state", async () =>
   assert.match(toasts[0]?.message ?? "", /pr-sitter \(disabled\)/)
 })
 
-test("a bare unknown token that names no task gets the usage toast", async () => {
+test("an unknown verb gets the engineering usage toast", async () => {
   const { client, toasts } = makeClientFS({})
   const log: string[] = []
   const deps: Deps = { client, $: makeShellFS({}, log), directory: "/repo", log: () => {} }
 
-  await handleCommand(deps, "sess", "no-such-task", testConfig)
+  await handleCommand(deps, "sess", "no-such-verb", testConfig)
 
   assert.equal(toasts[0]?.variant, "warning")
-  assert.match(toasts[0]?.message ?? "", /Unknown \/agent-loop mode/)
+  assert.match(toasts[0]?.message ?? "", /Unknown \/agentic-loop:engineering mode/)
 })
 
-test("the bare-id shorthand routes a draft id at the right verb", async () => {
+test("plan <id> on a draft points at approve, no move", async () => {
   const files = { "docs/tasks/draft/my-task.md": serializeTask({ title: "Do the thing", body: "x" }) }
   const { client, toasts } = makeClientFS(files)
   const log: string[] = []
   const deps: Deps = { client, $: makeShellFS(files, log), directory: "/repo", log: () => {} }
 
-  await handleCommand(deps, "sess", "my-task", testConfig)
+  await handleCommand(deps, "sess", "plan my-task", testConfig)
 
   assert.equal(toasts[0]?.variant, "warning")
   assert.match(toasts[0]?.message ?? "", /it's a draft — approve it first/)
-  assert.ok(!log.some((cmd) => cmd.startsWith("mv ")), "the shorthand never moves gate files")
+  assert.ok(!log.some((cmd) => cmd.startsWith("mv ")), "plan never moves gate files")
 })
 
-test("/agent-loop ship refuses to guess between two in-review tasks", async () => {
+test("plan <id> on a build-ready in-progress task points at claim/watch", async () => {
+  const planned = serializeTask({ title: "Do the thing", body: `${PLAN_HEADING}\n\n1. Step.` })
+  const files = { "docs/tasks/in-progress/my-task.md": planned }
+  const { client, toasts } = makeClientFS(files)
+  const log: string[] = []
+  const deps: Deps = { client, $: makeShellFS(files, log), directory: "/repo", log: () => {} }
+
+  await handleCommand(deps, "sess", "plan my-task", testConfig)
+
+  assert.equal(toasts[0]?.variant, "warning")
+  assert.match(toasts[0]?.message ?? "", /build-ready/)
+  assert.ok(!log.some((cmd) => cmd.startsWith("mv ")), "plan never moves in-progress files")
+})
+
+test("id-less approve refuses to guess between two in-review tasks", async () => {
   const files = {
     "docs/tasks/in-review/task-a.md": serializeTask({ title: "A", body: "x" }),
     "docs/tasks/in-review/task-b.md": serializeTask({ title: "B", body: "y" }),
@@ -738,7 +721,7 @@ test("/agent-loop ship refuses to guess between two in-review tasks", async () =
   const log: string[] = []
   const deps: Deps = { client, $: makeShellFS(files, log), directory: "/repo", log: () => {} }
 
-  await handleCommand(deps, "sess", "ship", testConfig)
+  await handleCommand(deps, "sess", "approve", testConfig)
 
   assert.equal(toasts[0]?.variant, "warning")
   assert.match(toasts[0]?.message ?? "", /Multiple tasks awaiting/)

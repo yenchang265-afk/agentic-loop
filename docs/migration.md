@@ -1,5 +1,29 @@
 # Migrating between layouts
 
+## To the per-kind commands (`/agentic-loop:engineering`, `/agentic-loop:pr-sitter`)
+
+- **The umbrella `/agent-loop` command is gone** — each loop kind now has its
+  own plugin-namespaced command. Engineering: `/agentic-loop:engineering`
+  (`new <idea>` · `retask <id> [note]` · `approve [id]` — the unified
+  folder-driven gate, behavior unchanged · `replan [id] [reason]` — the sole
+  rejection verb, previously `reject` · `plan <id>` · `claim` ·
+  `watch [interval]` / `unwatch` (OpenCode) · `recover <id>` · `kinds` ·
+  `doctor [fix]` · `stop` · `status`). The PR sitter:
+  `/agentic-loop:pr-sitter` (`claim` · `watch [interval]` / `unwatch`
+  (OpenCode) · `stop` · `status`).
+- **Dropped with the umbrella**: the `ok`/`go` approve aliases; `reject` and
+  its `redo` alias (use `replan`); the explicit `approve-plan <id>` form (the
+  unified `approve <id>` covers the plan gate); `task <id>`, its `run` alias,
+  and the bare-id shorthand (use `plan <id>` to plan one task, `claim` to
+  build the next); and `ship <id>` (the unified `approve <id>` ships from
+  `in-review/`).
+- **Scoping**: `claim [kind]` / `watch [interval] [kind]` no longer take a
+  kind filter — the command is the filter. Restart old `/agent-loop watch`
+  sessions as `/agentic-loop:engineering watch` (plus
+  `/agentic-loop:pr-sitter watch` where the sitter is enabled).
+- Re-run `./install.sh` after updating; a previously installed
+  `commands/agent-loop.md` symlink now dangles — delete it if it lingers.
+
 ## To the single `/agent-loop` command and same-layer plugins
 
 - **`/agent-loop-task` is gone** — all its verbs live on `/agent-loop`:

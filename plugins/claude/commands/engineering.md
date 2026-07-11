@@ -1,14 +1,16 @@
 ---
-description: The agentic loop — author tasks, gate them, and drive them through plan → build → verify → review
-argument-hint: new <idea> | retask <id> [note] | approve [id] | reject [id] [reason] | task <id> | claim [kind] | recover <id> | ship [id] | kinds | doctor [fix] | stop | status
+description: The engineering loop — author tasks, gate them, and drive them through plan → build → verify → review
+argument-hint: new <idea> | retask <id> [note] | approve [id] | replan [id] [reason] | plan <id> | claim | recover <id> | kinds | doctor [fix] | stop | status
 ---
 
-You are about to work the **agentic loop** — one command for task authoring,
-the human gates, and execution over the task queues. The loop plans a queued
-task right before execution (and parks the plan for the human gate) or builds
-a plan-approved task. Read the `loop-orchestration` skill now — it is the
+You are about to work the **engineering agentic loop** (typed as
+`/agentic-loop:engineering`) — one command for task authoring, the human
+gates, and execution over the task queues. The loop plans a queued task right
+before execution (and parks the plan for the human gate) or builds a
+plan-approved task. Read the `loop-orchestration` skill now — it is the
 authoritative protocol for how you (the main agent) drive the stages and how
-verdicts terminate the loop. Then act on the argument below.
+verdicts terminate the loop. Then act on the argument below. (The PR sitter
+has its own command: `/agentic-loop:pr-sitter`.)
 
 **Argument:** `$ARGUMENTS`
 
@@ -47,7 +49,8 @@ Dispatch:
      confirmed set to write the draft file(s) — one draft, or N child drafts
      plus one epic tracking file. No plan is written now — the loop's PLAN
      stage plans each task right before execution, so plans don't rot while it
-     sits parked. The next step is `/agent-loop approve <id>` per child.
+     sits parked. The next step is `/agentic-loop:engineering approve <id>`
+     per child.
      - **The epic file is a tracking draft only** (frontmatter `type: epic`,
        body listing the children in order). **Never approve it** — an
        un-approved draft is inert, so the loop never claims it. Close it by
@@ -65,7 +68,8 @@ Dispatch:
   the interview, same as `new`:
   1. Resolve `<id>` in `docs/tasks/draft/` **only**. If it isn't there (it's
      already queued/planned, or missing), refuse: "only drafts can be
-     re-tasked — a parked plan uses `/agent-loop reject <id>`" and stop.
+     re-tasked — a parked plan uses `/agentic-loop:engineering replan <id>`"
+     and stop.
   2. Read the existing draft and show its current title, priority, acceptance,
      body (and any `tracker` block) to the user.
   3. **Always** invoke the `interview-me` skill to reshape it, seeding it with
@@ -75,57 +79,49 @@ Dispatch:
      with the id and the confirmed title/priority/acceptance/body (carry
      forward the `tracker` block if the draft had one) to rewrite
      `docs/tasks/draft/<id>.md` **in place** — the id/filename never changes.
-     Still no plan. The next step is unchanged: `/agent-loop approve <id>`.
+     Still no plan. The next step is unchanged:
+     `/agentic-loop:engineering approve <id>`.
 
 ## Human gates (deterministic — handled by the plugin's hook before your turn)
 
-- **`approve [id]`** (aliases: `ok`, `go`) — the unified, folder-driven gate.
-  **Handled deterministically by the plugin's `UserPromptSubmit` hook before
-  this turn** — it advances the task by the gate its folder implies and blocks
-  the turn, so you normally never see it. With an explicit `<id>`: a reviewed
-  `draft/` → `queued/` (task gate), a parked `plan-review/` plan →
-  `in-progress/` (plan gate, `## Implementation Plan` required), or a
-  finished `in-review/` task → `completed/` (ship). Without an id it advances
-  the single task at a loop wait-gate (`plan-review/` or `in-review/`);
-  drafts always need the explicit id. **Spawn nothing** — report the outcome.
-  (Fallback: `mcp__agentic-loop__loop_approve({id})`, id optional.)
-- **`approve-plan <id>`** — the explicit plan-gate form; `approve <id>` covers
-  it. **Handled by the same hook.** (Fallback:
-  `mcp__agentic-loop__loop_plan_approve({id})`.)
-- **`reject [id] [reason]`** (aliases: `redo`, `replan`) — send a parked plan
+- **`approve [id]`** — THE gate verb, unified and folder-driven. **Handled
+  deterministically by the plugin's `UserPromptSubmit` hook before this turn**
+  — it advances the task by the gate its folder implies and blocks the turn,
+  so you normally never see it. With an explicit `<id>`: a reviewed `draft/`
+  → `queued/` (task gate), a parked `plan-review/` plan → `in-progress/`
+  (plan gate, `## Implementation Plan` required), or a finished `in-review/`
+  task → `completed/` (ship — only after the human reviewed the branch
+  diff). A task lives in exactly one folder, so the gate is never ambiguous.
+  Without an id it advances the single task at a loop wait-gate
+  (`plan-review/` or `in-review/`); drafts always need the explicit id.
+  **Spawn nothing** — report the outcome. (Fallback:
+  `mcp__agentic-loop__loop_approve({id})`, id optional.)
+- **`replan [id] [reason]`** — the sole rejection verb: send a parked plan
   (or a cap-tripped `in-progress/` task, by id) back to `queued/` for
   re-planning. **Handled by the same hook**; the reason is recorded in the
   audit note. (Fallback: `mcp__agentic-loop__loop_reject({id, reason})`, id
   optional.)
-- **`ship [id]`** — call `mcp__agentic-loop__loop_ship({id})` to move a
-  reviewed task from `in-review/` to `completed/`. Do this only after the
-  human has reviewed the branch diff. The `id` is optional — omit it to ship
-  the single `in-review/` task. (The user can also type **`/agent-loop
-  approve`**, which ships when the only task awaiting a gate is in `in-review/`.)
 
 ## Execution
 
-- **`task <id>`** (alias: `run <id>`) — run one task now. Call
-  `mcp__agentic-loop__loop_start({id})`. A `queued/` task starts at PLAN (no
-  git isolation): spawn `loop-plan-author` in task mode with the returned
-  prompt, then `loop_advance` — the task parks in `plan-review/` and the
-  plan gate goes live: ask the user inline (AskUserQuestion — Approve /
+- **`plan <id>`** — plan one approved task now. Call
+  `mcp__agentic-loop__loop_start({id})` on the `queued/` task — it starts at
+  PLAN (no git isolation): spawn `loop-plan-author` in task mode with the
+  returned prompt, then `loop_advance` — the task parks in `plan-review/` and
+  the plan gate goes live: ask the user inline (AskUserQuestion — Approve /
   Replan / Park for later, per the `loop-orchestration` skill) instead of
-  only telling them which command to run. An `in-progress/` task starts at
-  BUILD on `feature/<id>`;
-  follow the `loop-orchestration` protocol: `loop_stage` before spawning
-  each stage subagent (`loop-build` / `loop-verify` / `loop-review` via the
-  Task tool) and `loop_advance` after each returns, until a terminal action.
-- **`claim [kind]`** — call `mcp__agentic-loop__loop_claim` to pick up the
-  next item and drive it the same way. It polls **all enabled loop kinds** in
-  claim-priority order: the engineering backlog first (build-ready
-  `in-progress/` tasks win over planless `queued/` ones; within each pool,
-  lowest priority number first), then kinds enabled in `.agentic-loop.json`
-  (e.g. pr-sitter PRs — driven per that kind's manifest, see the
-  `loop-orchestration` skill's "Loop kinds" section). Pass a kind to restrict
-  the pull (`/agent-loop claim pr-sitter` → `loop_claim({kind: "pr-sitter"})`).
-  This is the pull equivalent of the OpenCode plugin's `/agent-loop watch` —
-  there is no standing watch mode on this substrate.
+  only telling them which command to run. If the id is already build-ready
+  (`in-progress/`), don't start it here — `claim` builds it.
+- **`claim`** — call `mcp__agentic-loop__loop_claim` to pick up the next
+  engineering item and drive it: build-ready `in-progress/` tasks win over
+  planless `queued/` ones (work in flight finishes before new work spins
+  up); within each pool, lowest priority number first. An `in-progress/`
+  task starts at BUILD on `feature/<id>`; follow the `loop-orchestration`
+  protocol: `loop_stage` before spawning each stage subagent (`loop-build` /
+  `loop-verify` / `loop-review` via the Task tool) and `loop_advance` after
+  each returns, until a terminal action. This is the pull equivalent of the
+  OpenCode plugin's `watch` — there is no standing watch mode on this
+  substrate.
 - **`recover <id>`** — call `mcp__agentic-loop__loop_recover({id})` and
   resume driving from the action it returns.
 - **`stop`** (alias: `abort`) — call `mcp__agentic-loop__loop_stop` to abort
@@ -133,30 +129,31 @@ Dispatch:
 
 ## Introspection
 
-- **`status`** (or bare `/agent-loop`) — call `mcp__agentic-loop__loop_status`
-  and report the active loop plus the backlog roll-up and the enabled loop
-  kinds. When a `projectManagement` tracker is configured, the result also
-  carries a `pairing` block (tracker system, paired count, unpaired task ids)
-  — surface which active tasks still need to be paired to a Jira/ADO item.
-- **`kinds`** — report the loop kinds from `loop_status`'s `kinds` block (or
-  explain: enabled/disabled per `loops.<kind>.enabled` in `.agentic-loop.json`).
+- **`status`** (or bare) — call `mcp__agentic-loop__loop_status` and report
+  the active loop plus the backlog roll-up and the loop kinds. When a
+  `projectManagement` tracker is configured, the result also carries a
+  `pairing` block (tracker system, paired count, unpaired task ids) —
+  surface which active tasks still need to be paired to a Jira/ADO item.
+- **`kinds`** — report the loop kinds from `loop_status`'s `kinds` block
+  (enabled/disabled per `loops.<kind>.enabled` in `.agentic-loop.json`; each
+  enabled kind has its own `/agentic-loop:<kind>` command).
 - **`doctor [fix]`** — call `mcp__agentic-loop__loop_doctor({fix})` to audit
   the backlog for structural damage (stray folders, task files outside every
   status folder, duplicate ids, held claim markers); with `fix` it applies
   the unambiguous repairs. Never repair the backlog by hand.
 - **anything else** (including a free-text goal) — do not run it. Show this
-  usage instead; a single bare token may be a task id (`task <id>` runs it).
+  usage instead.
 
 The flow: `new` (interview → draft) → human reviews the draft (reshape with
-`retask <id>` if it's off) → `approve <id>` queues it → `/agent-loop task
-<id>` (or `claim`) plans it and parks the plan in `plan-review/` → human
-reviews the plan → `approve` (or `reject <why>`) → the loop builds it →
-`in-review/` → `ship`.
+`retask <id>` if it's off) → `approve <id>` queues it → `plan <id>` (or
+`claim`) plans it and parks the plan in `plan-review/` → human reviews the
+plan → `approve` (or `replan <why>`) → `claim` builds it → `in-review/` →
+`approve` ships it.
 
 On a VERIFY or REVIEW FAIL the loop re-**builds** with the feedback threaded
 in, within the iteration cap; when the cap trips, the plan itself is suspect
-— a human sends it back with `/agent-loop reject <id> <why>` and the next
-PLAN pass addresses the failure.
+— a human sends it back with `/agentic-loop:engineering replan <id> <why>`
+and the next PLAN pass addresses the failure.
 
 When a loop you are driving hits a gate live (a plan just parked, or a build
 just finished), the `loop-orchestration` skill has you offer the gate choices

@@ -66,7 +66,7 @@
       "onDone": {
         "kind": "park",
         "toStatus": "plan-review",
-        "message": "Plan written — parked in plan-review/ for human review. Approve with /agent-loop approve."
+        "message": "Plan written — parked in plan-review/ for human review. Approve with /agentic-loop:engineering approve."
       }
     },
     "build": {
@@ -79,11 +79,11 @@
         "stage": "build",
         "countIteration": true,
         "dropArtifacts": ["review"],
-        "capMessage": "✗ Loop stopped — verify failed after {maxIterations} iterations. If the plan itself is wrong, send it back to the PLAN stage with /agent-loop reject <id>."
+        "capMessage": "✗ Loop stopped — verify failed after {maxIterations} iterations. If the plan itself is wrong, send it back to the PLAN stage with /agentic-loop:engineering replan <id>."
       },
       "onError": {
         "kind": "stop",
-        "message": "✗ Loop stopped — verify could not run (environment/infrastructure error). Fix the environment, then /agent-loop recover the task."
+        "message": "✗ Loop stopped — verify could not run (environment/infrastructure error). Fix the environment, then /agentic-loop:engineering recover the task."
       }
     },
     "review": {
@@ -97,11 +97,11 @@
         "stage": "build",
         "countIteration": true,
         "dropArtifacts": ["verify"],
-        "capMessage": "✗ Loop stopped — review failed after {maxIterations} iterations. If the plan itself is wrong, send it back to the PLAN stage with /agent-loop reject <id>."
+        "capMessage": "✗ Loop stopped — review failed after {maxIterations} iterations. If the plan itself is wrong, send it back to the PLAN stage with /agentic-loop:engineering replan <id>."
       },
       "onError": {
         "kind": "stop",
-        "message": "✗ Loop stopped — review could not run (environment/infrastructure error). Fix the environment, then /agent-loop recover the task."
+        "message": "✗ Loop stopped — review could not run (environment/infrastructure error). Fix the environment, then /agentic-loop:engineering recover the task."
       }
     }
   },
