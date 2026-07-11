@@ -190,12 +190,6 @@ export interface TokensSummaryResponse {
   readonly runs: readonly TokensSummaryEntry[]
 }
 
-export interface ManualFreshnessResponse {
-  /** False when docs/manual.html doesn't exist in the watched repo. */
-  readonly available: boolean
-  readonly warnings: readonly string[]
-}
-
 /** One monitored repo (from `--dir` / hub.config.json resolution). */
 export interface RepoInfo {
   readonly id: string

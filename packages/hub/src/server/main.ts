@@ -15,7 +15,6 @@ import { startWatcher } from "./watch.js"
 import { getActive } from "./routes/active.js"
 import { getBacklog, getTaskDetail } from "./routes/backlog.js"
 import { getKind, getKinds, saveKind, validateKind } from "./routes/kinds.js"
-import { getManualFreshness, MANUAL_PATH } from "./routes/manual.js"
 import { getRunDetail, getRuns } from "./routes/runs.js"
 import { getRunTokens, getTokensSummary } from "./routes/tokens.js"
 import { defaultOpencodeDbPath } from "./tokens/opencodedb.js"
@@ -134,7 +133,6 @@ const routes: Route[] = [
   { method: "GET", pattern: "/api/tokens/:id", handler: scoped(getRunTokens) },
   { method: "POST", pattern: "/api/kinds/validate", handler: (req) => validateKind(defaultRepo.deps, req) },
   { method: "POST", pattern: "/api/kinds/:kind", handler: (req) => saveKind(defaultRepo.deps, req), mutating: true },
-  { method: "GET", pattern: "/api/manual/freshness", handler: scoped((deps) => getManualFreshness(deps)) },
 ]
 
 const events = makeEventHub()
@@ -147,27 +145,6 @@ const watcherStops = repos.map((repo) =>
 
 const rawRoutes: RawRoute[] = [
   { method: "GET", pattern: "/api/events", handle: (req, res) => events.handle(req, res) },
-  {
-    method: "GET",
-    pattern: "/manual",
-    handle: (req, res) => {
-      const url = new URL(req.url ?? "/", "http://localhost")
-      const repo = byId.get(url.searchParams.get("repo") ?? defaultRepo.id)
-      if (!repo) {
-        res.writeHead(400, { "content-type": "text/plain; charset=utf-8" })
-        res.end(`unknown repo ${url.searchParams.get("repo")}`)
-        return
-      }
-      try {
-        const html = fs.readFileSync(path.join(repo.deps.directory, MANUAL_PATH))
-        res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" })
-        res.end(html)
-      } catch {
-        res.writeHead(404, { "content-type": "text/plain; charset=utf-8" })
-        res.end("this repo has no docs/manual.html")
-      }
-    },
-  },
 ]
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "web")

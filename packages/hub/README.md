@@ -4,8 +4,8 @@
 > expect rough edges in the creator canvas UX, and the HTTP/JSON surface may
 > still change without a migration path. See [Beta status](#beta-status).
 
-A local admin hub for the agentic-loop framework: **loop monitor**, **visual
-loop creator**, and the **user manual**, served as one small web app.
+A local admin hub for the agentic-loop framework: **loop monitor** and
+**visual loop creator**, served as one small web app.
 
 ```bash
 npm run hub -- --dir /path/to/repo    # from the repo root — builds core + hub, serves http://127.0.0.1:4317
@@ -61,9 +61,6 @@ creator tab is unaffected.
   `packages/core/loops/<kind>/loop.json` + prompt stubs **only** and returns
   the checklist of steps it deliberately doesn't generate (agent personas,
   `gen:prompts`, command wrappers, hook registration, enablement).
-- **User manual**: `docs/manual.html` in an iframe, with a drift banner
-  diffing its command mentions against the hosts' real `argument-hint`
-  surfaces.
 
 ## Token usage sources
 
@@ -89,8 +86,7 @@ slug-validated and prefix-checked.
 Solid (unit-tested + live-verified against this repo):
 
 - every `/api/*` endpoint, the SSE watcher (fs.watch + polling reconciler),
-  the run-log/metrics parsers, the graph↔manifest round-trip, save guards,
-  and the manual freshness diff
+  the run-log/metrics parsers, the graph↔manifest round-trip, and save guards
 
 Known beta caveats:
 
@@ -117,4 +113,4 @@ npm run test -w @agentic-loop/hub       # node --test via tsx
 The web bundle (`dist/web/`) is built locally, never checked in. Manual QA
 that automated tests don't cover: creator drag/connect UX, SSE reconnect
 after killing the server, and the Notification permission flow — open the hub
-in a real browser and click through all three tabs.
+in a real browser and click through both tabs.

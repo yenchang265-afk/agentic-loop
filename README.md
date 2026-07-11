@@ -161,9 +161,9 @@ to the bundled skills library via [AGENTS.md](AGENTS.md).
 - [packages/hub/README.md](packages/hub/README.md) — the **admin hub (beta)**
   (`npm run hub -- --dir /path/to/repo` → http://127.0.0.1:4317): loop
   monitor (backlog board, live gate notifications, run history, per-stage
-  token usage), visual loop creator, and the user manual with a freshness
-  check; monitors one or many repos (`--dir` is repeatable and takes `*`
-  wildcards, or use `hub.config.json` — no repos configured, no watching)
+  token usage) and visual loop creator; monitors one or many repos (`--dir`
+  is repeatable and takes `*` wildcards, or use `hub.config.json` — no repos
+  configured, no watching)
 
 Each topic is canonical in one file — config/wizard in
 [docs/configuration.md](docs/configuration.md), OpenCode/Claude install +
@@ -179,7 +179,7 @@ link to it; don't copy.
 - `packages/core/loops/` — the declarative loop kinds (`engineering/`, `pr-sitter/`): a
   `loop.json` manifest + `stages/*.md` prompt templates per kind
 - `packages/hub/` — the **admin hub (beta)**: a localhost web app with the loop
-  monitor, visual loop creator, and user manual
+  monitor and visual loop creator
   ([packages/hub/README.md](packages/hub/README.md))
 - `plugins/opencode/src/` — the OpenCode plugin: host
   wiring, the driver that runs the engine on `session.idle`, config extensions
