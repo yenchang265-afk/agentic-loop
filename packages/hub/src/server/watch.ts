@@ -24,8 +24,6 @@ export interface WatchSnapshot {
 export type { HubEventBase } from "../shared/api.js"
 import type { HubEventBase } from "../shared/api.js"
 
-const GATE_STATUSES = ["plan-review", "in-review"] as const
-
 const statKey = (file: string): string | null => {
   try {
     const s = fs.statSync(file)
@@ -75,8 +73,16 @@ export const scanSnapshot = (directory: string, tasksDir: string, statuses: read
   }
 }
 
-/** Derive events from two snapshots. Pure; equal snapshots → []. */
-export const diffSnapshots = (prev: WatchSnapshot, next: WatchSnapshot): HubEventBase[] => {
+/**
+ * Derive events from two snapshots; `gateStatuses` are the folders (from the
+ * enabled kinds' manifests) whose new arrivals are "the loop wants you"
+ * moments. Pure; equal snapshots → [].
+ */
+export const diffSnapshots = (
+  prev: WatchSnapshot,
+  next: WatchSnapshot,
+  gateStatuses: readonly string[],
+): HubEventBase[] => {
   const events: HubEventBase[] = []
 
   let backlogChanged = false
@@ -88,7 +94,7 @@ export const diffSnapshots = (prev: WatchSnapshot, next: WatchSnapshot): HubEven
     for (const name of names) {
       if (before[name] !== after[name]) backlogChanged = true
       // a task newly appearing in a gate folder is the "loop wants you" moment
-      if ((GATE_STATUSES as readonly string[]).includes(status) && before[name] === undefined && after[name] !== undefined) {
+      if (gateStatuses.includes(status) && before[name] === undefined && after[name] !== undefined) {
         events.push({ type: "gate", taskId: name.replace(/\.md$/, ""), toStatus: status })
       }
     }
@@ -111,6 +117,8 @@ export interface WatcherOptions {
   readonly directory: string
   readonly tasksDir: string
   readonly statuses: readonly string[]
+  /** Folders whose new arrivals emit `gate` events (from the kinds' manifests). */
+  readonly gateStatuses: readonly string[]
   /** Poll interval — the delivery guarantee on DrvFs. */
   readonly pollMs?: number
   /** fs.watch debounce. */
@@ -124,7 +132,7 @@ export const startWatcher = (opts: WatcherOptions, onEvents: (events: HubEventBa
 
   const rescan = (): void => {
     const next = scanSnapshot(opts.directory, opts.tasksDir, opts.statuses)
-    const events = diffSnapshots(snapshot, next)
+    const events = diffSnapshots(snapshot, next, opts.gateStatuses)
     snapshot = next
     if (events.length > 0) onEvents(events)
   }

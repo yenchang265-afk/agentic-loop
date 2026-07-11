@@ -53,12 +53,14 @@ creator tab is unaffected.
 
 ## Tabs
 
-- **Loop monitor** (read-only): backlog board over `docs/tasks/<status>/`
-  with gate highlights, live-activity strip (`.stage.json` marker, watch-lease
-  liveness, resumable snapshots, pr-sitter ledgers), run history parsed from
-  `runs/<id>.md`, and per-stage token usage. Live updates via
-  `fs.watch` + a polling reconciler (DrvFs-safe) → SSE; arm the 🔔 to get a
-  browser notification when a task parks at a gate.
+- **Loop monitor** (read-only): one sub-tab per enabled loop kind, each view
+  derived from the kind's manifest — backlog kinds get a board over their own
+  `docs/tasks/<status>/` folders with gate columns taken from the manifest's
+  park/done targets (not hardcoded), PR-shaped kinds get a ledger panel — plus
+  the live-activity strip (`.stage.json` marker, watch-lease liveness,
+  resumable snapshots), run history parsed from `runs/<id>.md`, and per-stage
+  token usage. Live updates via `fs.watch` + a polling reconciler (DrvFs-safe)
+  → SSE; arm the 🔔 to get a browser notification when a task parks at a gate.
 - **Loop creator**: the manifest state machine on a React Flow canvas —
   work/check stages as nodes, fire/park/done/stop transitions as edges,
   side-panel forms for stage fields, effects, work source, and stage prompts.

@@ -372,6 +372,41 @@ body {
   fill: var(--ok);
 }
 
+/* --- monitor kind sub-tabs --- */
+
+.kind-tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin: 0.4rem 0 0.8rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.kind-tab {
+  border: none;
+  background: none;
+  color: var(--muted);
+  padding: 0.4rem 0.8rem;
+  border-radius: 6px 6px 0 0;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.kind-tab:hover {
+  color: var(--text);
+}
+
+.kind-tab.active {
+  color: var(--accent);
+  font-weight: 600;
+  border-bottom: 2px solid var(--accent);
+}
+
+.pr-kind-desc {
+  color: var(--muted);
+  font-size: 0.88rem;
+  margin: 0.3rem 0 0.8rem;
+}
+
 /* --- creator --- */
 
 .creator {

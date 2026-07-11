@@ -10,6 +10,7 @@ import { makeEventHub } from "./events.js"
 import { fsClient, sh } from "./fsclient.js"
 import { badRequest, makeListener, ok, type JsonResponse, type ParsedRequest, type RawRoute, type Route } from "./http.js"
 import { loadHubSettings } from "./config.js"
+import { kindBoards, unionGates, unionStatuses } from "./kindboard.js"
 import { resolveRepos } from "./repos.js"
 import { startWatcher } from "./watch.js"
 import { getActive } from "./routes/active.js"
@@ -77,11 +78,13 @@ interface Repo {
 const repos: Repo[] = []
 for (const { id, directory } of resolved) {
   const config = await loadConfig(fsClient, directory)
+  const boards = kindBoards(defaultLoopsDir(), config, log)
   repos.push({
     id,
     deps: {
       directory,
       tasksDir: config.tasksDir,
+      boards,
       loopsDir: defaultLoopsDir(),
       projectsDir: defaultProjectsDir(),
       opencodeDbPath: defaultOpencodeDbPath(),
@@ -119,7 +122,8 @@ const reposResponse: ReposResponse = {
 // Kind routes stay unscoped: loop kinds live in the core package, shared by every repo.
 const routes: Route[] = [
   { method: "GET", pattern: "/api/repos", handler: async () => ok(reposResponse) },
-  { method: "GET", pattern: "/api/backlog", handler: scoped((deps) => getBacklog(deps)) },
+  { method: "GET", pattern: "/api/monitor/kinds", handler: scoped(async (deps) => ok({ kinds: deps.boards })) },
+  { method: "GET", pattern: "/api/backlog", handler: scoped(getBacklog) },
   { method: "GET", pattern: "/api/tasks/:status/:id", handler: scoped(getTaskDetail) },
   { method: "GET", pattern: "/api/kinds", handler: () => getKinds(defaultRepo.deps) },
   { method: "GET", pattern: "/api/kinds/:kind", handler: (req) => getKind(defaultRepo.deps, req) },
@@ -133,12 +137,20 @@ const routes: Route[] = [
 ]
 
 const events = makeEventHub()
-const watcherStops = repos.map((repo) =>
-  startWatcher(
-    { directory: repo.deps.directory, tasksDir: repo.deps.tasksDir, statuses: STATUSES },
+const watcherStops = repos.map((repo) => {
+  // Scan every folder any enabled kind declares; fall back to the engineering
+  // shape when no manifest loaded (e.g. a bare repo with no kinds on disk).
+  const statuses = unionStatuses(repo.deps.boards)
+  return startWatcher(
+    {
+      directory: repo.deps.directory,
+      tasksDir: repo.deps.tasksDir,
+      statuses: statuses.length > 0 ? statuses : STATUSES,
+      gateStatuses: unionGates(repo.deps.boards),
+    },
     (evts) => events.broadcast(evts.map((e) => ({ ...e, repo: repo.id }))),
-  ),
-)
+  )
+})
 
 const rawRoutes: RawRoute[] = [
   { method: "GET", pattern: "/api/events", handle: (req, res) => events.handle(req, res) },
