@@ -100,8 +100,9 @@ backlog as reviewable task files. Never edits code.
 > the sketch below: majors are *skipped and logged* rather than parked (the
 > `dependency-scan` source claims only patch/minor fixes whose target
 > version `npm audit` pins — no `validateBeforeTransition` hook needed);
-> `maxIterations` is 2; GitHub-only (the publish stage uses `gh pr create`;
-> an `ado` platform skips the kind with a warning). See threat model T12.
+> `maxIterations` is 2. Supports both GitHub (`gh pr create`) and Azure
+> DevOps (the publish stage opens the draft PR via the REST API) — the
+> dependency scan itself is platform-agnostic. See threat model T12.
 
 Sits on outdated and vulnerable dependencies: upgrades them on a branch,
 verifies, and opens a draft PR. Patch/minor CVE fixes flow straight to a
@@ -309,9 +310,10 @@ has drifted past.
 > head (older red heads are moot once a newer push exists; a green re-run
 > retires the item naturally) and never claims a head with runs still in
 > flight; the remedy branch is `main-sitter/<sha>` and the push allowlist is
-> scoped to it, so the watched branch is structurally unpushable;
-> GitHub-only (an `ado` platform skips the kind with a warning). See threat
-> model T13.
+> scoped to it, so the watched branch is structurally unpushable. Supports
+> both GitHub (`gh run list`) and Azure DevOps (the Pipelines Build REST
+> API, `ado-ci-runs.ts`, sharing its ledger/WorkItem mechanics with the
+> GitHub source). See threat model T13.
 
 Sits on the default branch's CI. When main goes red after a merge, it
 bisects to the breaking change, then proposes either a fix or a revert — as

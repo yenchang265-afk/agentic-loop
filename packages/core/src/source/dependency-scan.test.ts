@@ -213,3 +213,25 @@ test("an unparsable audit report is an actionable skip, not a crash", async () =
   assert.match(skip?.message ?? "", /^dep-sitter: could not parse npm audit output/)
   assert.equal(skip?.actionable, true)
 })
+
+test("the claimed item is stamped with the resolved platform; defaults to github", () => {
+  return (async () => {
+    const defaulted = await source({}).claimNext()
+    assert.equal(defaulted.item?.state.platform, "github")
+    const adoSrc = makeDependencyScanSource({
+      $: scriptedShell([
+        { cmd: "npm audit --json", result: { exitCode: 1, stdout: audit({ lodash: vuln({}) }) } },
+        { cmd: "npm ls --json", result: { stdout: installed({ lodash: "4.17.20" }) } },
+      ]),
+      client: ledgerClient({}),
+      directory: "/r",
+      tasksDir: "docs/tasks",
+      log: () => {},
+      loaded: sitter,
+      platform: "ado",
+      now: () => "2026-07-05T00:00:00Z",
+    })
+    const ado = await adoSrc.claimNext()
+    assert.equal(ado.item?.state.platform, "ado")
+  })()
+})

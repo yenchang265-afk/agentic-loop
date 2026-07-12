@@ -1,96 +1,91 @@
 import { z } from "zod"
 import type { Client, Log, Shell } from "../host.js"
 import type { LoadedManifest } from "../manifest/schema.js"
-import { loadHeadLedger, redHeadWorkItem, saveHeadLedger, shortSha } from "./ci-runs-shared.js"
+import type { AdoConfig } from "../loop/state.js"
+import { newestHeadVerdict, shortSha, type CiRun } from "./ci-runs.js"
+import { loadHeadLedger, redHeadWorkItem, saveHeadLedger } from "./ci-runs-shared.js"
+import {
+  ADO_HEADERS_ENV,
+  AdoBuildListSchema,
+  buildAdoHeaders,
+  normalizeAdoBuild,
+  resolveAdoHeaders,
+} from "./ado-shared.js"
+import type { AdoHttp } from "./ado-pr.js"
 import type { ClaimSkipReason, TerminalOutcome, WorkSource } from "./types.js"
 
-export { shortSha }
-
 /**
- * The CI-runs work source (main-sitter): a claimable unit of work is the
- * watched branch's CURRENT head when its completed CI runs conclude red
- * (`gh run list`). Only the newest head is ever considered — a red run on an
- * older commit is moot once a newer push exists, and a green re-run on the
- * same head retires it naturally because the latest run per workflow is what
- * gets judged. A head with runs still in flight is left alone: racing live CI
- * would diagnose a moving target.
+ * The Azure DevOps CI-runs work source: the `gh`-backed `ci-runs.ts` mirrored
+ * onto the Azure DevOps Build REST API. Selected at wiring time when config
+ * `codePlatform` resolves to `"ado"` for a `ci-runs`-bound loop kind
+ * (main-sitter).
  *
- * Dedup rides a per-head ledger under `<tasksDir>/runs/<kind>/head-<sha>.json`
- * — a diagnosed (or failed) head is never re-claimed; the next human push
- * makes a new head and a fresh judgement. The ledger, claim-marker shape, and
- * WorkItem builder are shared with the Azure DevOps sibling (`ado-ci-runs.ts`)
- * via `ci-runs-shared.ts`; `newestHeadVerdict` below judges both platforms
- * identically once their raw output is normalized into `CiRun`.
+ * Raw ADO builds are normalized (`normalizeAdoBuild`, `ado-shared.ts`) into the
+ * same `CiRun` shape the GitHub source produces, so `newestHeadVerdict` judges
+ * both platforms identically, and the ledger/claim/WorkItem mechanics are
+ * shared verbatim via `ci-runs-shared.ts`.
  *
- * At claim the source fetches the branch and pins a local `<kind>/<sha>`
- * branch to the red head, pre-setting `state.git` so the standard isolation
- * path checks the failing commit out in the loop's worktree. The remedy lands
- * on that branch as a draft fix/revert PR — the watched branch itself is NEVER
- * pushed.
+ * Auth is the same Personal Access Token (HTTP Basic) as `ado-pr.ts`, read
+ * from `AZURE_DEVOPS_EXT_PAT`, falling back to config `ado.pat`. Unlike the PR
+ * sources, no `ado.selfLogin` is needed — CI status isn't scoped to an
+ * identity, only to the watched branch.
  */
 
-const RunListSchema = z.array(
-  z.object({
-    headSha: z.string().default(""),
-    status: z.string().default(""),
-    conclusion: z.string().nullish(),
-    workflowName: z.string().default(""),
-    createdAt: z.string().default(""),
-  }),
-)
-export type CiRun = z.infer<typeof RunListSchema>[number]
+const defaultHttp: AdoHttp = (url, init) => fetch(url, init)
 
-const FAILING = new Set(["failure", "timed_out"])
+const PAT_ENV = "AZURE_DEVOPS_EXT_PAT"
+const API_VERSION = "api-version=7.1"
 
-/**
- * Judge the branch's newest head from its recent runs: the verdict is `red`
- * when the latest completed run of any watched workflow failed, `pending`
- * when anything on that head is still in flight, `green` otherwise. Pure.
- */
-export const newestHeadVerdict = (
-  runs: readonly CiRun[],
-  workflows: readonly string[],
-): { sha: string; verdict: "red" | "green" | "pending"; failing: string[] } | null => {
-  const watched = workflows.length ? runs.filter((r) => workflows.includes(r.workflowName)) : runs
-  const sorted = [...watched].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
-  const sha = sorted[0]?.headSha
-  if (!sha) return null
-  const onHead = sorted.filter((r) => r.headSha === sha)
-  if (onHead.some((r) => r.status !== "completed")) return { sha, verdict: "pending", failing: [] }
-  const latestPerWorkflow = new Map<string, CiRun>()
-  for (const r of onHead) {
-    if (!latestPerWorkflow.has(r.workflowName)) latestPerWorkflow.set(r.workflowName, r)
-  }
-  const failing = [...latestPerWorkflow.values()]
-    .filter((r) => FAILING.has((r.conclusion ?? "").toLowerCase()))
-    .map((r) => r.workflowName)
-    .filter(Boolean)
-  return { sha, verdict: failing.length ? "red" : "green", failing }
-}
-
-interface CiRunsDeps {
+interface AdoCiRunsDeps {
   readonly $: Shell
   readonly client: Client
   readonly directory: string
   readonly tasksDir: string
   readonly log: Log
   readonly loaded: LoadedManifest
+  /** Azure DevOps coordinates (config `ado`). */
+  readonly ado: AdoConfig
+  /** HTTP transport for ADO REST calls; defaults to the global `fetch`. */
+  readonly http?: AdoHttp
+  /** The Personal Access Token; defaults to `process.env.AZURE_DEVOPS_EXT_PAT`. */
+  readonly pat?: string
   /** Config override of the manifest's watched branch (`loops.<kind>.branch`). */
   readonly branch?: string
   /** Clock injection for ledger stamps; defaults to the real time. */
   readonly now?: () => string
 }
 
-export const makeCiRunsSource = (deps: CiRunsDeps): WorkSource => {
-  const { $, client, directory, tasksDir, log, loaded } = deps
+export const makeAdoCiRunsSource = (deps: AdoCiRunsDeps): WorkSource => {
+  const { $, client, directory, tasksDir, log, loaded, ado } = deps
   const binding = loaded.manifest.workSource
   if (binding.type !== "ci-runs") {
     throw new Error(`loop kind "${loaded.manifest.kind}" does not use a ci-runs work source`)
   }
   const kind = loaded.manifest.kind
   const now = deps.now ?? (() => new Date().toISOString())
+  const http = deps.http ?? defaultHttp
+  // Precedence: explicit dep (tests) → env var → config `ado.pat`.
+  const pat = deps.pat ?? process.env[PAT_ENV] ?? ado.pat ?? ""
+  const org = ado.organization.replace(/\/+$/, "")
+  const project = encodeURIComponent(ado.project)
+  const customHeaders = resolveAdoHeaders(ado.customHeaders, process.env[ADO_HEADERS_ENV])
   const claimsDir = `${directory}/${tasksDir}/runs/${kind}/.claims`
   let resolvedBranch: string | null = null
+
+  const authHeader = `Basic ${Buffer.from(`:${pat}`).toString("base64")}`
+
+  /** One authenticated GET. Never throws — a network error reads as a non-ok response, like the CLI's `nothrow()`. */
+  const get = async (url: string): Promise<{ ok: boolean; status: number; statusText: string; body: string }> => {
+    try {
+      const res = await http(url, {
+        headers: buildAdoHeaders({ Authorization: authHeader, Accept: "application/json" }, customHeaders),
+      })
+      const body = await res.text().catch(() => "")
+      return { ok: res.ok, status: res.status, statusText: res.statusText, body }
+    } catch (err) {
+      return { ok: false, status: 0, statusText: (err as Error).message, body: "" }
+    }
+  }
 
   const branch = async (): Promise<string> => {
     if (resolvedBranch) return resolvedBranch
@@ -110,27 +105,43 @@ export const makeCiRunsSource = (deps: CiRunsDeps): WorkSource => {
     loopKind: kind,
 
     async claimNext() {
-      const b = await branch()
-      const fields = "headSha,status,conclusion,workflowName,createdAt"
-      const out = await $`gh run list --branch ${b} --limit 30 --json ${fields}`.cwd(directory).quiet().nothrow()
-      if (out.exitCode !== 0) {
+      if (!pat) {
         return {
           item: null,
           skip: {
-            message: `${kind}: gh run list failed — ${out.stderr.toString().trim() || "is gh authenticated?"}`,
+            message:
+              `${kind}: Azure DevOps PAT not set — export ${PAT_ENV} with a token that has Build (read) scope so the ` +
+              `sitter can call the ADO REST API.`,
             actionable: true,
           } satisfies ClaimSkipReason,
         }
       }
-      let runs: z.infer<typeof RunListSchema>
+      const b = await branch()
+      const branchName = encodeURIComponent(`refs/heads/${b}`)
+      const listUrl = `${org}/${project}/_apis/build/builds?branchName=${branchName}&$top=30&queryOrder=queueTimeDescending&${API_VERSION}`
+      const out = await get(listUrl)
+      if (!out.ok) {
+        return {
+          item: null,
+          skip: {
+            message:
+              `${kind}: Azure DevOps build list failed — HTTP ${out.status} ${out.statusText}. ` +
+              `Is ${PAT_ENV} a valid token with Build (read) scope, and are ado.organization/project correct?`,
+            actionable: true,
+          } satisfies ClaimSkipReason,
+        }
+      }
+      let builds: z.infer<typeof AdoBuildListSchema>
       try {
-        runs = RunListSchema.parse(JSON.parse(out.stdout.toString() || "[]"))
+        const json = JSON.parse(out.body || "{}") as { value?: unknown }
+        builds = AdoBuildListSchema.parse(json.value ?? [])
       } catch (err) {
         return {
           item: null,
-          skip: { message: `${kind}: could not parse gh output — ${(err as Error).message}`, actionable: true },
+          skip: { message: `${kind}: could not parse the ADO response — ${(err as Error).message}`, actionable: true },
         }
       }
+      const runs: CiRun[] = builds.map(normalizeAdoBuild)
       const judged = newestHeadVerdict(runs, binding.workflows)
       if (!judged) {
         return { item: null, skip: { message: `${kind}: no CI runs on ${b} yet`, actionable: false } }
@@ -176,7 +187,7 @@ export const makeCiRunsSource = (deps: CiRunsDeps): WorkSource => {
         await $`rmdir ${`${claimsDir}/head-${shortSha(judged.sha)}`}`.quiet().nothrow()
         return { item: null, skip: { message: `${kind}: could not pin the red head locally`, actionable: true } }
       }
-      return { item: redHeadWorkItem(loaded, "github", b, judged.sha, judged.failing), skip: null }
+      return { item: redHeadWorkItem(loaded, "ado", b, judged.sha, judged.failing), skip: null }
     },
 
     async release(work) {

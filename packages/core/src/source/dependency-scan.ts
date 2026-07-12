@@ -2,7 +2,7 @@ import path from "node:path"
 import { z } from "zod"
 import type { Client, Log, Shell } from "../host.js"
 import type { LoadedManifest } from "../manifest/schema.js"
-import type { LoopState } from "../loop/state.js"
+import type { CodePlatform, LoopState } from "../loop/state.js"
 import { slugify } from "../task/schema.js"
 import type { ClaimSkipReason, TerminalOutcome, WorkItem, WorkSource } from "./types.js"
 
@@ -22,8 +22,10 @@ import type { ClaimSkipReason, TerminalOutcome, WorkItem, WorkSource } from "./t
  *
  * The item enters the loop with no preset `git`: `ensureIsolation` cuts the
  * standard `feature/<slug>` branch from the human's current branch, and the
- * publish stage pushes that branch and opens a draft PR. GitHub-only in v1 —
- * the wiring skips this source when the kind's platform resolves to `ado`.
+ * publish stage pushes that branch and opens a draft PR. The source itself is
+ * platform-agnostic (npm reports don't care which forge the repo lives on) —
+ * only the publish stage's PR-creation call differs, so the entry state is
+ * stamped with whichever platform the kind resolves to (`deps.platform`).
  */
 
 const AuditFixSchema = z.union([
@@ -149,6 +151,8 @@ interface DependencyScanDeps {
   /** Config overrides of the manifest policy (`loops.<kind>.severityFloor` …). */
   readonly severityFloor?: string
   readonly includeOutdated?: boolean
+  /** The resolved code platform (`platformFor(config, kind)`) stamped onto entry state; defaults to `github`. */
+  readonly platform?: CodePlatform
   /** Clock injection for ledger stamps; defaults to the real time. */
   readonly now?: () => string
 }
@@ -168,6 +172,7 @@ export const makeDependencyScanSource = (deps: DependencyScanDeps): WorkSource =
     includeOutdated: deps.includeOutdated ?? binding.includeOutdated,
   }
   const now = deps.now ?? (() => new Date().toISOString())
+  const platform: CodePlatform = deps.platform ?? "github"
   const claimsDir = `${directory}/${tasksDir}/runs/${kind}/.claims`
 
   const loadDepLedger = async (pkg: string): Promise<DepLedger> => {
@@ -204,7 +209,7 @@ export const makeDependencyScanSource = (deps: DependencyScanDeps): WorkSource =
       stage: loaded.manifest.stages[0]?.name ?? "scan",
       iteration: 0,
       artifacts: {},
-      platform: "github",
+      platform,
     }
     return {
       id: `dep-${slugify(c.pkg)}`,

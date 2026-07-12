@@ -102,7 +102,7 @@ test("buildWorkSources wires review-sitter as a second github-pr source alongsid
   assert.equal(buildWorkSources(deps, config, manifestFor, "review-sitter")[0]?.loopKind, "review-sitter")
 })
 
-test("buildWorkSources wires dep-sitter and main-sitter on github, and skips them with a warning on ado", () => {
+test("buildWorkSources wires dep-sitter and main-sitter on both github and ado — no more skip-with-warning", () => {
   const config = parseConfigWith(ConfigSchema, {
     loops: { "dep-sitter": { enabled: true }, "main-sitter": { enabled: true } },
   })
@@ -116,7 +116,7 @@ test("buildWorkSources wires dep-sitter and main-sitter on github, and skips the
   const ado = parseConfigWith(ConfigSchema, {
     codePlatform: "ado",
     ado: { organization: "https://dev.azure.com/acme", project: "widgets", selfLogin: "sitter@acme.com" },
-    loops: { "dep-sitter": { enabled: true } },
+    loops: { "dep-sitter": { enabled: true }, "main-sitter": { enabled: true } },
   })
   const sources = buildWorkSources(
     { ...deps, log: (_l: string, m: string) => void warnings.push(m) },
@@ -125,7 +125,7 @@ test("buildWorkSources wires dep-sitter and main-sitter on github, and skips the
   )
   assert.deepEqual(
     sources.map((s) => s.loopKind),
-    ["engineering"],
+    ["engineering", "dep-sitter", "main-sitter"],
   )
-  assert.ok(warnings.some((w) => w.includes("dep-sitter") && w.includes('codePlatform "github"')))
+  assert.deepEqual(warnings, [])
 })

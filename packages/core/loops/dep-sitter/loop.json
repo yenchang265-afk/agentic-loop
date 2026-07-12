@@ -69,6 +69,10 @@
       "platformAllowlist": {
         "github": [
           "gh pr create *", "gh pr view*", "gh pr list*", "gh pr comment *"
+        ],
+        "ado": [
+          "curl -sS -u :* https://dev.azure.com/*",
+          "curl -sS -u :* https://*.visualstudio.com/*"
         ]
       }
     }

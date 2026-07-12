@@ -143,16 +143,22 @@ code platform — pr-sitter stages branch on these to pick `gh` vs ADO REST
   outdated ones (`includeOutdated`). One item per dependency, deduped by a
   per-dependency ledger under `<tasksDir>/runs/<kind>/dep-<pkg>.json`; a
   bump outside the `autoFix` classes (majors always) is logged and never
-  claimed. GitHub-only for now — on an `ado` platform the wiring skips the
-  kind with a warning.
+  claimed. Platform-agnostic — npm reports don't care which forge the repo
+  lives on; the entry state is stamped with the resolved platform
+  (`platformFor(config, kind)`) and only the publish stage's PR-creation call
+  differs.
 - **`ci-runs`** — the watched branch's newest head when its completed CI runs
-  conclude red (`gh run list`; `branch` defaults to the remote default
+  conclude red (`gh run list` on GitHub, the Azure Pipelines Build REST API
+  — `_apis/build/builds` — on `ado`; `branch` defaults to the remote default
   branch, `workflows` narrows the judgement). Heads with runs still in
   flight are left alone; a green re-run or a newer push retires the item
   naturally. Deduped per head under `<tasksDir>/runs/<kind>/head-<sha>.json`;
   at claim the red head is pinned to a local `<kind>/<sha>` branch for
-  isolation. GitHub-only for now — on an `ado` platform the wiring skips the
-  kind with a warning.
+  isolation. The GitHub source (`ci-runs.ts`) and its ADO sibling
+  (`ado-ci-runs.ts`) share the ledger, claim-marker, and WorkItem mechanics
+  via `ci-runs-shared.ts` — normalizing raw ADO builds into the same `CiRun`
+  shape (`ado-shared.ts`'s `normalizeAdoBuild`) is what lets the pure
+  `newestHeadVerdict` judge both platforms identically.
 
 ## The TS escape hatch
 

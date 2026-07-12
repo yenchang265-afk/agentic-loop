@@ -2,6 +2,7 @@ import type { Client, Log, Shell } from "../host.js"
 import { enabledLoopKinds, platformFor } from "../config.js"
 import { loadManifest } from "../manifest/load.js"
 import type { LoadedManifest } from "../manifest/schema.js"
+import { makeAdoCiRunsSource } from "../source/ado-ci-runs.js"
 import { makeAdoPrSource } from "../source/ado-pr.js"
 import { makeBacklogSource } from "../source/backlog.js"
 import { makeCiRunsSource } from "../source/ci-runs.js"
@@ -111,27 +112,28 @@ export const buildWorkSources = (
         const query = config.loops[kind]?.["query"]
         return [makeGithubPrSource({ ...base, ...(typeof query === "string" ? { query } : {}) })]
       }
-      if (loaded.manifest.workSource.type === "dependency-scan" || loaded.manifest.workSource.type === "ci-runs") {
-        // These sources publish via `gh` (draft PRs); no ADO flavor yet.
-        if (platformFor(config, kind) === "ado") {
-          void deps.log(
-            "warn",
-            `loop kind "${kind}" uses a ${loaded.manifest.workSource.type} work source, which supports only ` +
-              `codePlatform "github" for now — skipping it.`,
-          )
-          return []
-        }
+      if (loaded.manifest.workSource.type === "dependency-scan") {
+        // Platform-agnostic (npm reports don't care which forge the repo lives
+        // on) — only the publish stage's PR-creation call differs, driven by
+        // the platform stamp on entry state.
         const knobs: Record<string, unknown> = config.loops[kind] ?? {}
-        if (loaded.manifest.workSource.type === "dependency-scan") {
-          return [
-            makeDependencyScanSource({
-              ...base,
-              ...(typeof knobs["severityFloor"] === "string" ? { severityFloor: knobs["severityFloor"] } : {}),
-              ...(typeof knobs["includeOutdated"] === "boolean" ? { includeOutdated: knobs["includeOutdated"] } : {}),
-            }),
-          ]
+        return [
+          makeDependencyScanSource({
+            ...base,
+            platform: platformFor(config, kind),
+            ...(typeof knobs["severityFloor"] === "string" ? { severityFloor: knobs["severityFloor"] } : {}),
+            ...(typeof knobs["includeOutdated"] === "boolean" ? { includeOutdated: knobs["includeOutdated"] } : {}),
+          }),
+        ]
+      }
+      if (loaded.manifest.workSource.type === "ci-runs") {
+        const knobs: Record<string, unknown> = config.loops[kind] ?? {}
+        const branchOverride = typeof knobs["branch"] === "string" ? { branch: knobs["branch"] } : {}
+        if (platformFor(config, kind) === "ado") {
+          // Config parse fails fast when platform "ado" lacks the ado section.
+          return [makeAdoCiRunsSource({ ...base, ado: config.ado!, ...branchOverride })]
         }
-        return [makeCiRunsSource({ ...base, ...(typeof knobs["branch"] === "string" ? { branch: knobs["branch"] } : {}) })]
+        return [makeCiRunsSource({ ...base, ...branchOverride })]
       }
       return [makeBacklogSource({ ...base, isDriving: deps.isDriving })]
     })

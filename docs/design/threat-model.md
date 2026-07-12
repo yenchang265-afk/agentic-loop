@@ -206,9 +206,15 @@ push to any branch, comment anywhere, sometimes merge.
   `AZURE_DEVOPS_EXT_PAT` (Code read + Pull Request contribute) is the
   hard-containment equivalent. The ADO allowlist is host-pinned `curl`
   (`curl -sS -u :"$AZURE_DEVOPS_EXT_PAT" <url>`) plus a PreToolUse backstop hook
-  (`check-stage-guard.mjs`) that permits **only** GET reads and POSTs to a
-  `/threads` resource — blocking complete/abandon, approve/reject reviewer
-  votes, reviewer edits, create-PR, and run-pipeline. One allowlist-breadth
+  (`check-stage-guard.mjs`) that permits **only** GET reads, POSTs to a
+  `/threads` resource, and POSTs creating a brand-new pull request (the bare
+  `.../pullrequests` collection, no id segment after it — dep-sitter's and
+  main-sitter's publish stage; see T12/T13) — blocking complete/abandon,
+  approve/reject reviewer votes, reviewer edits, and run-pipeline regardless
+  of loop kind or stage. The distinction between "create" and "mutate an
+  existing PR" is a regex lookahead (`isAdoWriteBackstopViolation`,
+  `plugins/claude/hooks/src/allowlist.mjs`) checking whether anything
+  (a `/`, an id) follows `pullrequests` in the URL. One allowlist-breadth
   note: the manifest's stage allowlists are platform-scoped
   (`platformAllowlist.github`/`.ado` merged at stage-marker time, so only the
   resolved platform's CLI is admitted), but the OpenCode agent frontmatter is
@@ -294,6 +300,12 @@ scripts.
   exposure `npm audit fix` has everywhere. Hard containment is the host's
   usual npm posture (`ignore-scripts`, a proxying registry) and the human
   merge gate.
+- **ADO parity:** the `dependency-scan` source is platform-agnostic (npm
+  doesn't care which forge the repo lives on); only the publish stage's
+  PR-creation call differs. On `ado` it opens the draft PR via `POST
+  _apis/git/repositories/<repo>/pullrequests` — the one write shape T8's
+  backstop-hook update explicitly carves out — everything else about the
+  control above (branch-scoped push, VERIFY gate, no merge) is identical.
 
 ### T13. main-sitter — CI logs and executing historical commits
 
@@ -313,6 +325,15 @@ watched branch inside the loop's worktree.
 - **Residual:** a wrong diagnosis can propose a wrong revert; the draft PR +
   human merge is the gate, and the verify stage requires the failing job's
   command to pass locally before anything is published.
+- **ADO parity:** `ado-ci-runs.ts` polls the Azure Pipelines Build REST API
+  (`_apis/build/builds`) instead of `gh run list`, normalizing results into
+  the same shape the pure, already-tested `newestHeadVerdict` judges — the
+  "only the newest head, never mid-run, never re-claim a handled head" logic
+  is identical on both platforms, sharing its ledger/claim/WorkItem mechanics
+  with the GitHub source via `ci-runs-shared.ts`. The diagnose stage's log
+  and culprit-PR lookups go through the same read-only REST calls pr-sitter's
+  triage stage already uses; publish's draft-PR creation is the same T8
+  backstop-hook carve-out dep-sitter uses.
 
 ## Non-goals
 

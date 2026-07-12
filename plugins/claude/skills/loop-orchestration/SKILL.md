@@ -187,14 +187,14 @@ Three further opt-in kinds drive the same way (`loop_claim({kind})` →
 - **dep-sitter** — `npm audit`/`npm outdated` upgrades: **scan** (check;
   `loop-dep-scan`) → **upgrade** (work; `loop-dep-upgrade`) → **verify**
   (check; reuses `loop-verify`, cap 2) → **publish** (work;
-  `loop-dep-publish`, DRAFT PR on a `feature/*` branch; majors are never
-  claimed). GitHub-only for now.
-- **main-sitter** — red CI on the watched branch's newest head: **diagnose**
-  (check; `loop-main-diagnose`, bisects) → **remedy** (work;
+  `loop-dep-publish`, DRAFT PR on a `feature/*` branch — `gh pr create` or
+  the ADO REST API depending on `codePlatform`; majors are never claimed).
+- **main-sitter** — red CI on the watched branch's newest head (`gh run
+  list` or the Azure Pipelines Build API): **diagnose** (check;
+  `loop-main-diagnose`, bisects) → **remedy** (work;
   `loop-main-remedy`) → **verify** (check; reuses `loop-verify`, cap 2) →
   **publish** (work; `loop-main-publish`, DRAFT fix/revert PR on a
-  `main-sitter/*` branch — the watched branch is never pushed). GitHub-only
-  for now.
+  `main-sitter/*` branch — the watched branch is never pushed).
 
 ## What is different from the OpenCode version
 

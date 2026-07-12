@@ -267,12 +267,15 @@ T11–T13 for their authority):
 - **dep-sitter** — `scan (check) → upgrade (work) → verify (check) →
   publish (work)` over `npm audit`/`npm outdated`. Auto-fixes patch/minor
   advisories into verified DRAFT PRs on `feature/*` branches; majors are
-  skipped and logged for a human. GitHub-only for now.
+  skipped and logged for a human. Platform-agnostic scan (npm doesn't care
+  which forge the repo lives on); publish opens the PR via `gh` or the ADO
+  REST API depending on `codePlatform`.
 - **main-sitter** — `diagnose (check) → remedy (work) → verify (check) →
-  publish (work)` over the watched branch's CI. When the newest head goes
-  red it reproduces, bisects to the culprit, and publishes a verified DRAFT
+  publish (work)` over the watched branch's CI (`gh run list` on GitHub, the
+  Azure Pipelines Build API on `ado`). When the newest head goes red it
+  reproduces, bisects to the culprit, and publishes a verified DRAFT
   fix/revert PR on a `main-sitter/*` branch, commenting once on the culprit
-  PR. The watched branch is never pushed. GitHub-only for now.
+  PR. The watched branch is never pushed.
 
 ## The verdict contracts
 
