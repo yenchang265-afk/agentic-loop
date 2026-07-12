@@ -54,25 +54,18 @@ const readLease = async (deps: HubDeps, now: Date): Promise<LeaseView | null> =>
 }
 
 const readPrLedgers = async (deps: HubDeps): Promise<PrLedgerView[]> => {
-  // Ledgers are namespaced per loop kind (`runs/<kind>/pr-<n>.json`) — walk
-  // every kind directory under runs/ rather than assuming pr-sitter. Non-PR
-  // artifacts in those directories fail the schema and are skipped.
-  const root = await deps.client.file
-    .list({ query: { path: `${deps.tasksDir}/runs`, directory: deps.directory } })
-    .catch(() => null)
-  const kindDirs = (root?.data ?? []).filter((n) => n.type === "directory" && !n.name.startsWith("."))
+  // Each PR-shaped kind keeps its ledgers under `runs/<kind>/` (core's ledgerDir);
+  // scan every enabled github-pr kind, not just the literal pr-sitter, so a second
+  // PR kind's ledgers surface too — each view stamped with its kind.
+  const prKinds = deps.boards.filter((b) => b.sourceType === "github-pr").map((b) => b.kind)
   const ledgers: PrLedgerView[] = []
-  for (const dir of kindDirs) {
+  for (const kind of prKinds) {
     const listed = await deps.client.file
-      .list({ query: { path: `${deps.tasksDir}/runs/${dir.name}`, directory: deps.directory } })
+      .list({ query: { path: `${deps.tasksDir}/runs/${kind}`, directory: deps.directory } })
       .catch(() => null)
-    const files = (listed?.data ?? []).filter(
-      (n) => n.type === "file" && n.name.startsWith("pr-") && n.name.endsWith(".json"),
-    )
+    const files = (listed?.data ?? []).filter((n) => n.type === "file" && n.name.endsWith(".json"))
     for (const file of files) {
-      const read = await deps.client.file
-        .read({ query: { path: file.path, directory: deps.directory } })
-        .catch(() => null)
+      const read = await deps.client.file.read({ query: { path: file.path, directory: deps.directory } }).catch(() => null)
       const content = read?.data?.content
       if (!content) continue
       try {
@@ -81,7 +74,7 @@ const readPrLedgers = async (deps: HubDeps): Promise<PrLedgerView[]> => {
         const l = parsed.data
         ledgers.push({
           pr: l.pr,
-          kind: dir.name,
+          kind,
           ...(l.updatedAt ? { updatedAt: l.updatedAt } : {}),
           ...(l.headShaHandled ? { headShaHandled: l.headShaHandled } : {}),
           failedAttempts: l.failedAttempts.length,

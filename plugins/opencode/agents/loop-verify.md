@@ -21,6 +21,23 @@ permission:
     "grep *": allow
     "find *": allow
     "wc *": allow
+    "npm test*": allow
+    "npm run *": allow
+    "pnpm test*": allow
+    "pnpm run *": allow
+    "yarn test*": allow
+    "yarn run *": allow
+    "bun test*": allow
+    "node --test*": allow
+    "npx tsc*": allow
+    "npx vitest*": allow
+    "npx jest*": allow
+    "npx eslint*": allow
+    "pytest*": allow
+    "go test*": allow
+    "cargo test*": allow
+    "make test*": allow
+    "make check*": allow
     "npm ci*": allow
     "npm install*": allow
     "npm audit*": allow
@@ -41,23 +58,23 @@ permission:
     "./gradlew check*": allow
     "./gradlew build*": allow
     "./gradlew dependencyInsight*": allow
-    "npm test*": allow
-    "npm run *": allow
-    "pnpm test*": allow
-    "pnpm run *": allow
-    "yarn test*": allow
-    "yarn run *": allow
-    "bun test*": allow
-    "node --test*": allow
-    "npx tsc*": allow
-    "npx vitest*": allow
-    "npx jest*": allow
-    "npx eslint*": allow
-    "pytest*": allow
-    "go test*": allow
-    "cargo test*": allow
-    "make test*": allow
-    "make check*": allow
+    "cd * && npm test*": allow
+    "cd * && npm run *": allow
+    "cd * && pnpm test*": allow
+    "cd * && pnpm run *": allow
+    "cd * && yarn test*": allow
+    "cd * && yarn run *": allow
+    "cd * && bun test*": allow
+    "cd * && node --test*": allow
+    "cd * && npx tsc*": allow
+    "cd * && npx vitest*": allow
+    "cd * && npx jest*": allow
+    "cd * && npx eslint*": allow
+    "cd * && pytest*": allow
+    "cd * && go test*": allow
+    "cd * && cargo test*": allow
+    "cd * && make test*": allow
+    "cd * && make check*": allow
     "cd * && npm ci*": allow
     "cd * && npm install*": allow
     "cd * && npm audit*": allow
@@ -77,23 +94,6 @@ permission:
     "cd * && ./gradlew check*": allow
     "cd * && ./gradlew build*": allow
     "cd * && ./gradlew dependencyInsight*": allow
-    "cd * && npm test*": allow
-    "cd * && npm run *": allow
-    "cd * && pnpm test*": allow
-    "cd * && pnpm run *": allow
-    "cd * && yarn test*": allow
-    "cd * && yarn run *": allow
-    "cd * && bun test*": allow
-    "cd * && node --test*": allow
-    "cd * && npx tsc*": allow
-    "cd * && npx vitest*": allow
-    "cd * && npx jest*": allow
-    "cd * && npx eslint*": allow
-    "cd * && pytest*": allow
-    "cd * && go test*": allow
-    "cd * && cargo test*": allow
-    "cd * && make test*": allow
-    "cd * && make check*": allow
 ---
 
 You are the **verify** subagent — the worker for the VERIFY stage of the agentic

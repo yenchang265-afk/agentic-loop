@@ -30,7 +30,7 @@ export const triggerSummary = (triggers: readonly PrTrigger[], snapshot: PrSnaps
     })
     .join("; ")
 
-/** Local mkdir claim markers under `<tasksDir>/runs/<kind>/.claims/pr-<n>` — atomic across watchers on this filesystem, namespaced per loop kind. */
+/** Local mkdir claim markers under `<tasksDir>/runs/<kind>/.claims/pr-<n>` — atomic across watchers on this filesystem. Keyed by kind so a second PR-shaped kind can't clash. */
 export const makeClaimMarkers = ($: Shell, directory: string, tasksDir: string, kind: string) => {
   const claimsDir = `${directory}/${tasksDir}/runs/${kind}/.claims`
   return {
