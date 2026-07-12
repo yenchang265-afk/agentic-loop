@@ -74,7 +74,9 @@ const expandAllowlist = (frontmatter, agent) => {
   if (!globs) throw new Error(`agent "${agent}" uses {{allowlist}} but declares no bashAllowlist in any loop.json`)
   const indent = m[1]
   const lines = globs.map((g) => `${indent}${JSON.stringify(g)}: allow`).join("\n")
-  return frontmatter.replace(marker, lines)
+  // Function replacement, not a string: a glob containing `$` (e.g. `$HOME`) must
+  // be spliced literally, not interpreted as a `String.replace` `$`-pattern.
+  return frontmatter.replace(marker, () => lines)
 }
 
 const OPEN = /^\{\{#host ([a-z]+)\}\}\s*$/
