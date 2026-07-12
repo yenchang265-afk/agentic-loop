@@ -177,6 +177,10 @@ const writeStageMarker = (stage: string | null) => {
         JSON.stringify({
           kind: m.manifest.kind,
           stage,
+          // The subagent this stage binds, straight from the manifest — the driver
+          // (loop-orchestration SKILL) spawns whatever is named here, so a new kind
+          // needs no prose edit.
+          agent: def.agent,
           // The backlog guard's PLAN carve-out: only this task's queued/ file
           // may be written directly while PLAN is live.
           taskId: active?.task?.id ?? null,
@@ -307,15 +311,21 @@ const claimWarnings = async (): Promise<string[]> => {
 }
 
 /** The fire payload loop_start/loop_claim return for a fresh claim. */
-const firePayload = (state: LoopState, id: string) => ({
-  action: { kind: "fire", stage: state.stage },
-  taskId: id,
-  isolation: state.git ?? null,
-  prompt: composePrompt(manifestFor(state.kind ?? "engineering"), state, state.stage),
-  ...(state.stage === "plan"
-    ? { note: "PLAN stage: spawn loop-plan-author in task mode; on loop_advance the task parks in plan-review/ for the human gate" }
-    : {}),
-})
+const firePayload = (state: LoopState, id: string) => {
+  const manifest = manifestFor(state.kind ?? "engineering")
+  return {
+    action: { kind: "fire", stage: state.stage },
+    taskId: id,
+    // The subagent to spawn for this stage — straight from the manifest, so the
+    // driver never hardcodes per-kind agent names.
+    agent: stageDef(manifest.manifest, state.stage).agent,
+    isolation: state.git ?? null,
+    prompt: composePrompt(manifest, state, state.stage),
+    ...(state.stage === "plan"
+      ? { note: "PLAN stage: spawn the subagent named in the `agent` field in task mode; on loop_advance the task parks in plan-review/ for the human gate" }
+      : {}),
+  }
+}
 
 // --- server + tools ---
 
@@ -498,7 +508,12 @@ server.registerTool(
       const actor = await gitActor(sh, directory)
       await appendNote(sh, active.task, auditNote(`BUILD started (iteration ${active.iteration + 1})`, new Date(), actor), log)
     }
-    return ok({ stage, worktree: active.git?.worktree ?? null, deadlineMinutes: config.stageTimeoutMinutes })
+    return ok({
+      stage,
+      agent: stageDef(activeManifest().manifest, stage).agent,
+      worktree: active.git?.worktree ?? null,
+      deadlineMinutes: config.stageTimeoutMinutes,
+    })
   },
 )
 
@@ -551,8 +566,9 @@ server.registerTool(
       await snapshot()
       return ok({
         action: { kind: "fire", stage: action.stage },
+        agent: stageDef(activeManifest().manifest, action.stage).agent,
         prompt: composePrompt(activeManifest(), active, action.stage),
-        note: "call loop_stage before spawning the subagent",
+        note: "call loop_stage, then spawn the subagent named in the `agent` field",
       })
     }
     if (action.kind === "park") {

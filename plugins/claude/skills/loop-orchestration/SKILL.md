@@ -44,11 +44,19 @@ the loop (/agentic-loop:engineering plan <id> or /agentic-loop:engineering claim
                           (iteration++, capped by maxIterations)
 ```
 
-Each `loop_advance` returns the next **action**: `{kind:"fire", stage, prompt}`
-(run that stage) or `{kind:"park"|"done"|"stop", message}` (terminal — the MCP
-server has already moved the task and written the run summary; just report
-it). `park` is PLAN's only exit: the task moves to `plan-review/` for the
+Each `loop_advance` returns the next **action**: `{kind:"fire", stage, prompt,
+agent}` (run that stage) or `{kind:"park"|"done"|"stop", message}` (terminal —
+the MCP server has already moved the task and written the run summary; just
+report it). `park` is PLAN's only exit: the task moves to `plan-review/` for the
 human gate and the loop ends there — an unapproved plan cannot reach BUILD.
+
+**Which subagent to spawn is data, not memorized.** Every `loop_start`,
+`loop_claim`, `loop_stage`, and `loop_advance` (fire) response carries an
+`agent` field — the subagent this stage binds, straight from the kind's
+manifest. Always spawn the agent named there; never hardcode a per-kind name.
+The stage names below (`loop-plan-author`, `loop-build`, …) are the engineering
+kind's current values, shown for concreteness — a new loop kind needs no edit
+to this protocol.
 
 ## Step by step
 
@@ -63,8 +71,9 @@ human gate and the loop ends there — an unapproved plan cannot reach BUILD.
    at BUILD; a queued task is claimed and entered at PLAN with **no git
    isolation** (it writes only the task file, in the main tree). The composed
    stage `prompt` comes back either way.
-2. **Plan (queued tasks only).** `loop_stage({stage:"plan"})`, then spawn
-   **`loop-plan-author`** (Task tool) with the prompt — it runs in `task`
+2. **Plan (queued tasks only).** `loop_stage({stage:"plan"})`, then spawn the
+   stage's subagent — the response's `agent` field (**`loop-plan-author`** for
+   engineering) — via the Task tool with the prompt. It runs in `task`
    mode, reads the code, and writes the `## Implementation Plan` onto the
    task file named by the prompt's `Task file:` line. When it returns, call
    `loop_advance({stageOutput: <plan summary>})` — the server validates the
@@ -82,19 +91,21 @@ human gate and the loop ends there — an unapproved plan cannot reach BUILD.
    exists so no unapproved plan reaches BUILD.
 3. **Build.** Call `mcp__agentic-loop__loop_stage({stage:"build"})` — it arms
    the stage deadline, reconciles isolation, and appends the audited
-   `BUILD started` note — then spawn **`loop-build`** (Task tool) with the
-   prompt (it carries the `Worktree:` line when isolated). When it returns,
+   `BUILD started` note — then spawn the response's `agent` (**`loop-build`**)
+   via the Task tool with the prompt (it carries the `Worktree:` line when
+   isolated). When it returns,
    call `mcp__agentic-loop__loop_advance({stageOutput: <build summary>})` —
    the server appends `BUILD finished`, commits a checkpoint, and returns
    `{kind:"fire", stage:"verify", prompt}`.
 4. **Verify.** `loop_stage({stage:"verify"})` (arms the read-only bash
-   allowlist + deadline), spawn **`loop-verify`** with the prompt. The verify
+   allowlist + deadline), spawn the response's `agent` (**`loop-verify`**) with
+   the prompt. The verify
    subagent records its verdict by calling `loop_verdict` itself — you do not.
    Then `loop_advance({stageOutput: <verify summary>})`: PASS →
    `{fire, review}`; FAIL → `{fire, build}` (re-build, threading the failure)
    if the iteration budget remains, else `{stop}`; ERROR → `{stop}`.
-5. **Review.** `loop_stage({stage:"review"})`, spawn **`loop-review`** (it
-   calls `loop_verdict`), then `loop_advance`. PASS → `{done}`. FAIL →
+5. **Review.** `loop_stage({stage:"review"})`, spawn the response's `agent`
+   (**`loop-review`**, which calls `loop_verdict`), then `loop_advance`. PASS → `{done}`. FAIL →
    `{fire, build}` if budget remains, else `{stop}`.
    - **Multi-lens review** (`reviewLenses` configured): spawn `loop-review`
      once per lens, each focused on that lens; each pass calls `loop_verdict`.
@@ -130,7 +141,7 @@ rejects anything else.
   included — it arms the bash allowlist (check stages), the worktree pin, and
   the `stageTimeoutMinutes` deadline (an overdue stage is starved of tools by
   the PreToolUse hook, and `loop_advance` stops the loop). It writes the
-  stage marker `<tasksDir>/runs/.stage.json` carrying `{kind, stage,
+  stage marker `<tasksDir>/runs/.stage.json` carrying `{kind, stage, agent,
   worktree, deadline, bashAllowlist}`; the PreToolUse guard prefers the
   marker's allowlist, so each kind's per-stage allowlist from its manifest is
   what actually gates bash.
