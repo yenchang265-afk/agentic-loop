@@ -100,8 +100,10 @@ export const resolveRunTokens = async (deps: HubDeps, runId: string): Promise<Ru
   const sidecar = sidecarRaw !== null ? parseRunMetrics(sidecarRaw) : null
   if (sidecarRaw !== null && sidecar === null) notes.push("metrics sidecar unreadable — ignored")
 
+  const inProgress = sidecar?.runs.at(-1)?.open === true
   if (sidecar) {
     for (const entry of sidecar.runs) rows.push(...(await entryRows(deps, entry, notes)))
+    if (inProgress) notes.push("run in progress — usage may still be accruing")
   } else {
     const logRaw = await read(deps, `${deps.tasksDir}/runs/${runId}.md`)
     if (logRaw === null) return null
@@ -121,6 +123,7 @@ export const resolveRunTokens = async (deps: HubDeps, runId: string): Promise<Ru
     rows,
     totals,
     ...(costs.length ? { cost: costs.reduce((sum, r) => sum + (r.cost ?? 0), 0) } : {}),
+    ...(inProgress ? { inProgress: true } : {}),
     notes,
   }
 }

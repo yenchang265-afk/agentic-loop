@@ -11,6 +11,7 @@ export interface EventVersions {
   readonly backlog: number
   readonly run: number
   readonly active: number
+  readonly tokens: number
   readonly gate: number
 }
 
@@ -21,7 +22,7 @@ interface EventsValue {
   readonly requestNotifications: () => void
 }
 
-const initial: EventVersions = { backlog: 0, run: 0, active: 0, gate: 0 }
+const initial: EventVersions = { backlog: 0, run: 0, active: 0, tokens: 0, gate: 0 }
 
 const EventsContext = createContext<EventsValue>({
   versions: initial,

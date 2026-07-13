@@ -35,6 +35,22 @@ test("diffSnapshots emits run for changed run logs and active for marker/lease/s
   assert.deepEqual(events, [{ type: "run", id: "fix" }, { type: "active" }])
 })
 
+test("diffSnapshots emits exactly one tokens event (not run) for a changed metrics sidecar", () => {
+  const prev = snap({ runs: { "fix.metrics.json": "10:1" } })
+  const next = snap({ runs: { "fix.metrics.json": "22:2" } })
+  assert.deepEqual(diffSnapshots(prev, next, GATES), [{ type: "tokens", id: "fix" }])
+})
+
+test("scanSnapshot picks up .metrics.json sidecars under runs/", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hub-watch-metrics-"))
+  const runs = path.join(dir, "docs", "tasks", "runs")
+  fs.mkdirSync(runs, { recursive: true })
+  fs.writeFileSync(path.join(runs, "fix.metrics.json"), '{"version":1,"runs":[]}')
+  const s = scanSnapshot(dir, "docs/tasks", ["queued"])
+  assert.ok(s.runs["fix.metrics.json"])
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
 test("scanSnapshot reads folders, runs and markers from disk", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hub-watch-"))
   const tasks = path.join(dir, "docs", "tasks")

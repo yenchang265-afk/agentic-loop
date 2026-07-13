@@ -58,7 +58,7 @@ export const scanSnapshot = (directory: string, tasksDir: string, statuses: read
   const runsDir = path.join(root, "runs")
   try {
     for (const name of fs.readdirSync(runsDir)) {
-      if (!name.endsWith(".md") && !name.endsWith(".state.json")) continue
+      if (!name.endsWith(".md") && !name.endsWith(".state.json") && !name.endsWith(".metrics.json")) continue
       const key = statKey(path.join(runsDir, name))
       if (key !== null) runs[name] = key
     }
@@ -106,6 +106,9 @@ export const diffSnapshots = (
   for (const name of runNames) {
     if (prev.runs[name] === next.runs[name]) continue
     if (name.endsWith(".state.json")) activeChanged = true
+    // A live per-stage flush rewrites the metrics sidecar; emit `tokens` (NOT
+    // `run`, which would collapse the open run panel) so only TokenPanel refetches.
+    else if (name.endsWith(".metrics.json")) events.push({ type: "tokens", id: name.replace(/\.metrics\.json$/, "") })
     else events.push({ type: "run", id: name.replace(/\.md$/, "") })
   }
   if (activeChanged) events.push({ type: "active" })

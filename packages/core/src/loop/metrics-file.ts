@@ -38,11 +38,16 @@ const MetricsSampleSchema = z.object({
 
 const RunEntrySchema = z.object({
   endedAt: z.string(),
-  outcome: z.enum(["done", "stopped", "error"]),
+  // Absent on an in-progress (`open`) entry — the run has not reached a terminal
+  // event yet. No consumer reads `outcome`, so making it optional is zero-ripple.
+  outcome: z.enum(["done", "stopped", "error"]).optional(),
   detail: z.string().default(""),
   host: z.enum(["opencode", "claude"]),
   sessionID: z.string().optional(),
   samples: z.array(MetricsSampleSchema),
+  /** True while the run is still live: a per-stage flush wrote samples-so-far.
+   *  The terminal event replaces this entry with its finalized twin. */
+  open: z.boolean().optional(),
 })
 
 export const RunMetricsSchema = z.object({
@@ -82,4 +87,20 @@ export const appendRunMetrics = (existingRaw: string | null, run: RunEntry): str
     runs: [...(existing?.runs ?? []), run],
   }
   return JSON.stringify(doc, null, 2)
+}
+
+/**
+ * Upsert one run entry (null/unparseable → start fresh). If the last existing
+ * entry is still `open`, replace it; otherwise append. This is what makes the
+ * live flow safe: each per-stage flush writes a full `open: true` snapshot that
+ * overwrites the previous flush, and the terminal event writes the finalized
+ * entry (no `open`) that overwrites the trailing open one — so at most one open
+ * entry ever exists and finalize never leaves a duplicate. Pure.
+ */
+export const upsertRunMetrics = (existingRaw: string | null, run: RunEntry): string => {
+  const existing = existingRaw !== null ? parseRunMetrics(existingRaw) : null
+  const prior = existing?.runs ?? []
+  const replaceLast = prior.length > 0 && prior[prior.length - 1]?.open === true
+  const runs = replaceLast ? [...prior.slice(0, -1), run] : [...prior, run]
+  return JSON.stringify({ version: RUN_METRICS_VERSION, runs }, null, 2)
 }

@@ -67,7 +67,7 @@ import { clearState, loadState, saveState } from "@agentic-loop/core/loop/persis
 import { approveAny, rejectAny, type GateCtx } from "@agentic-loop/core/loop/gate"
 import { runTerminal, type TerminalCtx } from "@agentic-loop/core/loop/terminal"
 import { type Outcome, renderRunSummary, type StageSample, type StageTokens } from "@agentic-loop/core/loop/metrics"
-import { appendRunMetrics, metricsPath } from "@agentic-loop/core/loop/metrics-file"
+import { metricsPath, upsertRunMetrics } from "@agentic-loop/core/loop/metrics-file"
 import {
   failedCriteriaBlock,
   LOOP_REVIEW_TAG,
@@ -574,6 +574,9 @@ const runStageWithLenses = async (
       startedAt: new Date(t0).toISOString(),
       ...(usage ? { tokens: usage.tokens, cost: usage.cost, model: usage.model } : {}),
     })
+    // Publish samples-so-far live (awaited: no flush I/O may be in flight when a
+    // terminal event finalizes the sidecar).
+    await flushMetrics(deps, sessionID, config, state)
     if (!getLoop(sessionID)) break // stop mid-pass — don't fire the rest
   }
 
@@ -598,6 +601,30 @@ const runStageWithLenses = async (
 const snapshot = async (deps: Deps, config: Config, state: LoopState): Promise<void> => {
   if (!state.task) return
   await saveState(deps.$, deps.directory, config.tasksDir, state.task.id, state)
+}
+
+/**
+ * Flush this session's samples-so-far to the metrics sidecar as an `open` entry,
+ * mid-run, so the hub can show tokens accruing per stage instead of only at
+ * termination. Does NOT touch the run log or clear the accumulator — the
+ * terminal `renderMetrics` still owns both. Best-effort: telemetry must never
+ * fail the loop. Must be awaited (see the call site) so no flush write is in
+ * flight when `renderMetrics` finalizes.
+ */
+const flushMetrics = async (deps: Deps, sessionID: string, config: Config, state: LoopState): Promise<void> => {
+  const samples = runSamples.get(sessionID) ?? []
+  if (samples.length === 0) return
+  const file = metricsPath(deps.directory, config.tasksDir, loopId(state))
+  const existing = await deps.$`cat ${file}`.quiet().nothrow()
+  const doc = upsertRunMetrics(existing.exitCode === 0 ? existing.stdout.toString() : null, {
+    endedAt: new Date().toISOString(),
+    detail: "",
+    host: "opencode",
+    sessionID,
+    samples,
+    open: true,
+  })
+  await deps.$`printf '%s' ${doc} > ${file}`.quiet().nothrow()
 }
 
 /**
@@ -626,7 +653,9 @@ const renderMetrics = async (
   // dashboards join against. sessionID lets host storage be joined exactly.
   const file = metricsPath(deps.directory, config.tasksDir, loopId(state))
   const existing = await deps.$`cat ${file}`.quiet().nothrow()
-  const doc = appendRunMetrics(existing.exitCode === 0 ? existing.stdout.toString() : null, {
+  // Upsert (not append): replace the trailing `open` entry that the per-stage
+  // flush left behind — appending here would double-count the run.
+  const doc = upsertRunMetrics(existing.exitCode === 0 ? existing.stdout.toString() : null, {
     endedAt: stamp,
     outcome,
     detail,
