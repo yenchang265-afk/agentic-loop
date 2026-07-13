@@ -375,6 +375,28 @@ const takeVerdictRecord = (sessionID: string, stage: CheckStage): VerdictRecord 
   return rec && rec.stage === stage ? rec.record : null
 }
 
+/**
+ * Resolve the DRIVING session for a tool call. Check stages run as subtasks
+ * (`subtask: true` commands), so `loop_verdict` arrives with the CHILD
+ * session's id — `getLoop` missed, the verdict was silently ignored, and the
+ * stage read "none recorded → FAIL" even though the verifier called the tool
+ * (its prose PASS is the untrusted channel and rightly ignored). Walk the
+ * session's parentID chain until a session with a live loop is found.
+ * Depth-capped; falls back to the given id so `recordVerdict` still reports
+ * "no active loop" when nothing in the chain is driving.
+ */
+export const resolveDrivingSession = async (client: Client, sessionID: string): Promise<string> => {
+  let id = sessionID
+  for (let depth = 0; depth < 5; depth++) {
+    if (getLoop(id)) return id
+    const res = await client.session.get({ path: { id } }).catch(() => null)
+    const parent = res?.data?.parentID
+    if (!parent) return sessionID
+    id = parent
+  }
+  return sessionID
+}
+
 const toast = (client: Client, message: string, variant: "info" | "success" | "warning" | "error") =>
   client.tui.showToast({ body: { message, variant } }).catch(() => {})
 
@@ -561,36 +583,53 @@ const runStageWithLenses = async (
       ? `${baseArgs}\n\nReview lens ${i + 1}/${passes.length}: focus exclusively on ${lens}. The other lenses ` +
         `run as separate passes — don't repeat them. Record this pass's verdict via loop_verdict as usual.`
       : baseArgs
-    recordedVerdicts.delete(sessionID) // no stale verdict may leak into this pass
-    const t0 = Date.now()
-    const { text: out, usage } = await runStage(
-      client,
-      sessionID,
-      stageCommand(loaded, stage),
-      args,
-      config.stageTimeoutMinutes,
-    )
-    const ms = Date.now() - t0
-    const stamp = new Date().toISOString()
-    const header = lens
-      ? `${stage} (lens: ${lens}) · iteration ${iteration + 1} · ${stamp}`
-      : `${stage} · iteration ${iteration + 1} · ${stamp}`
-    await appendRunLog(deps.$, deps.directory, config.tasksDir, loopId(state), header, out, deps.log)
-    outputs.push(lens ? `### Review lens: ${lens}\n${out}` : out)
-    const passRecord = isCheck ? takeVerdictRecord(sessionID, stage as CheckStage) : null
+    // One pass, plus at most one retry when a check stage ends with no
+    // loop_verdict call — a broken verdict channel is not a genuine FAIL, and
+    // burning a build iteration on it re-built already-done work (the
+    // theater-booking-0 failure mode; parity with the Claude host's retry).
+    let passRecord: VerdictRecord | null = null
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const passArgs =
+        attempt === 0
+          ? args
+          : `${args}\n\nPREVIOUS ATTEMPT RECORDED NO VERDICT — the loop_verdict tool call is MANDATORY. ` +
+            `If the tool is not in your tool list, state that explicitly in your final message and finish.`
+      recordedVerdicts.delete(sessionID) // no stale verdict may leak into this pass
+      const t0 = Date.now()
+      const { text: out, usage } = await runStage(
+        client,
+        sessionID,
+        stageCommand(loaded, stage),
+        passArgs,
+        config.stageTimeoutMinutes,
+      )
+      const ms = Date.now() - t0
+      const stamp = new Date().toISOString()
+      const retryTag = attempt > 0 ? " · verdict retry" : ""
+      const header = lens
+        ? `${stage} (lens: ${lens}) · iteration ${iteration + 1}${retryTag} · ${stamp}`
+        : `${stage} · iteration ${iteration + 1}${retryTag} · ${stamp}`
+      await appendRunLog(deps.$, deps.directory, config.tasksDir, loopId(state), header, out, deps.log)
+      outputs.push(lens ? `### Review lens: ${lens}\n${out}` : out)
+      passRecord = isCheck ? takeVerdictRecord(sessionID, stage as CheckStage) : null
+      addSample(sessionID, {
+        stage,
+        iteration,
+        ms,
+        ...(isCheck ? { verdict: passRecord?.verdict ?? "none" } : {}),
+        ...(lens ? { lens } : {}),
+        startedAt: new Date(t0).toISOString(),
+        ...(usage ? { tokens: usage.tokens, cost: usage.cost, model: usage.model } : {}),
+      })
+      // Publish samples-so-far live (awaited: no flush I/O may be in flight when a
+      // terminal event finalizes the sidecar).
+      await flushMetrics(deps, sessionID, config, state)
+      if (!isCheck || passRecord || !getLoop(sessionID)) break
+      if (attempt === 0) {
+        await deps.log("warn", `${stage}${lens ? ` (${lens})` : ""} recorded no verdict via loop_verdict — re-running the pass once`)
+      }
+    }
     records.push(passRecord)
-    addSample(sessionID, {
-      stage,
-      iteration,
-      ms,
-      ...(isCheck ? { verdict: passRecord?.verdict ?? "none" } : {}),
-      ...(lens ? { lens } : {}),
-      startedAt: new Date(t0).toISOString(),
-      ...(usage ? { tokens: usage.tokens, cost: usage.cost, model: usage.model } : {}),
-    })
-    // Publish samples-so-far live (awaited: no flush I/O may be in flight when a
-    // terminal event finalizes the sidecar).
-    await flushMetrics(deps, sessionID, config, state)
     if (!getLoop(sessionID)) break // stop mid-pass — don't fire the rest
   }
 
@@ -599,11 +638,22 @@ const runStageWithLenses = async (
   const record = lenses.length ? combineRecords(records, lenses) : (records[0] ?? null)
   const verdict = record?.verdict ?? null
   if (verdict === null) {
+    // Still nothing after the retry: the verdict channel is unreachable —
+    // surface it as a retryable ERROR (manifest onError → recoverable stop),
+    // never as a FAIL that triggers a pointless rebuild.
     const inText = parseVerdict(outputs.join("\n"), stage === "verify" ? LOOP_VERIFY_TAG : LOOP_REVIEW_TAG)
     await deps.log(
       "warn",
-      `${stage} recorded no verdict via loop_verdict${inText ? ` (text claimed ${inText})` : ""} — treating as FAIL`,
+      `${stage} recorded no verdict via loop_verdict even after a retry${inText ? ` (text claimed ${inText}, ignored — free text is untrusted)` : ""} — stopping with ERROR`,
     )
+    const errorRecord: VerdictRecord = {
+      verdict: "ERROR",
+      reason:
+        "no loop_verdict recorded even after a retry — the verdict channel is unreachable from the stage subagent " +
+        "or the agent contract was not applied; fix the plugin wiring, then recover the task" +
+        (inText ? ` (prose claimed ${inText}, ignored — free text is untrusted)` : ""),
+    }
+    return { output: outputs.join("\n\n"), verdict: "ERROR", record: errorRecord }
   }
   return { output: outputs.join("\n\n"), verdict, record }
 }

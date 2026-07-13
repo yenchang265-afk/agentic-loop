@@ -16,6 +16,7 @@ import {
   onInterrupt,
   parseWatchArgs,
   recordVerdict,
+  resolveDrivingSession,
   type Deps,
 } from "./driver.ts"
 
@@ -952,4 +953,41 @@ test("pr-sitter triage-FAIL leaves the human's main tree untouched (no commit / 
     (c) => c.startsWith("git ") && (c.includes(" add -A") || c.includes(" commit") || c.includes(" checkout")),
   )
   assert.equal(touchedTree, false, `main tree was mutated: ${log.filter((c) => c.startsWith("git ")).join(" | ")}`)
+})
+
+// --- resolveDrivingSession: verdicts from subtask (child) sessions ---
+// Check stages run as subtasks, so loop_verdict arrives with the child
+// session's id; unresolved, the verdict was silently ignored and the stage
+// read "none recorded → FAIL" while the verifier's prose said PASS.
+
+test("resolveDrivingSession walks the parentID chain to the driving session", async () => {
+  const { setLoop, clearLoop } = await import("@agentic-loop/core/loop/state")
+  setLoop("parent-sess", { goal: "g", stage: "verify", iteration: 0, artifacts: {} })
+  const client = {
+    session: {
+      get: async ({ path: { id } }: { path: { id: string } }) =>
+        id === "child-sess" ? { data: { parentID: "parent-sess" } } : { data: {} },
+    },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any
+  try {
+    assert.equal(await resolveDrivingSession(client, "child-sess"), "parent-sess", "child resolves to its driving parent")
+    assert.equal(await resolveDrivingSession(client, "parent-sess"), "parent-sess", "the driving session resolves to itself")
+    assert.equal(await resolveDrivingSession(client, "stranger"), "stranger", "an unrelated session falls back to itself")
+  } finally {
+    clearLoop("parent-sess")
+  }
+})
+
+test("recordVerdict accepts the verdict once the child session is resolved to the driver", async () => {
+  const { setLoop, clearLoop } = await import("@agentic-loop/core/loop/state")
+  setLoop("drv-sess", { goal: "g", stage: "verify", iteration: 0, artifacts: {} })
+  try {
+    // Unresolved child id: ignored (the pre-fix behavior the resolver exists to prevent).
+    assert.match(recordVerdict("some-child", "verify", { verdict: "PASS" }), /No active loop/)
+    // Resolved driving id: recorded.
+    assert.match(recordVerdict("drv-sess", "verify", { verdict: "PASS" }), /Recorded verify verdict: PASS/)
+  } finally {
+    clearLoop("drv-sess")
+  }
 })
