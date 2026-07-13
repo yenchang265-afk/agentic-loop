@@ -307,12 +307,17 @@ export const makeAgenticLoop: Plugin = async ({ client, directory, $ }) => {
             .optional()
             .describe("Per-acceptance-criterion results, mirroring the criteria threaded into your stage prompt."),
         },
-        execute: async (args, ctx) =>
-          driver.recordVerdict(ctx.sessionID, args.stage, {
+        execute: async (args, ctx) => {
+          // Check stages run as subtasks: the call carries the CHILD session's
+          // id, so resolve the driving session up the parent chain first — a
+          // verdict recorded under the child id would be invisible to the drive.
+          const drivingID = await driver.resolveDrivingSession(client, ctx.sessionID)
+          return driver.recordVerdict(drivingID, args.stage, {
             verdict: args.verdict,
             ...(args.reason !== undefined ? { reason: args.reason } : {}),
             ...(args.criteria !== undefined ? { criteria: args.criteria } : {}),
-          }),
+          })
+        },
       }),
     },
   }
