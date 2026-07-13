@@ -61,9 +61,11 @@ var auditBacklog = async (client, directory, tasksDir) => {
 
 // plugins/claude/hooks/src/reconcile.entry.mjs
 var wasInterrupted = (body) => {
-  const lastStart = body.lastIndexOf("> BUILD started");
+  const anchor = body.lastIndexOf("> Plan approved");
+  const window = anchor === -1 ? body : body.slice(anchor);
+  const lastStart = window.lastIndexOf("> BUILD started");
   if (lastStart === -1) return false;
-  return body.lastIndexOf("> BUILD finished") < lastStart;
+  return window.lastIndexOf("> BUILD finished") < lastStart;
 };
 var read = () => new Promise((resolve) => {
   let s = "";

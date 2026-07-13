@@ -48,14 +48,35 @@ export const markClaimed = async ($: Shell, task: FileRef, actor?: string | null
 }
 
 /**
- * Eligible for `/agentic-loop:engineering watch` to claim: planned, and never had ANY
- * "> BUILD started" or CLAIMED note — not just "last pair unmatched" (that's
- * `wasInterrupted`, below). Any marker at all means another live LoopState
- * is driving it right now, or it crashed and needs manual recovery — a
- * watch session must never silently reclaim either case. Pure.
+ * The audited note `approvePlan` appends at the plan gate — the start of a
+ * task's CURRENT build lifecycle. Audit notes are append-only and survive a
+ * replan, so the claimability predicates below must only read CLAIMED/BUILD
+ * markers appended AFTER the most recent approval: an older attempt's notes
+ * are history, not state. Without this, a task that built once and was
+ * replanned reads "already started" forever — an approved plan no watcher
+ * will ever claim.
  */
-export const isClaimable = (task: Task): boolean =>
-  hasPlan(task) && !task.body.includes("> BUILD started") && !task.body.includes(CLAIMED_MARKER)
+export const PLAN_APPROVED_MARKER = "> Plan approved"
+
+/** The body of the task's current lifecycle: everything after the last
+ *  plan-approval note; the whole body when none exists (legacy tasks). Pure. */
+const lifecycleWindow = (body: string): string => {
+  const idx = body.lastIndexOf(PLAN_APPROVED_MARKER)
+  return idx === -1 ? body : body.slice(idx)
+}
+
+/**
+ * Eligible for `/agentic-loop:engineering watch` to claim: planned, with no
+ * "> BUILD started" or CLAIMED note in the current lifecycle window — not just
+ * "last pair unmatched" (that's `wasInterrupted`, below). A marker in the
+ * window means another live LoopState is driving it right now, or it crashed
+ * and needs manual recovery — a watch session must never silently reclaim
+ * either case. Pure.
+ */
+export const isClaimable = (task: Task): boolean => {
+  const window = lifecycleWindow(task.body)
+  return hasPlan(task) && !window.includes("> BUILD started") && !window.includes(CLAIMED_MARKER)
+}
 
 /** The persisted plan text following `PLAN_HEADING`, or `undefined` if absent. Pure. */
 export const extractPlan = (task: Task): string | undefined => {
@@ -65,23 +86,28 @@ export const extractPlan = (task: Task): string | undefined => {
 }
 
 /**
- * Planned and started at least once — no longer claimable by `/agentic-loop:engineering watch`,
- * but a human can force-resume it with `/agentic-loop:engineering recover <id>` once no live
- * loop is driving it (crashed runs, restarted plugins). Pure.
+ * Planned and started at least once in the current lifecycle window — no longer
+ * claimable by `/agentic-loop:engineering watch`, but a human can force-resume it
+ * with `/agentic-loop:engineering recover <id>` once no live loop is driving it
+ * (crashed runs, restarted plugins). Pure.
  */
-export const isRecoverable = (task: Task): boolean =>
-  hasPlan(task) && (task.body.includes("> BUILD started") || task.body.includes(CLAIMED_MARKER))
+export const isRecoverable = (task: Task): boolean => {
+  const window = lifecycleWindow(task.body)
+  return hasPlan(task) && (window.includes("> BUILD started") || window.includes(CLAIMED_MARKER))
+}
 
 /**
- * Whether the task's last recorded BUILD run has no matching "finished" note —
- * i.e. the process likely died mid-build, possibly leaving a half-finished diff
- * in the working tree. Only BUILD is tracked: it's the sole stage that writes
- * code. Pure.
+ * Whether the current lifecycle's last recorded BUILD run has no matching
+ * "finished" note — i.e. the process likely died mid-build, possibly leaving a
+ * half-finished diff in the working tree. Only BUILD is tracked: it's the sole
+ * stage that writes code. A pre-replan attempt's unmatched note must not keep
+ * flagging a freshly re-approved task, hence the window. Pure.
  */
 export const wasInterrupted = (task: Task): boolean => {
-  const lastStart = task.body.lastIndexOf("> BUILD started")
+  const window = lifecycleWindow(task.body)
+  const lastStart = window.lastIndexOf("> BUILD started")
   if (lastStart === -1) return false
-  const lastFinish = task.body.lastIndexOf("> BUILD finished")
+  const lastFinish = window.lastIndexOf("> BUILD finished")
   return lastFinish < lastStart
 }
 
