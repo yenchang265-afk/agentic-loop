@@ -82,6 +82,46 @@ test("recovers a labels item tripped by the colon-space footgun", () => {
   assert.deepEqual(task.labels, ["area: auth service"])
 })
 
+// The YAML reserved-character footgun: a bullet STARTING with a backtick (or
+// @, *, [, …) kills the lexer itself — coercion never gets a chance, parseTask
+// threw, and every gate reported "no task found" for a file on disk (observed
+// live: a `- \`calc --help\` prints usage` acceptance bullet). parseTask now
+// retries the parse with the lexer-tripping plain scalars quoted. See
+// quotePlainScalars in schema.ts.
+test("recovers an acceptance bullet starting with a backtick (reserved-character footgun)", () => {
+  const content = [
+    "---",
+    "title: CLI Calculator",
+    "priority: 0",
+    "acceptance:",
+    "  - Binary accepts `calc <a> <op> <b>` positional args",
+    "  - Exits with non-zero + error message on: wrong arg count, invalid number",
+    "  - `calc --help` prints usage",
+    "---",
+    "Build a TypeScript CLI calculator.",
+  ].join("\n")
+  const task = parseTask("q8m3-cli-calculator.md", content, "/p/q8m3-cli-calculator.md")
+  assert.equal(task.title, "CLI Calculator")
+  assert.equal(task.priority, 0, "the repair must not stringify numeric fields")
+  assert.deepEqual(task.acceptance, [
+    "Binary accepts `calc <a> <op> <b>` positional args",
+    "Exits with non-zero + error message on: wrong arg count, invalid number",
+    "`calc --help` prints usage",
+  ])
+})
+
+test("recovers a list item starting with a reserved character, leaves quoted values alone", () => {
+  // Control: already-quoted values are valid YAML — parsed first try, never rewritten.
+  const quoted = ["---", "title: t", "labels:", "  - '*hot*'", "---", "b"].join("\n")
+  assert.deepEqual(parseTask("t.md", quoted, "/p").labels, ["*hot*"])
+  const broken = ["---", "title: t", "labels:", "  - @jdoe", "---", "b"].join("\n")
+  assert.deepEqual(parseTask("t.md", broken, "/p").labels, ["@jdoe"])
+})
+
+test("still throws the original error when the repair cannot rescue the YAML", () => {
+  assert.throws(() => parseTask("t.md", "---\ntitle: : :\n  bad: indent\n---\nb", "/p"), /invalid YAML frontmatter/)
+})
+
 // --- serializeTask / slugify / buildTaskFile ---
 
 test("slugify kebab-cases a title", () => {

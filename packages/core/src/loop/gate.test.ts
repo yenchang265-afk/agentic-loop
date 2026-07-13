@@ -172,3 +172,19 @@ test("approvePlan resolves a plan-review task by its short-hash prefix", async (
   assert.ok(r.ok && r.data.approved === true)
   assert.ok("/repo/docs/tasks/in-progress/a1b2-do-bar.md" in fs)
 })
+
+// A task file whose frontmatter can't be parsed (schema failure, unrescuable
+// YAML) used to surface as "no task found" — findByIdIn swallows the parse
+// error — sending the human hunting for a file that is right there. The gates
+// now diagnose the unparseable file instead.
+test("approveTask on an unparseable draft reports the parse problem, not 'no task found'", async () => {
+  // Valid YAML, invalid schema (no title) — the parse-repair retry can't rescue this.
+  const broken = "---\npriority: 1\n---\nSome body."
+  const { ctx, fs } = makeCtx({ "draft/x9y8-broken-task.md": broken })
+  const r = await approveTask(ctx, "x9y8-broken-task")
+  assert.equal(r.ok, false)
+  assert.match(!r.ok ? r.message : "", /exists but can't be parsed/)
+  assert.match(!r.ok ? r.message : "", /draft\/x9y8-broken-task\.md/)
+  assert.match(!r.ok ? r.message : "", /title/)
+  assert.ok("/repo/docs/tasks/draft/x9y8-broken-task.md" in fs, "nothing moved")
+})
