@@ -24,7 +24,7 @@ import type { WorkSource } from "@agentic-loop/core/source/types"
 import { enabledLoopKinds, platformFor } from "@agentic-loop/core/config"
 import { failedCriteriaBlock, worstOf, type CriterionResult, type Verdict, type VerdictRecord } from "@agentic-loop/core/loop/verdict"
 import { renderRunSummary, type Outcome, type StageSample } from "@agentic-loop/core/loop/metrics"
-import { appendRunMetrics, metricsPath } from "@agentic-loop/core/loop/metrics-file"
+import { metricsPath, upsertRunMetrics } from "@agentic-loop/core/loop/metrics-file"
 import { commitAll, commitPaths, currentBranch, gitActor, listWorktrees, pruneWorktrees } from "@agentic-loop/core/loop/git"
 import { ensureIsolation, loopId } from "@agentic-loop/core/loop/isolate"
 import {
@@ -129,7 +129,27 @@ const writeRunMetrics = (id: string, outcome: Outcome, detail: string, endedAt: 
   try {
     const file = metricsPath(directory, config.tasksDir, id)
     const existing = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null
-    fs.writeFileSync(file, appendRunMetrics(existing, { endedAt, outcome, detail, host: "claude", samples }))
+    // Upsert: replace the trailing `open` entry the per-stage flush left behind.
+    fs.writeFileSync(file, upsertRunMetrics(existing, { endedAt, outcome, detail, host: "claude", samples }))
+  } catch {
+    /* telemetry never fails the loop */
+  }
+}
+
+/**
+ * Flush samples-so-far as an `open` entry mid-run, so the hub shows token
+ * usage accruing per stage instead of only at termination. Synchronous write →
+ * no race with the terminal `writeRunMetrics`. Best-effort: never fails the loop.
+ */
+const flushRunMetrics = (id: string): void => {
+  if (samples.length === 0) return
+  try {
+    const file = metricsPath(directory, config.tasksDir, id)
+    const existing = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null
+    fs.writeFileSync(
+      file,
+      upsertRunMetrics(existing, { endedAt: new Date().toISOString(), detail: "", host: "claude", samples, open: true }),
+    )
   } catch {
     /* telemetry never fails the loop */
   }
@@ -553,6 +573,7 @@ server.registerTool(
       startedAt: new Date(lastFireAt).toISOString(),
       ...(stageDef(activeManifest().manifest, stage).kind === "check" ? { verdict: (pending?.verdict ?? "none") as Verdict | "none" } : {}),
     })
+    flushRunMetrics(loopId(active)) // publish samples-so-far live to the hub
     // thread failed criteria ahead of the prose for the next iteration
     const block = failedCriteriaBlock(pending)
     const threaded = block ? `${block}\n\n${stageOutput}` : stageOutput

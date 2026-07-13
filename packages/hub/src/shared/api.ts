@@ -219,6 +219,9 @@ export interface RunTokensResponse {
   readonly rows: readonly TokenRow[]
   readonly totals: StageTokens
   readonly cost?: number
+  /** True while the run is still live — the sidecar's trailing entry is `open`,
+   *  so rows/totals are partial and still accruing. Drives the panel's live badge. */
+  readonly inProgress?: boolean
   /** Human-readable caveats: missing sidecar, unavailable opencode-db, estimation. */
   readonly notes: readonly string[]
 }
@@ -250,6 +253,7 @@ export type HubEventBase =
   | { readonly type: "backlog" }
   | { readonly type: "run"; readonly id: string }
   | { readonly type: "active" }
+  | { readonly type: "tokens"; readonly id: string }
   | { readonly type: "gate"; readonly taskId: string; readonly toStatus: string }
 
 /** One live-update event on the `/api/events` SSE stream. */

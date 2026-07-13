@@ -1,5 +1,7 @@
 import type { RunTokensResponse, StageTokens } from "../../shared/api.js"
+import { useEvents } from "../events.js"
 import { repoPath, useRepo } from "../repo.js"
+import { Badge } from "../ui/Badge.js"
 import { useJson } from "../useJson.js"
 
 /** Per-stage token usage for one run: hand-rolled stacked SVG bars, no chart dep. */
@@ -26,9 +28,11 @@ const Bar = ({ tokens, max }: { tokens: StageTokens; max: number }) => {
 
 export const TokenPanel = ({ runId }: { runId: string }) => {
   const { repoId } = useRepo()
+  const { versions } = useEvents()
   const { data, error } = useJson<RunTokensResponse>(repoPath(`/api/tokens/${encodeURIComponent(runId)}`, repoId), [
     runId,
     repoId,
+    versions.tokens,
   ])
 
   if (error) return null
@@ -36,7 +40,17 @@ export const TokenPanel = ({ runId }: { runId: string }) => {
   if (data.rows.length === 0)
     return (
       <div className="token-panel">
-        <h3>Token usage</h3>
+        <h3>
+        Token usage
+        {data.inProgress && (
+          <>
+            {" "}
+            <Badge tone="gate" title="run in progress — usage still accruing">
+              live
+            </Badge>
+          </>
+        )}
+      </h3>
         <div className="muted">No usage data for this run.{data.notes.length > 0 && ` ${data.notes.join(" · ")}`}</div>
       </div>
     )
@@ -44,7 +58,17 @@ export const TokenPanel = ({ runId }: { runId: string }) => {
   const max = Math.max(...data.rows.map((r) => inTotal(r.tokens) + outTotal(r.tokens)))
   return (
     <div className="token-panel">
-      <h3>Token usage</h3>
+      <h3>
+        Token usage
+        {data.inProgress && (
+          <>
+            {" "}
+            <Badge tone="gate" title="run in progress — usage still accruing">
+              live
+            </Badge>
+          </>
+        )}
+      </h3>
       <table className="stage-table">
         <thead>
           <tr>
