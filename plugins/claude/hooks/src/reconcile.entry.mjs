@@ -22,11 +22,18 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { auditBacklog, formatAnomalies, hasAnomalies } from "@agentic-loop/core/task/audit"
 
-/** Mirror of core `wasInterrupted` (store.ts): a BUILD started with no later finish. */
+/**
+ * Mirror of core `wasInterrupted` (store.ts): a BUILD started with no later
+ * finish, read only within the current lifecycle window (after the last
+ * "> Plan approved" note) — an older attempt's unmatched note must not keep
+ * flagging a re-planned, freshly approved task.
+ */
 const wasInterrupted = (body) => {
-  const lastStart = body.lastIndexOf("> BUILD started")
+  const anchor = body.lastIndexOf("> Plan approved")
+  const window = anchor === -1 ? body : body.slice(anchor)
+  const lastStart = window.lastIndexOf("> BUILD started")
   if (lastStart === -1) return false
-  return body.lastIndexOf("> BUILD finished") < lastStart
+  return window.lastIndexOf("> BUILD finished") < lastStart
 }
 
 const read = () =>

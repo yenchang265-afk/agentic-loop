@@ -208,6 +208,45 @@ test("markClaimed appends the CLAIMED audit note to the task file", async () => 
   )
 })
 
+// --- lifecycle window: only markers after the LAST plan approval are state ---
+// Audit notes survive a replan, so a task that built once (cap-trip/crash →
+// replan → re-plan → re-approve) must become claimable again once its new plan
+// is approved — the old attempt's CLAIMED/BUILD notes are history.
+
+const replannedBody = [
+  `${PLAN_HEADING}\n\n1. Old plan.`,
+  "> Plan approved — parked for execution [2026-07-12T08:00:00.000Z by w]",
+  "> CLAIMED — loop starting [2026-07-12T08:01:00.000Z by w]",
+  "> BUILD started (iteration 1) [2026-07-12T08:02:00.000Z by w]",
+  "> Plan rejected — sent back to queued for re-planning [2026-07-12T09:00:00.000Z by w]",
+  `${PLAN_HEADING}\n\n1. New plan.`,
+].join("\n\n")
+
+test("isClaimable becomes true again after a replanned task's NEW plan is approved", () => {
+  const reApproved = `${replannedBody}\n\n> Plan approved — parked for execution [2026-07-13T10:00:00.000Z by w]`
+  assert.equal(isClaimable(task("a", 0, reApproved)), true)
+  assert.equal(isRecoverable(task("a", 0, reApproved)), false)
+  assert.equal(wasInterrupted(task("a", 0, reApproved)), false, "the old unmatched BUILD start is history, not an interruption")
+})
+
+test("a replanned task awaiting re-approval still reads the old markers (whole-body fallback)", () => {
+  // No new "Plan approved" yet — the window anchors at the FIRST approval, so the
+  // old attempt's markers still count and nothing claims it early.
+  assert.equal(isClaimable(task("a", 0, replannedBody)), false)
+})
+
+test("markers appended after the latest approval make the task un-claimable and recoverable again", () => {
+  const reclaimed = [
+    replannedBody,
+    "> Plan approved — parked for execution [2026-07-13T10:00:00.000Z by w]",
+    "> CLAIMED — loop starting [2026-07-13T10:05:00.000Z by w]",
+    "> BUILD started (iteration 1) [2026-07-13T10:06:00.000Z by w]",
+  ].join("\n\n")
+  assert.equal(isClaimable(task("a", 0, reclaimed)), false)
+  assert.equal(isRecoverable(task("a", 0, reclaimed)), true)
+  assert.equal(wasInterrupted(task("a", 0, reclaimed)), true, "an unmatched BUILD start in the current window IS an interruption")
+})
+
 test("auditNote suffixes the timestamp and actor", () => {
   const at = new Date("2026-07-03T05:00:00.000Z")
   assert.equal(
