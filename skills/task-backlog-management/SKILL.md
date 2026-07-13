@@ -79,6 +79,13 @@ approved, buildable.
 
 - **id** = the filename without `.md` (`add-foo.md` becomes `add-foo`). Stable, human-visible.
 - **title** is required; everything else has a sane default.
+- **YAML footgun — quote risky values.** Double-quote any `title:` value or
+  `acceptance:`/`labels:` bullet that contains `: ` or starts with a YAML
+  reserved character (backtick, `@`, `*`, `[`, `{`, `|`, `>`, `%`, `&`, `!`).
+  A bullet like ``- `calc --help` prints usage`` is invalid YAML — wrap the
+  whole value: `- "'calc --help' prints usage"` or put the backticked term
+  mid-sentence. Unquoted, YAML either mis-parses the value or rejects the
+  whole file (the parser repairs the common cases, but don't rely on it).
 - **acceptance** is optional but strongly recommended — it is what VERIFY checks.
   "What tests are needed" folds in here as concrete bullets rather than a
   separate field.

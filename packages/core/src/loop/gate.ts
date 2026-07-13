@@ -1,7 +1,7 @@
 import path from "node:path"
 import type { Client, Log, Shell } from "../host.js"
 import type { Config } from "./state.js"
-import type { Task } from "../task/schema.js"
+import { parseTask, type Task } from "../task/schema.js"
 import { appendNote, auditNote, findByIdIn, hasPlan, listByStatus, moveTask, resolveTaskIdAnywhere, STATUSES } from "../task/store.js"
 import type { TaskStatus } from "../task/statuses.js"
 import { commitPaths, gitActor } from "./git.js"
@@ -57,6 +57,30 @@ export const findAnyStatus = async (ctx: GateCtx, id: string): Promise<Task | nu
 const statusFolder = (t: Task): string => path.basename(path.dirname(t.path))
 
 /**
+ * When every parse-based lookup missed, check whether an id-named FILE still
+ * exists in some status folder — i.e. the task is right there on disk but its
+ * frontmatter can't be parsed (`findByIdIn` swallows parse errors to null).
+ * Returning that diagnosis instead of "no task found" stops the gate from
+ * sending the human hunting for a file they can see. Null when the file is
+ * genuinely absent (or parseable — then a parse-based lookup would have hit).
+ */
+const unparseableAt = async (ctx: GateCtx, id: string): Promise<string | null> => {
+  if (!id) return null
+  for (const s of STATUSES) {
+    const file = path.join(ctx.directory, ctx.config.tasksDir, s, `${id}.md`)
+    const out = await ctx.$`cat ${file}`.quiet().nothrow()
+    if (out.exitCode !== 0) continue
+    try {
+      parseTask(`${id}.md`, out.stdout.toString(), file)
+      return null
+    } catch (err) {
+      return `Task file ${ctx.config.tasksDir}/${s}/${id}.md exists but can't be parsed — fix its frontmatter: ${(err as Error).message}`
+    }
+  }
+  return null
+}
+
+/**
  * Resolve a user-typed id — which may be a short-hash prefix (`f7k3`) rather than
  * the full `f7k3-add-rate-limit` — to the single canonical task id across all
  * status folders. An exact filename hit always wins; a prefix hitting several tasks
@@ -96,7 +120,9 @@ export const approveTask = async (ctx: GateCtx, id: string): Promise<GateResult>
     }
     return {
       ok: false,
-      message: where ? `Can't approve "${id}": it's in ${where} — only draft tasks can be approved.` : `Can't approve "${id}": no task found.`,
+      message: where
+        ? `Can't approve "${id}": it's in ${where} — only draft tasks can be approved.`
+        : ((await unparseableAt(ctx, id)) ?? `Can't approve "${id}": no task found.`),
     }
   }
   // A tracking epic is never approved — it only orders its child slices;
@@ -147,7 +173,7 @@ export const approvePlan = async (ctx: GateCtx, id: string): Promise<GateResult>
             ? `Can't approve the plan for "${id}": it's a draft — approve the task first with loop_task_approve.`
             : where
               ? `Can't approve the plan for "${id}": it's in ${where} — only plan-review tasks can be plan-approved.`
-              : `Can't approve the plan for "${id}": no task found.`,
+              : ((await unparseableAt(ctx, id)) ?? `Can't approve the plan for "${id}": no task found.`),
     }
   }
   // Host-neutral pointer: this message is surfaced verbatim on both hosts (the
@@ -195,7 +221,7 @@ export const replanTask = async (ctx: GateCtx, id: string, reason?: string): Pro
       ok: false,
       message: where
         ? `Can't replan "${id}": it's in ${where} — only plan-review or in-progress tasks can be sent back to planning.`
-        : `Can't replan "${id}": no task found.`,
+        : ((await unparseableAt(ctx, id)) ?? `Can't replan "${id}": no task found.`),
     }
   }
   const actor = await gitActor($, directory)
@@ -224,7 +250,7 @@ export const shipTask = async (ctx: GateCtx, id: string, kind = "engineering"): 
     if (where === "completed") {
       return { ok: true, message: `"${elsewhere!.title}" is already completed. Nothing to do.`, path: elsewhere!.path, data: { completed: elsewhere!.path, alreadyDone: true } }
     }
-    return { ok: false, message: elsewhere ? `Can't ship "${id}": it's in ${where}, not in-review/.` : `No in-review task "${id}".` }
+    return { ok: false, message: elsewhere ? `Can't ship "${id}": it's in ${where}, not in-review/.` : ((await unparseableAt(ctx, id)) ?? `No in-review task "${id}".`) }
   }
   await appendNote($, { id, path: t.path }, auditNote("Shipped — moved to completed", new Date(), await gitActor($, directory)), log)
   const newPath = await moveTask($, { id, path: t.path }, "completed")
@@ -271,7 +297,8 @@ export const resolveGateTask = async (ctx: GateCtx, id: string, folders: readonl
     const where = elsewhere ? statusFolder(elsewhere) : null
     // A forward status means the move already happened — informational, not an error.
     const variant: GateVariant = where && FORWARD_STATUSES.includes(where as TaskStatus) ? "info" : "warning"
-    return { ok: false, kind: "message", message: where ? `"${id}" is in ${where} — nothing to do.` : `No task "${id}" found.`, variant }
+    const message = where ? `"${id}" is in ${where} — nothing to do.` : ((await unparseableAt(ctx, id)) ?? `No task "${id}" found.`)
+    return { ok: false, kind: "message", message, variant }
   }
   const found: { id: string; from: TaskStatus }[] = []
   for (const from of folders) {

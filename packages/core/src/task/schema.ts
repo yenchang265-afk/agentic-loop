@@ -174,6 +174,36 @@ export const mintShortId = (rand: () => number = Math.random): string => {
 export const isPaired = (task: Pick<Task, "tracker">): boolean => task.tracker !== undefined
 
 /**
+ * Double-quote the plain scalars in a frontmatter block that YAML's lexer
+ * rejects outright. The colon-space footgun is survivable after parsing
+ * (`coerceListItem` above), but a value STARTING with a reserved character —
+ * an LLM-authored bullet like `` - `calc --help` prints usage `` — kills
+ * `parseYaml` itself, and the swallowed error surfaces as a misleading "no
+ * task found" at every gate. Used only as a RETRY after a failed parse, so
+ * valid files are never rewritten. Quotes exactly the values that trip the
+ * lexer (reserved leading character) plus `key: value` scalars containing a
+ * further `: ` (the mapping-inside-a-mapping error); numbers, booleans, and
+ * block starts are untouched so the schema still sees their real types. Pure.
+ */
+// Characters that break the YAML lexer when they START a plain scalar: the
+// spec-reserved `@`/backtick, block indicators |>, tag/anchor/alias %!&*, and
+// the flow indicators. Already-quoted values are deliberately NOT matched.
+const RESERVED_START = /^[`@|>%!&*,[\]{}]/
+const quotePlainScalars = (yamlBlock: string): string => {
+  const quote = (v: string): string => `"${v.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`
+  return yamlBlock
+    .split(/\r?\n/)
+    .map((line) => {
+      const item = /^(\s*-\s+)(\S.*)$/.exec(line)
+      if (item && (RESERVED_START.test(item[2]!) || item[2]!.includes(": "))) return `${item[1]}${quote(item[2]!)}`
+      const kv = /^(\s*[A-Za-z_][\w.-]*:\s+)(\S.*)$/.exec(line)
+      if (kv && (RESERVED_START.test(kv[2]!) || kv[2]!.includes(": "))) return `${kv[1]}${quote(kv[2]!)}`
+      return line
+    })
+    .join("\n")
+}
+
+/**
  * Parse and validate a task file. Throws a readable, filename-prefixed error when
  * the frontmatter is missing, not valid YAML, or fails the schema.
  */
@@ -188,7 +218,13 @@ export const parseTask = (filename: string, content: string, path: string): Task
   try {
     raw = parseYaml(yamlBlock ?? "")
   } catch (err) {
-    throw new Error(`${filename}: invalid YAML frontmatter (${(err as Error).message})`)
+    // One retry with the lexer-tripping scalars quoted; a file this can't
+    // rescue reports the ORIGINAL parse error, not the repair's.
+    try {
+      raw = parseYaml(quotePlainScalars(yamlBlock ?? ""))
+    } catch {
+      throw new Error(`${filename}: invalid YAML frontmatter (${(err as Error).message})`)
+    }
   }
 
   const result = TaskFrontmatterSchema.safeParse(raw)
