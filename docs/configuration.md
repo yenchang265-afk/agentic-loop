@@ -4,6 +4,50 @@ Optional JSON file at the repo root. Every field has a sane default; a
 misconfigured file fails fast with a clear message instead of silently
 falling back.
 
+## Quick-start templates
+
+Copy the block for your platform into `.agentic-loop.json`, replace the
+placeholders, done — everything else keeps its default. The rest of this
+page is the field-by-field reference; you shouldn't need it for a first setup.
+
+**GitHub** (the default platform — this file is equivalent to having no
+`.agentic-loop.json` at all, plus `pr-sitter` turned on):
+
+```json
+{
+  "loops": {
+    "pr-sitter": { "enabled": true, "query": "is:open author:@me" }
+  }
+}
+```
+
+Replace `query` with the PR search you want the sitter to watch, or delete
+the whole `loops` block if you only want the engineering loop (its default).
+
+**Azure DevOps:**
+
+```json
+{
+  "codePlatform": "ado",
+  "ado": {
+    "organization": "https://dev.azure.com/<your-org>",
+    "project": "<your-project>",
+    "selfLogin": "<your-login-or-service-account-email>"
+  },
+  "loops": {
+    "pr-sitter": { "enabled": true }
+  }
+}
+```
+
+Replace `<your-org>`, `<your-project>`, and `<your-login-or-service-account-email>`
+— all three are required for `"ado"`. Add `"repository": "<your-repo>"` next
+to `project` if you'll use the ship gate or the `dep-sitter`/`main-sitter`
+publish stages (they need one specific repo to open a PR against). Don't put
+your PAT in this file — export `AZURE_DEVOPS_EXT_PAT=<pat>` instead; see
+[Code platform](#code-platform-codeplatform--ado) below for the fallback and
+its tradeoffs.
+
 ## Layers & precedence
 
 Config is resolved from two optional layers:
