@@ -82,6 +82,17 @@ creator tab is unaffected.
   toggles for the optional state (task / git / worktree / platform) — a stage
   prompt is mostly conditional sections, and the mistake worth catching is a
   block that silently never fires.
+- **Config**: read and write `.agentic-loop.json`. It edits **one layer at a
+  time** (this repo, or user-scope) and badges every field with where its
+  effective value actually comes from — the merged view is never written back,
+  because that would flatten your user layer into the repo file and copy
+  `ado.pat` into something you may well commit. Keys core's schema doesn't know
+  (a host-only `watchIntervalMinutes`, the `hub` section) are preserved and
+  listed as preserved, since the editor writes raw JSON rather than a parsed
+  object. Per-kind knobs get advisory warnings — the loop reads them
+  positionally, so a typo is otherwise silently ignored. Saving reloads the hub;
+  so does a hand-edit in `$EDITOR`. See
+  [docs/configuration.md](../../docs/configuration.md).
 
 ## Token usage sources
 
@@ -108,9 +119,13 @@ The hub can write in exactly two ways, and neither drives a loop:
 | Write | What it touches | Guard |
 |---|---|---|
 | Save a loop kind (creator) | `packages/core/loops/<kind>/` | slug + prefix check; 409 without `overwrite` |
-| A human gate move (approve / replan / ship) | the task file under `tasksDir`, plus a git commit — and for **ship**, a pull request | `X-Hub-Client`; `expectStatus` (a stale board 409s rather than gate the wrong task); refused while a loop is driving the task; a confirm naming the effect |
+| A human gate move (approve / replan / ship) | the task file under `tasksDir`, plus a git commit — and for **ship**, a draft pull request | `X-Hub-Client`; `expectStatus` (a stale board 409s rather than gate the wrong task); refused while a loop is driving the task; a confirm naming the effect |
+| Save config | one layer of `.agentic-loop.json` | `X-Hub-Client`; layer-explicit (never the merged view); raw-JSON writes, so unknown keys survive; `ado.pat` redacted out and refused into a non-gitignored repo file; rejected unless the merged config validates |
 
-It never claims work, never runs a stage, and never merges anything.
+It never claims work, never runs a stage, and never merges anything. Full
+analysis in [docs/design/threat-model.md](../../docs/design/threat-model.md)
+(T14–T16), including the honest residual: **there is no authentication** — any
+local process running as you can drive it, so don't run it on a shared host.
 
 ## Beta status
 

@@ -51,11 +51,12 @@ Authority levels, in increasing order of blast radius:
 | [1](#1--gate-actions) | Gate actions | `loop/gate.ts` — **zero hub callers** | backlog-write, push | M | **shipped** |
 | [2](#2--backlog-doctor) | Backlog doctor | write half of `task/store.ts` | backlog-write | M | proposed |
 | [3](#3--creator-prompt-preview) | Creator prompt preview | `manifest/template.ts` `renderPrompt` | read | S | **shipped** |
-| [4](#4--config-editor) | Config editor | **nothing anywhere writes `.agentic-loop.json`** | config-write | L | proposed |
+| [4](#4--config-editor) | Config editor | **nothing anywhere writes `.agentic-loop.json`** | config-write | L | **shipped** |
 
-PR 0 (the foundation) and features 1 and 3 have shipped; the gaps they closed
-are described below in the past tense they were written in. Features 2 and 4
-remain proposals.
+PR 0 (the foundation) and features 1, 3 and 4 have shipped. Only the backlog
+doctor (2) remains a proposal. The gaps they closed are described below in the
+present tense they were written in — see `architecture.md`, the hub README and
+`configuration.md` for what the hub does today.
 
 Recommended order — **PR 0 (foundation) → 3 → 1 → 2 → 4** — is justified under
 [Sequencing](#sequencing). The config editor is the headline ask and ships
@@ -255,7 +256,7 @@ that boundary for one feature. Take the POST.
 
 ## 4 — Config editor
 
-**Authority: config-write · Cost: L**
+**Authority: config-write · Cost: L · Status: SHIPPED**
 
 The headline ask, and the one with real footguns. New `server/configfile.ts`
 (raw layer IO), `configlayers.ts` (provenance), `knobs.ts` (advisory lint),
@@ -683,8 +684,7 @@ docs are part of done:
   `loops.<kind>` knob table** ([Crux C](#crux-c--loops-is-looseobject)) and fix
   the "validated by the kind itself" claim at :126 — a doc fix that pays for
   itself independent of this feature.
-- **[`threat-model.md`](./threat-model.md)** — **still open, and now overdue**:
-  PR 1 shipped the mutating surface it should describe. Needs: which routes
-  write, what they commit, why localhost + Host guard + `X-Hub-Client` is the
-  boundary, and that a PR-opening click now exists. `architecture.md` and the
-  hub README cover it for readers in the meantime; the threat model does not.
+- ~~**[`threat-model.md`](./threat-model.md)**~~ — **done** (PR 4). Adds T14–T16:
+  the HTTP surface (localhost/Host/`X-Hub-Client`, and the honest residual that
+  there is no auth), stale-board and live-loop gating, and config-write — the
+  file that grants every other authority in the model.

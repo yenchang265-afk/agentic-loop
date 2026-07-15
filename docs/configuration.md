@@ -120,10 +120,31 @@ it can honor (today: OpenCode's `watchIntervalMinutes` — see
 
 Each key under `loops` enables and configures one loop kind (a
 `packages/core/loops/<kind>/` manifest). **`engineering` runs unless explicitly disabled**;
-every other kind is opt-in with `"enabled": true`. Kind-specific knobs ride
-along in the same section and are validated by the kind itself. Enabled kinds
-are polled in claim-priority order: engineering first, then opted-in kinds in
-config order.
+every other kind is opt-in with `"enabled": true`. Enabled kinds are polled in
+claim-priority order: engineering first, then opted-in kinds in config order.
+
+Kind-specific knobs ride along in the same section. **They are not validated**:
+`loops` is a loose record by design (kinds are user-authorable — see
+[`packages/core/loops/README.md`](../packages/core/loops/README.md)), and the
+loop reads each knob positionally by name with a bare type check. A misspelled
+or wrongly-typed knob is therefore **silently ignored** — the loop runs on the
+default and says nothing:
+
+| Applies to kinds whose work source is | Knob | Read as |
+|---|---|---|
+| `github-pr` | `query` | string |
+| `dependency-scan` | `severityFloor` | string |
+| `dependency-scan` | `includeOutdated` | boolean |
+| `dependency-scan` | `ecosystem` | string |
+| `ci-runs` | `branch` | string |
+
+(What each knob *means* per sitter is documented canonically in
+[`sitters.md`](sitters.md); the table above is only the read contract.)
+
+The admin hub's **Config tab flags exactly these mistakes** — unknown knob (with
+a did-you-mean), wrong type, and a knob on a kind whose work source never reads
+it. The warnings are advisory: they annotate a save, never block it. See
+[the admin hub](#admin-hub-hub--user-scope-only) below.
 
 > **The four sitters (`pr-sitter`, `review-sitter`, `dep-sitter`,
 > `main-sitter`) are experimental** — their knobs and defaults below may still
@@ -208,6 +229,31 @@ is ignored rather than merged:
 
 Unknown keys under `hub` are rejected (typo safety). See
 [packages/hub/README.md](../packages/hub/README.md).
+
+### Editing this file from the hub
+
+The hub's **Config tab** reads and writes `.agentic-loop.json`. Four behaviours
+are worth knowing, because each exists to prevent a specific way of losing data:
+
+- **It edits one layer at a time, and says which.** You pick *This repo* or
+  *User (all repos)*; every field shows a badge for where its effective value
+  actually comes from (`repo` / `user` / `default`). The merged view is never
+  written back — doing so would flatten the user layer into the repo file,
+  copying `ado.pat` into a file that may be committed.
+- **Keys it doesn't recognise are preserved, and shown as preserved.** The
+  editor writes raw JSON, so a host-only key (`watchIntervalMinutes`) or the
+  `hub` section survives a save untouched. They're listed under *Preserved, not
+  editable* — which also means a top-level typo appears there instead of
+  vanishing silently.
+- **`ado.pat` never reaches the browser.** It's replaced by a placeholder;
+  leaving it untouched keeps the stored value. Writing a PAT into a repo file
+  that **isn't gitignored is refused** — prefer `AZURE_DEVOPS_EXT_PAT`.
+- **A save is refused unless the merged config validates**, and knob warnings
+  (above) annotate it without blocking. Saving reloads the hub immediately; a
+  hand-edit in `$EDITOR` is picked up too, so no restart either way.
+
+The hub only writes the file. A loop already running picks up the new config at
+its next stage; it is not re-read mid-stage.
 
 ## Code platform (`codePlatform` / `ado`)
 
