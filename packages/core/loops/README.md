@@ -24,6 +24,9 @@ loops/
     └── stages/{diagnose,remedy,verify,publish}.md
 ```
 
+Each kind's usage quickstart (enable snippet, commands, worked examples) lives at
+[`docs/loops/<kind>.md`](../../../docs/loops/). This page stays the manifest/authoring reference.
+
 Ideas for further kinds are cataloged in
 [`docs/design/proposed-loops.md`](../../../docs/design/proposed-loops.md).
 
