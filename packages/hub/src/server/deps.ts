@@ -29,4 +29,12 @@ export interface HubDeps {
   readonly client: Client
   readonly sh: Shell
   readonly log: Log
+  /**
+   * Re-read this repo's `.agentic-loop.json` and swap its deps. Config is read
+   * once at startup, so a route that writes the config must call this or the
+   * server keeps serving the old one until a restart. Optional: test fixtures
+   * and read-only routes have no use for it. Returns false when the new config
+   * was unusable and the last good one was kept.
+   */
+  readonly reloadRepo?: () => Promise<boolean>
 }

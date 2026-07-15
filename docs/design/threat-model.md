@@ -337,10 +337,90 @@ watched branch inside the loop's worktree.
   triage stage already uses; publish's draft-PR creation is the same T8
   backstop-hook carve-out dep-sitter uses.
 
+## Admin hub surfaces (T14–T16)
+
+The hub (`packages/hub/`, beta) is a localhost web app. It began read-only; it
+now also performs the **human gate moves** (approve / replan / ship), backlog
+kind authoring, and **config writes**. It is a fourth caller of the shared gate
+(`loop/gate.ts`), not a fourth driver: it never claims work and never runs a
+stage, so T1/T2-style prompt-injection surfaces don't extend to it. What it adds
+is an HTTP surface in front of authority the hosts already hold.
+
+The three things a browser click can now cause: a task file moves and a **git
+commit** lands; `ship` additionally opens a **pull request**; and
+`.agentic-loop.json` is **rewritten**.
+
+### T14. The HTTP surface is reachable by something other than you
+
+A local web server with no auth is reachable by any process on the machine, and
+— absent care — by any web page you visit.
+
+- **Control:** binds `127.0.0.1` only (never `0.0.0.0`); rejects requests whose
+  `Host` header isn't local (DNS rebinding); serves no CORS headers, so a
+  cross-origin page can't read a response; every mutating route additionally
+  requires an `X-Hub-Client: 1` header, which a cross-origin form post cannot
+  set without a preflight it will fail. Bodies are capped at 1 MB. Task ids and
+  kind slugs are pattern-screened before reaching the filesystem, and loop-kind
+  writes are prefix-checked inside `packages/core/loops/<kind>/`.
+- **Residual:** **no authentication.** Any local process running as you can
+  drive the hub — approve a gate, open a PR, rewrite the config. That is the
+  same authority such a process already has over the repo and your `gh` token,
+  so the hub widens the *interface*, not the privilege. Don't run it on a shared
+  or multi-tenant host, and don't port-forward it.
+
+### T15. A stale board gates the wrong task, or a gate move races a live loop
+
+The board is SSE-driven and can lag; a click could act on what you saw rather
+than what is.
+
+- **Control:** every gate request carries the status the client believed the
+  task was in, and the server refuses with a 409 if it has moved (`expectStatus`)
+  — the move is never inferred from wherever the task now sits. A move is refused
+  outright while a loop is driving the task: the hub answers core's
+  `GateCtx.isDriving` from the filesystem (a claim marker — a loop claims before
+  it drives, so driving implies claimed — or the stage marker), biased to
+  "driving" when unsure, because a false negative re-queues a task mid-BUILD and
+  destroys work. Each action maps 1:1 onto an explicit core op, never the
+  folder-inferring `*Any` shortcuts. Every write is behind a confirm naming its
+  real effect; `ship` is styled as destructive and says it opens a PR.
+- **Residual:** a *stranded* claim (from a crashed loop) reads as driving and
+  refuses the gate until released — deliberate, and the reason the backlog
+  doctor exists. The claim→gate window is the same race two claimers already
+  have, narrowed by `expectStatus`. Approval identity is still the configured
+  git identity, not an authenticated one (see T4).
+
+### T16. A config write leaks a secret or silently destroys settings
+
+`.agentic-loop.json` is the file that grants every *other* authority in this
+model — the code platform, the ADO PAT, which kinds run at all. Writing it is a
+step up from backlog-write even though it is one small file. Two failure modes
+are specific and severe: `ado.pat` lives in the **user-scope** layer, and the
+layers merge (user under repo) before validation, so a naive editor that saved
+the *merged* view to the repo file would copy the PAT into a file that is often
+committed. Separately, the schema strips keys it doesn't know, so a
+parse-then-write would delete host-only settings.
+
+- **Control:** the editor is **layer-explicit** — it reads and writes one named
+  file, and the merged view is display-only, surfaced as per-field provenance.
+  Writes apply to **raw JSON**; the schema is only ever used to *refuse* a write,
+  never to produce the bytes, so unknown keys survive and are listed as
+  explicitly preserved. `ado.pat` is redacted to a placeholder before it reaches
+  the browser, and the write re-reads from disk rather than trusting a client
+  echo. A write that would newly introduce a plaintext PAT into a repo file
+  that is **not gitignored is refused** (`git check-ignore`). A save is rejected
+  unless the merged config validates.
+- **Residual:** a PAT stored in the file is still plaintext at rest — the
+  gitignore check prevents *committing* it, not reading it off disk;
+  `AZURE_DEVOPS_EXT_PAT` remains preferred. `hub.repos` is user-scope and
+  read at startup, so the editor treats the `hub` section as read-only. Per-kind
+  knobs are lint-warned, not validated (see `configuration.md`) — a wrong knob
+  is inert, not dangerous.
+
 ## Non-goals
 
 The engineering loop never pushes, opens PRs, or merges — the human does,
-after REVIEW passes. The PR sitter pushes commits to a PR's existing branch
+after REVIEW passes (including via the hub's ship button, which is that human
+click and opens a **draft** PR; it never merges). The PR sitter pushes commits to a PR's existing branch
 and replies to its threads, but never merges, closes, or approves. The
 review sitter only ever comments; the dep and main sitters push only their
 own `feature/*`/`main-sitter/*` branches and open draft PRs — landing code

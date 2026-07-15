@@ -245,10 +245,15 @@ Two consequences worth stating, because they are what keep that line honest:
 - **Ship opens a pull request**, which is visible outside the machine. Every
   hub write is behind a confirm that names its real effect.
 
+It also **edits `.agentic-loop.json`**, one named layer at a time — never the
+merged view, which would flatten the user-scope layer (and its `ado.pat`) into
+the repo's file. It writes raw JSON, so keys core's schema doesn't know survive
+a save instead of being stripped.
+
 Its write surface is bounded by the localhost bind, a Host-header check, and an
 `X-Hub-Client` header on every mutating route — see
-[`design/threat-model.md`](./design/threat-model.md). Beta: the API shape may
-still change. See [`packages/hub/README.md`](../packages/hub/README.md).
+[`design/threat-model.md`](./design/threat-model.md) (T14–T16). Beta: the API
+shape may still change. See [`packages/hub/README.md`](../packages/hub/README.md).
 
 ## Backlog integrity rails
 

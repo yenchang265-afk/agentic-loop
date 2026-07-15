@@ -211,6 +211,81 @@ export interface SaveKindResponse {
   readonly checklist: readonly ChecklistItem[]
 }
 
+// --- config editor -----------------------------------------------------------
+
+/**
+ * `.agentic-loop.json` is two files: the user-scope `~/.agentic-loop.json` and
+ * the repo's own. The editor always names which one it is reading or writing —
+ * never the merged view. Saving a merged view back to the repo file would
+ * flatten the user layer into it, committing `ado.pat` into a file core warns
+ * must stay gitignored.
+ */
+export type ConfigLayer = "repo" | "user"
+
+/** Which layer supplies a value. `default` = neither file sets it; the schema's default applies. */
+export type ConfigProvenance = "repo" | "user" | "default"
+
+/** The placeholder a secret's value is replaced with on the way out. Echo it back to leave the secret unchanged. */
+export const REDACTED = "__REDACTED__"
+
+export interface ConfigIssue {
+  readonly path: string
+  readonly message: string
+}
+
+/** A non-blocking complaint about a `loops.<kind>` knob. These annotate a save, never fail it. */
+export interface ConfigWarning {
+  readonly path: string
+  readonly message: string
+  /** A near-miss key name, when the knob looks like a typo of a real one. */
+  readonly suggestion?: string
+}
+
+export interface ConfigLayerResponse {
+  readonly layer: ConfigLayer
+  /** Absolute path of the file this layer lives in, or null when the layer is disabled. */
+  readonly path: string | null
+  /** This layer's raw JSON, exactly as on disk, secrets redacted. Null when the file is absent. */
+  readonly raw: Record<string, unknown> | null
+  /**
+   * The merged, schema-valid config both layers produce — display only, never
+   * written back. Null when the merged view doesn't validate (see `issues`).
+   */
+  readonly effective: Record<string, unknown> | null
+  /** Per-leaf-path provenance over the merged view, keyed by dotted path. */
+  readonly provenance: Readonly<Record<string, ConfigProvenance>>
+  /** Schema errors against the merged view. A save is refused while any exist. */
+  readonly issues: readonly ConfigIssue[]
+  readonly warnings: readonly ConfigWarning[]
+  /**
+   * Top-level keys present on disk that core's schema doesn't know — a host-only
+   * key (`watchIntervalMinutes`), the hub's own `hub` section, or a typo.
+   * Surfaced read-only so they are visibly preserved rather than silently
+   * dropped, and so a typo shows up here instead of vanishing.
+   */
+  readonly passthrough: readonly string[]
+  /** Dotted paths whose values were redacted on the way out. */
+  readonly redactedPaths: readonly string[]
+  /** Set when the file exists but isn't valid JSON — rendered, not thrown. */
+  readonly parseError?: string
+}
+
+/** One edit: set a value at a dotted path, or delete it when `value` is absent. */
+export interface ConfigEdit {
+  readonly path: string
+  readonly value?: unknown
+}
+
+export interface SaveConfigRequest {
+  readonly layer: ConfigLayer
+  readonly edits: readonly ConfigEdit[]
+}
+
+export interface SaveConfigResponse {
+  readonly written: string
+  readonly warnings: readonly ConfigWarning[]
+}
+
 /**
  * The human gate moves the hub can perform. Each maps 1:1 onto a core op in
  * `loop/gate.ts` — never core's `*Any` shortcuts, which infer the gate from
@@ -324,6 +399,8 @@ export type HubEventBase =
   | { readonly type: "active" }
   | { readonly type: "tokens"; readonly id: string }
   | { readonly type: "gate"; readonly taskId: string; readonly toStatus: string }
+  /** `.agentic-loop.json` changed — the server has already reloaded by the time this arrives. */
+  | { readonly type: "config" }
 
 /** One live-update event on the `/api/events` SSE stream. */
 export type HubEvent = HubEventBase & { readonly repo: string }

@@ -11,6 +11,7 @@ import { resolveRepos } from "./repos.js"
 import { startWatcher } from "./watch.js"
 import { getActive } from "./routes/active.js"
 import { getBacklog, getTaskDetail } from "./routes/backlog.js"
+import { getConfig, saveConfig } from "./routes/config.js"
 import { postGate } from "./routes/gate.js"
 import { getKind, getKinds, previewKind, saveKind, validateKind } from "./routes/kinds.js"
 import { getRunDetail, getRuns } from "./routes/runs.js"
@@ -79,7 +80,13 @@ const restartWatcher = (repo: Repo): void => {
   watcherStops.get(repo.id)?.()
   watcherStops.set(
     repo.id,
-    startWatcher(watchShape(repo.deps), (evts) => events.broadcast(evts.map((e) => ({ ...e, repo: repo.id })))),
+    startWatcher(watchShape(repo.deps), async (evts) => {
+      // Reload BEFORE fanning out: a `config` event tells clients to refetch, and
+      // they must not refetch against the config the server has just been told is
+      // stale. Covers hand-edits in $EDITOR as well as the hub's own save.
+      if (evts.some((e) => e.type === "config")) await repo.reload()
+      events.broadcast(evts.map((e) => ({ ...e, repo: repo.id })))
+    }),
   )
 }
 
@@ -135,6 +142,8 @@ const routes: Route[] = [
   { method: "POST", pattern: "/api/kinds/preview", handler: scoped(previewKind) },
   { method: "POST", pattern: "/api/kinds/:kind", handler: scoped(saveKind), mutating: true },
   { method: "POST", pattern: "/api/gate/:action", handler: scoped(postGate), mutating: true },
+  { method: "GET", pattern: "/api/config", handler: scoped(getConfig) },
+  { method: "POST", pattern: "/api/config", handler: scoped(saveConfig), mutating: true },
 ]
 
 for (const repo of repos) restartWatcher(repo)
