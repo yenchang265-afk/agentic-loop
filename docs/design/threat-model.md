@@ -3,8 +3,9 @@
 What can go wrong when a loop kind runs largely unattended — the engineering
 PLAN → BUILD → VERIFY → REVIEW workflow (T1–T6) and the PR sitter
 (T7–T10) — and which control answers it. The audience is a team adopting
-`/agent-loop` in an environment where unreviewed code changes, data exfiltration,
-or unauditable approvals are real costs, not hypotheticals.
+`/agentic-loop:engineering` (or a sitter) in an environment where unreviewed
+code changes, data exfiltration, or unauditable approvals are real costs,
+not hypotheticals.
 
 ## Assets
 
@@ -22,7 +23,7 @@ or unauditable approvals are real costs, not hypotheticals.
 
 The loop's agents consume four kinds of input with very different trust:
 
-1. **Human input** — the goal, the plan approval, `/agent-loop` commands. Trusted.
+1. **Human input** — the goal, the plan approval, `/agentic-loop:<kind>` commands. Trusted.
 2. **Loop-internal context** — prior stage artifacts threaded between
    stages. Semi-trusted: produced by our own agents, but those agents read
    untrusted input, so anything in an artifact may be attacker-influenced.
@@ -79,8 +80,8 @@ One task's half-finished diff leaks into another task's build or review.
   in short, each execution gets its own `feature/<id>` branch or (with
   `worktreesDir` set) its own git worktree, and a lease refuses a second
   watch-mode process on the same clone.
-- **Residual:** one-shot claims (`/agent-loop task`, the MCP server's
-  `loop_claim`/`loop_start`) are **warned, not blocked**, when a live foreign
+- **Residual:** one-shot claims (`/agentic-loop:<kind> claim`, the MCP
+  server's `loop_claim`/`loop_start`) are **warned, not blocked**, when a live foreign
   watcher holds the lease — they can still race its `index.lock` and
   in-place appends (best-effort, degrades gracefully). Run extra
   watchers/claimers in their own clones for hard isolation.
