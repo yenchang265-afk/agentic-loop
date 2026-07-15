@@ -7,6 +7,7 @@ should link.
 
 | Doc | Canonical for |
 |-----|---------------|
+| [loops/](loops/README.md) | Per-kind quickstarts (engineering, pr-sitter, review-sitter, dep-sitter, main-sitter) — enable snippet, command surface, 1-2 worked examples each |
 | [architecture.md](architecture.md) | The framework (core package, manifest engine, scheduler, work sources), the engineering pipeline, and how the Claude Code variant + admin hub differ |
 | [sitters.md](sitters.md) | What each of the four experimental sitters (`pr-sitter`, `review-sitter`, `dep-sitter`, `main-sitter`) does, its stage pipeline, and its config keys |
 | [configuration.md](configuration.md) | Every `.agentic-loop.json` field (layers/precedence, `loops`, `codePlatform`/`ado`, `projectManagement`, hardening, env vars) |
