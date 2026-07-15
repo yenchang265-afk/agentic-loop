@@ -1133,3 +1133,48 @@ body {
   opacity: 0.35;
   background: transparent;
 }
+
+/* --- confirm dialog --------------------------------------------------------- */
+/* Every hub action with a real-world side effect (a commit, a PR) routes through
+   ui/Confirm. Native <dialog>, so the backdrop/focus-trap are the platform's. */
+
+.confirm-trigger {
+  display: contents;
+}
+
+.confirm {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-3);
+  background: var(--panel);
+  color: var(--text);
+  padding: var(--sp-5);
+  max-width: 32rem;
+  font-family: var(--font-sans);
+}
+.confirm::backdrop {
+  background: rgb(0 0 0 / 0.55);
+  backdrop-filter: blur(2px);
+}
+
+.confirm__title {
+  margin: 0 0 var(--sp-3);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+}
+
+.confirm__detail {
+  margin-bottom: var(--sp-4);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+.confirm__body {
+  margin-bottom: var(--sp-4);
+}
+
+.confirm__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}

@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import path from "node:path"
 import { test } from "node:test"
 import { fileURLToPath } from "node:url"
+import { DEFAULT_CONFIG } from "@agentic-loop/core/config"
 import type { KindDetailResponse, KindsResponse } from "../../shared/api.js"
 import type { HubDeps } from "../deps.js"
 import { fsClient, sh } from "../fsclient.js"
@@ -14,6 +15,7 @@ const deps: HubDeps = {
   directory: "/unused",
   tasksDir: "docs/tasks",
   boards: [],
+  config: DEFAULT_CONFIG,
   loopsDir: LOOPS_DIR,
   projectsDir: "/nonexistent-projects",
   opencodeDbPath: "/nonexistent.db",
