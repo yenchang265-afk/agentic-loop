@@ -19,7 +19,7 @@ import type { WatcherOptions } from "./watch.js"
  * never run is not a rail.
  */
 
-export const buildDeps = async (directory: string, log: Log): Promise<HubDeps> => {
+export const buildDeps = async (directory: string, log: Log, reloadRepo?: () => Promise<boolean>): Promise<HubDeps> => {
   const config = await loadConfig(fsClient, directory)
   return {
     directory,
@@ -32,6 +32,7 @@ export const buildDeps = async (directory: string, log: Log): Promise<HubDeps> =
     client: fsClient,
     sh,
     log,
+    ...(reloadRepo ? { reloadRepo } : {}),
   }
 }
 
@@ -78,22 +79,27 @@ export const makeRepo = async (
   log: Log,
   onWatchShapeChanged: (repo: Repo) => void = () => {},
 ): Promise<Repo> => {
+  // Deps carry `reloadRepo` so a route that writes the config can refresh it
+  // without reaching back into main.ts. It closes over `repo`, which is
+  // assigned below — only ever called long after construction.
+  const reload = async (): Promise<boolean> => {
+    try {
+      const next = await buildDeps(directory, log, reload)
+      const moved = JSON.stringify(watchShape(repo.deps)) !== JSON.stringify(watchShape(next))
+      repo.deps = next
+      if (moved) onWatchShapeChanged(repo)
+      return true
+    } catch (err) {
+      log("warn", `config reload failed for ${id} — keeping the last good config: ${(err as Error).message}`)
+      return false
+    }
+  }
+
   const repo: Repo = {
     id,
     directory,
-    deps: await buildDeps(directory, log),
-    reload: async () => {
-      try {
-        const next = await buildDeps(directory, log)
-        const moved = JSON.stringify(watchShape(repo.deps)) !== JSON.stringify(watchShape(next))
-        repo.deps = next
-        if (moved) onWatchShapeChanged(repo)
-        return true
-      } catch (err) {
-        log("warn", `config reload failed for ${id} — keeping the last good config: ${(err as Error).message}`)
-        return false
-      }
-    },
+    deps: await buildDeps(directory, log, reload),
+    reload,
   }
   return repo
 }

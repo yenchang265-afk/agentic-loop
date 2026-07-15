@@ -1266,3 +1266,92 @@ body {
 .gate-msg--warning {
   color: var(--warn);
 }
+
+/* --- config editor ---------------------------------------------------------- */
+/* Always edits ONE named layer; the merged view appears only as provenance
+   badges. See routes/config.ts for why that is not a UI preference. */
+
+.cfg {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  max-width: 46rem;
+}
+
+.cfg-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.cfg-layers {
+  display: flex;
+  gap: var(--sp-2);
+}
+.cfg-file {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.cfg-section {
+  border: 1px solid var(--border);
+  border-radius: var(--r-3);
+  background: var(--panel);
+  padding: var(--sp-4);
+}
+.cfg-section h3 {
+  margin: 0 0 var(--sp-3);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.cfg-field {
+  margin-bottom: var(--sp-4);
+}
+.cfg-field input[type="checkbox"] {
+  width: auto;
+  align-self: flex-start;
+}
+
+.cfg-hint {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+}
+
+.cfg-path {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--muted);
+  opacity: 0.7;
+}
+
+.cfg-warnings {
+  margin: 0;
+  padding-left: var(--sp-4);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--muted);
+}
+.cfg-warnings code {
+  font-family: var(--font-mono);
+  color: var(--text);
+}
+
+.cfg-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.cfg-saved {
+  font-size: var(--fs-xs);
+  color: var(--ok);
+  font-family: var(--font-mono);
+}
+.cfg-error {
+  font-size: var(--fs-xs);
+  color: var(--warn);
+}

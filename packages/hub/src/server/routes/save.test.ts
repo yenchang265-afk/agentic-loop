@@ -75,7 +75,9 @@ test("saveKind writes loop.json + prompt stubs and returns the checklist", async
   assert.match(labels, /gen:prompts/)
   assert.match(labels, /plugins\/opencode\/commands\/scan\.md/)
   assert.match(labels, /plugins\/claude\/commands\/triage-bot\.md/)
-  assert.match(labels, /"triage-bot": \{"enabled": true\}/)
+  // The last step used to read "go hand-edit .agentic-loop.json". The Config tab
+  // writes that key now, so the checklist points at it instead of at a file.
+  assert.match(labels, /enable it in the Config tab \(loops\.triage-bot\.enabled\)/)
   assert.ok(body.checklist.every((c) => c.done === false))
   fs.rmSync(repo, { recursive: true, force: true })
 })

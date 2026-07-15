@@ -7,7 +7,7 @@ import { diffSnapshots, scanSnapshot, type WatchSnapshot } from "./watch.js"
 
 const GATES = ["plan-review", "in-review"] as const
 
-const empty: WatchSnapshot = { tasks: {}, runs: {}, stageMarker: null, lease: null }
+const empty: WatchSnapshot = { tasks: {}, runs: {}, stageMarker: null, lease: null, config: null }
 const snap = (partial: Partial<WatchSnapshot>): WatchSnapshot => ({ ...empty, ...partial })
 
 test("diffSnapshots on identical snapshots yields nothing", () => {
@@ -74,4 +74,24 @@ test("diffSnapshots emits gate for arrivals in a custom (manifest-declared) gate
   const next = snap({ tasks: { "waiting-human": { "t.md": 1 } } })
   const events = diffSnapshots(prev, next, ["waiting-human"])
   assert.deepEqual(events, [{ type: "gate", taskId: "t", toStatus: "waiting-human" }, { type: "backlog" }])
+})
+
+test("diffSnapshots emits config when .agentic-loop.json changes", () => {
+  const prev = snap({ config: "100:1" })
+  const next = snap({ config: "120:2" })
+  assert.deepEqual(diffSnapshots(prev, next, GATES), [{ type: "config" }])
+  // Appearing and disappearing both count — a deleted config falls back to defaults.
+  assert.deepEqual(diffSnapshots(snap({ config: null }), prev, GATES), [{ type: "config" }])
+  assert.deepEqual(diffSnapshots(prev, snap({ config: null }), GATES), [{ type: "config" }])
+})
+
+test("scanSnapshot picks up the config file, which lives outside tasksDir", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hub-watch-cfg-"))
+  fs.mkdirSync(path.join(dir, "docs", "tasks", "queued"), { recursive: true })
+  assert.equal(scanSnapshot(dir, "docs/tasks", ["queued"]).config, null, "absent config reads as null")
+
+  fs.writeFileSync(path.join(dir, ".agentic-loop.json"), JSON.stringify({ maxIterations: 3 }))
+  const withCfg = scanSnapshot(dir, "docs/tasks", ["queued"])
+  assert.notEqual(withCfg.config, null, "the poll is what delivers this — fs.watch never sees it")
+  fs.rmSync(dir, { recursive: true, force: true })
 })

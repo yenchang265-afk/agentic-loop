@@ -1,6 +1,7 @@
 import { StrictMode, useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
 import type { MonitorKindsResponse } from "../shared/api.js"
+import { ConfigEditor } from "./config/ConfigEditor.js"
 import { Creator } from "./creator/Creator.js"
 import { EventsProvider, useEvents } from "./events.js"
 import { ActivePanel } from "./monitor/ActivePanel.js"
@@ -14,11 +15,12 @@ import { BellIcon } from "./ui/icons.js"
 import { ThemeToggle } from "./ui/ThemeToggle.js"
 import "./theme.css"
 
-type Tab = "monitor" | "creator"
+type Tab = "monitor" | "creator" | "config"
 
 const TABS: readonly { id: Tab; label: string }[] = [
   { id: "monitor", label: "Loop monitor" },
   { id: "creator", label: "Loop creator" },
+  { id: "config", label: "Config" },
 ]
 
 const HeaderStatus = () => {
@@ -114,6 +116,7 @@ const App = () => {
       <main className="hub-main">
         {tab === "monitor" && <Monitor />}
         {tab === "creator" && <Creator />}
+        {tab === "config" && <ConfigEditor />}
       </main>
     </div>
   )

@@ -19,6 +19,12 @@ export interface WatchSnapshot {
   readonly stageMarker: string | null
   /** watch-lease owner.json key, or null */
   readonly lease: string | null
+  /**
+   * `.agentic-loop.json` key, or null when absent. It lives outside `tasksDir`,
+   * so the recursive `fs.watch` never sees it — the poll is what delivers this
+   * one, which is exactly the guarantee the poll exists for.
+   */
+  readonly config: string | null
 }
 
 export type { HubEventBase } from "../shared/api.js"
@@ -70,6 +76,7 @@ export const scanSnapshot = (directory: string, tasksDir: string, statuses: read
     runs,
     stageMarker: statKey(path.join(runsDir, ".stage.json")),
     lease: statKey(path.join(runsDir, ".watch-lease", "owner.json")),
+    config: statKey(path.join(directory, ".agentic-loop.json")),
   }
 }
 
@@ -112,6 +119,11 @@ export const diffSnapshots = (
     else events.push({ type: "run", id: name.replace(/\.md$/, "") })
   }
   if (activeChanged) events.push({ type: "active" })
+
+  // Config changed on disk — from the hub's own save, or a hand-edit in $EDITOR.
+  // The server reloads before fanning this out (see main.ts), because config is
+  // otherwise read once at startup.
+  if (prev.config !== next.config) events.push({ type: "config" })
 
   return events
 }

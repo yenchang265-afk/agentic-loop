@@ -17,6 +17,8 @@ import type {
   SaveKindResponse,
   ValidateResponse,
 } from "../../shared/api.js"
+import { readRawLayer } from "../configfile.js"
+import { valueAt } from "../configlayers.js"
 import type { HubDeps } from "../deps.js"
 import { badRequest, json, notFound, ok, type JsonResponse, type ParsedRequest } from "../http.js"
 
@@ -187,17 +189,13 @@ const buildChecklist = (deps: HubDeps, manifest: LoopManifest): ChecklistItem[] 
   for (const ref of hookRefs) {
     items.push({ done: false, label: `register hook "${ref}" at host startup (pattern: packages/core/src/kinds/)` })
   }
-  let enabled = false
-  try {
-    const cfg = JSON.parse(fs.readFileSync(path.join(repo, ".agentic-loop.json"), "utf8")) as {
-      loops?: Record<string, { enabled?: boolean }>
-    }
-    enabled = cfg.loops?.[manifest.kind]?.enabled === true
-  } catch {
-    // no config — engineering is default-on, everything else opt-in
-  }
+  // Read through the same layer reader the config editor uses, rather than a
+  // second raw fs.readFileSync + JSON.parse that could drift from it.
+  const cfg = readRawLayer(deps, "repo").raw
+  const enabled = valueAt(cfg, ["loops", manifest.kind, "enabled"]) === true
   if (manifest.kind !== "engineering") {
-    items.push({ done: enabled, label: `enable in .agentic-loop.json: {"loops": {"${manifest.kind}": {"enabled": true}}}` })
+    // No longer "go hand-edit the file" — the Config tab writes this.
+    items.push({ done: enabled, label: `enable it in the Config tab (loops.${manifest.kind}.enabled)` })
   }
   return items
 }
