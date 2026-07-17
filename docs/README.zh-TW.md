@@ -37,6 +37,6 @@
 旁邊（例如 [`README.zh-TW.md`](../README.zh-TW.md) 就放在
 [`../README.md`](../README.md) 旁邊），並在兩個檔案的第一行放上單行的
 語言切換器，例如英文檔案中放 `English | [繁體中文](README.zh-TW.md)`，
-翻譯檔案中放 `[English](README.md) | 繁體中文`。目前只有 `README.md`
-被翻譯；隨著需求出現，用同樣的方式增加更多文件或語言——不要預先翻譯
-所有東西。
+翻譯檔案中放 `[English](README.md) | 繁體中文`。所有使用者面向的
+文件（本索引、`docs/` 下的所有內容，以及套件／外掛的 README）目前
+都已有 zh-TW 翻譯；隨著需求出現，用同樣的方式增加更多語言。
