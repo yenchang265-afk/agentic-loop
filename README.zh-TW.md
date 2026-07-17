@@ -224,7 +224,7 @@ npm install && npm run typecheck:all && npm run test:all
 
 `typecheck:all` / `test:all` 涵蓋每一個 workspace：核心套件
 （`packages/core` —— 引擎、清單、排程器、來源、儲存）、管理面板
-（`packages/hub`）、OpenCode 外掛（`src/**/*.test.ts`），以及 Claude
+（`packages/hub`）、OpenCode 外掛（`plugins/opencode`），以及 Claude
 Code MCP 伺服器（`plugins/claude/mcp-server`）。若只想執行 OpenCode 外掛的
 測試套件，可限定到它的 workspace —— `npm run typecheck -w agentic-loop` /
 `npm test -w agentic-loop`（或者在 `plugins/opencode/` 內執行
