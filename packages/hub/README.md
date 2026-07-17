@@ -18,6 +18,22 @@ The hub only watches repos you name: with no `--dir` and no `hub` section in
 the user-scope config it exits with a usage message rather than assuming the
 cwd.
 
+**Loop monitor** — a board per kind, derived from its manifest: gate columns,
+task cards carrying the human gate moves (approve / replan / ship), and run
+history with per-stage token usage.
+
+![Loop monitor board with gate columns and run history](docs/screenshots/monitor.png)
+
+**Loop creator** — the manifest state machine on a canvas: stages, transitions,
+and a side panel that edits the same `LoopManifestSchema` the engine runs.
+
+![Loop creator canvas showing the engineering loop's stages and transitions](docs/screenshots/creator.png)
+
+**Config** — edits `.agentic-loop.json` one layer at a time, badging every
+field with where its effective value comes from (`REPO` here).
+
+![Config tab with REPO-sourced field badges](docs/screenshots/config.png)
+
 ## Monitoring multiple repos
 
 `--dir` is repeatable, and values may contain `*` wildcards (`*` matches
