@@ -20,10 +20,10 @@ jobs:
       - name: Install dependencies (builds @agentic-loop/core via prepare)
         run: npm ci
 
-      - name: Typecheck (core + mcp-server + opencode plugin)
+      - name: Typecheck (all workspaces)
         run: npm run typecheck:all
 
-      - name: Test (core + opencode plugin)
+      - name: Test (all workspaces + Claude hooks)
         run: npm run test:all
 
       - name: Generated prompts are in sync with prompts/ sources
