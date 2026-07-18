@@ -1,5 +1,6 @@
+import { useState } from "react"
 import type { LoopManifest, StageDef } from "@agentic-loop/core/manifest/schema"
-import type { GraphMeta } from "./graphmodel.js"
+import { terminalStatusOptions, type GraphMeta } from "./graphmodel.js"
 import { PromptPreview } from "./PromptPreview.js"
 import { Button } from "../ui/Button.js"
 
@@ -98,6 +99,60 @@ export const StageForm = ({
       <Button variant="danger" onClick={onDelete}>
         Delete stage
       </Button>
+    </div>
+  )
+}
+
+const CUSTOM_STATUS = "__custom__"
+
+/** Inline popover form for adding a park/done terminal (stop never asks — it has no status). */
+export const TerminalAddForm = ({
+  outcome,
+  workSource,
+  onAdd,
+  onCancel,
+}: {
+  outcome: "park" | "done"
+  workSource: LoopManifest["workSource"]
+  onAdd: (toStatus?: string) => void
+  onCancel: () => void
+}) => {
+  const options = terminalStatusOptions(workSource)
+  const [choice, setChoice] = useState("")
+  const [custom, setCustom] = useState("")
+  const freeText = options.length === 0 || choice === CUSTOM_STATUS
+  const submit = (): void => {
+    // trim + drop empties: toStatus is optional but must be non-empty when present
+    const status = (freeText ? custom : choice).trim()
+    onAdd(status || undefined)
+  }
+  return (
+    <div className="panel-form">
+      <h3>Add {outcome} terminal</h3>
+      {options.length > 0 && (
+        <Field label="move the task to (backlog status)">
+          <select value={choice} onChange={(e) => setChoice(e.target.value)}>
+            <option value="">(no status move)</option>
+            {options.map((s) => (
+              <option key={s} value={s}>
+                {s}/
+              </option>
+            ))}
+            <option value={CUSTOM_STATUS}>custom…</option>
+          </select>
+        </Field>
+      )}
+      {freeText && (
+        <Field label="status folder (optional)">
+          <input value={custom} onChange={(e) => setCustom(e.target.value)} placeholder="e.g. plan-review" />
+        </Field>
+      )}
+      <div className="terminal-popover__actions">
+        <Button onClick={onCancel}>Cancel</Button>
+        <Button variant="primary" onClick={submit}>
+          Add
+        </Button>
+      </div>
     </div>
   )
 }
