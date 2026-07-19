@@ -305,8 +305,8 @@ API instead of `gh pr create` when the platform resolves to `ado`. The
 into the same judged shape the GitHub source produces — the "only the newest
 head, never mid-run" logic is identical either way. Neither `dependency-scan`
 nor `ci-runs` needs `ado.selfLogin` (unlike the PR-shaped sources, they
-aren't scoped to an identity), but a polling credential is still required — a
-PAT, or a logged-in az CLI when `ado.access` is `"az"` (the default).
+aren't scoped to an identity), but the PAT (`AZURE_DEVOPS_EXT_PAT`) is still
+required in every access mode.
 
 Every sitter kind's publish stage — on ADO — opens PRs and posts thread
 comments through the Claude host's write backstop hook (`check-stage-guard`),
@@ -343,9 +343,8 @@ kind or stage; mutating-looking ADO MCP tool names are blocked best-effort.
     (and the generic `az devops invoke` for what the CLI lacks a verb for,
     e.g. thread-comment replies), and the driver's polling and ship-gate
     calls shell the same CLI (`az devops invoke` is a REST passthrough, so
-    responses parse identically). Auth is the CLI's own: `az login`, or a
-    set `AZURE_DEVOPS_EXT_PAT` (which the extension honors) — no PAT
-    required when az is logged in.
+    responses parse identically). Auth is `AZURE_DEVOPS_EXT_PAT`, set up
+    beforehand — the azure-devops extension honors it directly.
   - `"rest"` — raw REST, authenticated with `AZURE_DEVOPS_EXT_PAT`: `curl`
     in the stage prompts, fetch in the driver (the pre-`access` behavior;
     pin this to keep it). This is the only mode where `ado.customHeaders`

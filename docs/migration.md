@@ -14,10 +14,10 @@ English | [繁體中文](migration.zh-TW.md)
   change carries no access stamp and keeps rendering the curl/REST branch it
   was claimed under.
 - **Polling and the ship gate follow the same choice** — under `"az"` the
-  driver shells the az CLI for its own calls too (auth: `az login`, or
-  `AZURE_DEVOPS_EXT_PAT` which the extension honors), so no PAT is needed
-  anywhere with a logged-in CLI. `"rest"` keeps fetch+PAT. `"mcp"` covers
-  stage agents only — the driver's polling still needs a PAT. See
+  driver shells the az CLI for its own calls too; your existing
+  `AZURE_DEVOPS_EXT_PAT` keeps working unchanged (the azure-devops extension
+  honors it). `"rest"` keeps fetch+PAT. `"mcp"` covers stage agents only —
+  the driver's polling still needs the PAT. See
   [configuration.md](configuration.md#code-platform-codeplatform--ado).
 
 ## To layered configuration (user scope + repo scope)

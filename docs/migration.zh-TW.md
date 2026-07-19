@@ -13,10 +13,9 @@
 - **進行中的迴圈不受影響**：在這次變更前認領的狀態快照沒有存取
   戳記，會繼續渲染它被認領時的 curl/REST 分支。
 - **輪詢與 ship 把關點跟隨同一個選擇**——在 `"az"` 下 driver 自己的
-  呼叫也走 az CLI（認證：`az login`，或擴充會採用的
-  `AZURE_DEVOPS_EXT_PAT`），CLI 已登入時任何地方都不需要 PAT。
-  `"rest"` 維持 fetch+PAT。`"mcp"` 只涵蓋階段代理人——driver 的
-  輪詢仍需要一個 PAT。見
+  呼叫也走 az CLI；你既有的 `AZURE_DEVOPS_EXT_PAT` 原樣繼續生效
+  （azure-devops 擴充直接採用它）。`"rest"` 維持 fetch+PAT。
+  `"mcp"` 只涵蓋階段代理人——driver 的輪詢仍需要 PAT。見
   [configuration.md](configuration.md#code-platform-codeplatform--ado)。
 
 ## 遷移到分層設定（使用者層級 + 儲存庫層級）

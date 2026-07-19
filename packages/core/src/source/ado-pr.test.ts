@@ -480,7 +480,7 @@ test("access az: claims over the az CLI with no PAT at all — REST transport ne
   assert.match(list ?? "", /--query-parameters searchCriteria\.status=active \$top=100/)
 })
 
-test("access az: a failed az call surfaces as an actionable skip naming the CLI login", async () => {
+test("access az: a failed az call surfaces as an actionable skip carrying the CLI's stderr", async () => {
   const src = makeAdoPrSource({
     $: scriptedShell([]),
     http: scriptedHttp([]),
@@ -496,6 +496,6 @@ test("access az: a failed az call surfaces as an actionable skip naming the CLI 
   })
   const { item, skip } = await src.claimNext()
   assert.equal(item, null)
-  assert.match(skip?.message ?? "", /az CLI.*az login/s)
+  assert.match(skip?.message ?? "", /az CLI.*ERROR: Please run 'az login'/s) // the CLI's own stderr, verbatim
   assert.equal(skip?.actionable, true)
 })

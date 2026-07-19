@@ -196,11 +196,12 @@ ensure_gh() {
 # ---------------------------------------------------------------------------
 # codePlatform "ado" reaches Azure DevOps per config `ado.access`:
 #   az   (default) — the az CLI with the azure-devops extension; stage agents
-#                    AND the engine's own polling/ship calls go through it
-#                    (auth: az login, or AZURE_DEVOPS_EXT_PAT which it honors)
+#                    AND the engine's own polling/ship calls go through it.
+#                    Install and auth (AZURE_DEVOPS_EXT_PAT) are provisioned
+#                    beforehand — only a presence check here.
 #   rest           — raw curl/fetch + AZURE_DEVOPS_EXT_PAT (nothing to install)
 #   mcp            — an Azure DevOps MCP server configured in the agent host;
-#                    covers stage agents only — polling still needs a PAT
+#                    covers stage agents only — polling still needs the PAT
 ado_access() {
   # Best-effort read of ado.access from .agentic-loop.json; defaults to "az".
   local cfg=".agentic-loop.json"
@@ -231,20 +232,11 @@ ensure_ado() {
       note_manual "ado.access \"mcp\": covers stage agents only — the engine's polling still needs AZURE_DEVOPS_EXT_PAT"
       ;;
     *)
-      if ! command -v az >/dev/null 2>&1; then
-        todo "az CLI not found"
-        note_manual "az: https://learn.microsoft.com/cli/azure/install-azure-cli, then: az extension add --name azure-devops && az login"
-        return 0
-      fi
-      if az extension show --name azure-devops >/dev/null 2>&1; then
-        ok "Azure DevOps (az): az CLI with azure-devops extension"
-      elif cannot_install; then
-        note_manual "az azure-devops extension: az extension add --name azure-devops"
+      if command -v az >/dev/null 2>&1; then
+        ok "Azure DevOps (az): az CLI present"
       else
-        az extension add --name azure-devops >/dev/null 2>&1 && ok "az azure-devops extension installed" \
-          || note_manual "az azure-devops extension: az extension add --name azure-devops"
+        todo "az CLI not found (expected pre-provisioned for ado.access \"az\")"
       fi
-      note_manual "ado auth: az login (or set AZURE_DEVOPS_EXT_PAT — a PAT always wins)"
       ;;
   esac
 }

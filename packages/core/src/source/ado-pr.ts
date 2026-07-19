@@ -98,10 +98,10 @@ export const makeAdoPrSource = (deps: AdoPrDeps): WorkSource => {
 
   const markers = makeClaimMarkers($, directory, tasksDir, kind)
 
-  // Data transport per config `ado.access`: "az" shells the az CLI (its own
-  // auth — az login or a set AZURE_DEVOPS_EXT_PAT); anything else is REST
-  // fetch with a PAT. `az devops invoke` is a REST passthrough, so both
-  // transports return the same JSON envelopes and share the schema parsing.
+  // Data transport per config `ado.access`: "az" shells the az CLI (auth via
+  // the pre-provisioned AZURE_DEVOPS_EXT_PAT); anything else is REST fetch
+  // with a PAT. `az devops invoke` is a REST passthrough, so both transports
+  // return the same JSON envelopes and share the schema parsing.
   const useAz = ado.access === "az"
   const az = deps.azExec ?? execAz
   const authHeader = makeAdoAuthHeader({ pat })
@@ -196,15 +196,15 @@ export const makeAdoPrSource = (deps: AdoPrDeps): WorkSource => {
     loopKind: kind,
 
     async claimNext() {
-      // az mode needs no PAT here — the CLI brings its own auth (az login or
-      // AZURE_DEVOPS_EXT_PAT); a broken login surfaces as a failed list below.
+      // az mode needs no PAT check — the pre-provisioned CLI carries its own
+      // auth; a broken environment surfaces as a failed list below.
       if (!pat && !useAz) {
         return {
           item: null,
           skip: {
             message:
               `${kind}: Azure DevOps PAT not set — export ${PAT_ENV} with a token that has Code (read) scope so the ` +
-              `sitter can call the ADO REST API (or set ado.access "az" to poll through the az CLI).`,
+              `sitter can call the ADO REST API.`,
             actionable: true,
           } satisfies ClaimSkipReason,
         }
@@ -229,7 +229,7 @@ export const makeAdoPrSource = (deps: AdoPrDeps): WorkSource => {
           skip: {
             message: useAz
               ? `${kind}: Azure DevOps pull-request list failed (az CLI) — ${out.statusText}. ` +
-                `Is az logged in (az login, or ${PAT_ENV}) with the azure-devops extension, and are ado.organization/project correct?`
+                `Are ado.organization/project correct?`
               : `${kind}: Azure DevOps pull-request list failed — HTTP ${out.status} ${out.statusText}. ` +
                 `Is ${PAT_ENV} a valid token with Code (read) scope, and are ado.organization/project correct?`,
             actionable: true,

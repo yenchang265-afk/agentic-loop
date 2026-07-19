@@ -29,8 +29,8 @@ import type { ClaimSkipReason, TerminalOutcome, WorkSource } from "./types.js"
  * shared verbatim via `ci-runs-shared.ts`.
  *
  * Transport and auth follow config `ado.access` (same rules as `ado-pr.ts`):
- * `"az"` (the default) shells the az CLI, which brings its own auth (az login,
- * or `AZURE_DEVOPS_EXT_PAT` which the extension honors); otherwise raw REST
+ * `"az"` (the default) shells the az CLI, authenticated by the
+ * pre-provisioned `AZURE_DEVOPS_EXT_PAT`; otherwise raw REST
  * with the PAT (env, falling back to config `ado.pat`) as HTTP Basic. Unlike
  * the PR sources, no `ado.selfLogin` is needed — CI status isn't scoped to an
  * identity, only to the watched branch.
@@ -114,15 +114,15 @@ export const makeAdoCiRunsSource = (deps: AdoCiRunsDeps): WorkSource => {
     loopKind: kind,
 
     async claimNext() {
-      // az mode needs no PAT here — the CLI brings its own auth (az login or
-      // AZURE_DEVOPS_EXT_PAT); a broken login surfaces as a failed list below.
+      // az mode needs no PAT check — the pre-provisioned CLI carries its own
+      // auth; a broken environment surfaces as a failed list below.
       if (!pat && !useAz) {
         return {
           item: null,
           skip: {
             message:
               `${kind}: Azure DevOps PAT not set — export ${PAT_ENV} with a token that has Build (read) scope so the ` +
-              `sitter can call the ADO REST API (or set ado.access "az" to poll through the az CLI).`,
+              `sitter can call the ADO REST API.`,
             actionable: true,
           } satisfies ClaimSkipReason,
         }
@@ -149,7 +149,7 @@ export const makeAdoCiRunsSource = (deps: AdoCiRunsDeps): WorkSource => {
           skip: {
             message: useAz
               ? `${kind}: Azure DevOps build list failed (az CLI) — ${out.statusText}. ` +
-                `Is az logged in (az login, or ${PAT_ENV}) with the azure-devops extension, and are ado.organization/project correct?`
+                `Are ado.organization/project correct?`
               : `${kind}: Azure DevOps build list failed — HTTP ${out.status} ${out.statusText}. ` +
                 `Is ${PAT_ENV} a valid token with Build (read) scope, and are ado.organization/project correct?`,
             actionable: true,

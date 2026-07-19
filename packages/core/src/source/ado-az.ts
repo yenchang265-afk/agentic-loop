@@ -6,11 +6,11 @@ import { execFile } from "node:child_process"
  * `ado.access` is `"az"`. `az devops invoke` is a raw REST passthrough — it
  * returns the same JSON envelopes (`{ value: [...] }` wrappers included) the
  * REST transport gets, so the sources' schema parsing is shared verbatim.
- * Auth is the CLI's own: `az login`, `az devops login`, or a set
- * `AZURE_DEVOPS_EXT_PAT` (which the extension honors). The `rest` access
- * method keeps the fetch+PAT transport; `mcp` cannot cover these calls at all
- * (the driver runs in the host process, outside the agent session's MCP
- * reach) and polls over REST+PAT.
+ * Auth is the pre-provisioned `AZURE_DEVOPS_EXT_PAT`, which the azure-devops
+ * extension honors directly. The `rest` access method keeps the fetch+PAT
+ * transport; `mcp` cannot cover these calls at all (the driver runs in the
+ * host process, outside the agent session's MCP reach) and polls over
+ * REST+PAT.
  */
 
 /** One az CLI run: `ok` mirrors the exit code; `body` is stdout (JSON via `--output json`). */

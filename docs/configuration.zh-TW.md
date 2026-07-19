@@ -282,8 +282,8 @@ REST API（`_apis/build/builds`）而不是 `gh run list`，把建置結果
 正規化成和 GitHub 來源相同的、經過裁定的形狀——「只看最新的 head，
 絕不看執行中途」這條邏輯兩邊完全一樣。`dependency-scan` 和
 `ci-runs` 都不需要 `ado.selfLogin`（不像 PR 形狀的來源，它們不受限
-於某個身分），但仍然需要一個輪詢憑證——一個 PAT，或當 `ado.access`
-為 `"az"`（預設）時一個已登入的 az CLI。
+於某個身分），但每種存取模式下都仍然需要 PAT
+（`AZURE_DEVOPS_EXT_PAT`）。
 
 每種 sitter 類型的 publish 階段——在 ADO 上——都是透過 Claude host
 的寫入防線 hook（`check-stage-guard`）開啟 PR 和發表討論串留言的，
@@ -319,9 +319,8 @@ id 片段的 POST（這正是 ADO 如何草擬一個 PR 的方式，`isDraft: tr
     階段代理人執行 `az repos pr …` / `az pipelines runs …`（CLI 沒有
     動詞的操作——例如討論串留言回覆——則用通用的 `az devops
     invoke`），而 driver 的輪詢與 ship 把關點呼叫也走同一個 CLI
-    （`az devops invoke` 是 REST 直通，回應解析完全相同）。認證是
-    CLI 自己的：`az login`，或已設定的 `AZURE_DEVOPS_EXT_PAT`
-    （擴充會採用它）——az 已登入時不需要 PAT。
+    （`az devops invoke` 是 REST 直通，回應解析完全相同）。認證用
+    事先備妥的 `AZURE_DEVOPS_EXT_PAT`——azure-devops 擴充直接採用它。
   - `"rest"`——原生 REST，用 `AZURE_DEVOPS_EXT_PAT` 認證：階段提示
     用 `curl`，driver 用 fetch（`access` 出現之前的行為；想保留就
     固定住這個值）。只有這個模式下 `ado.customHeaders` 與

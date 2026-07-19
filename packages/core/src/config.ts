@@ -124,9 +124,10 @@ const BaseConfigSchema = z.object({
        * agent session). Selects the stage prompts' command examples, the
        * stage bash allowlist, and the driver's own data transport: under
        * `az` the poll sources and ship gate shell the az CLI too (auth via
-       * az login, or AZURE_DEVOPS_EXT_PAT which the extension honors); under
-       * `rest` they fetch REST with the PAT; `mcp` covers stage agents only
-       * (out of the host process's reach), so its driver side polls REST+PAT.
+       * the pre-provisioned AZURE_DEVOPS_EXT_PAT, which the extension
+       * honors); under `rest` they fetch REST with the PAT; `mcp` covers
+       * stage agents only (out of the host process's reach), so its driver
+       * side polls REST+PAT.
        */
       access: z.enum(ADO_ACCESS_METHODS).default("az"),
       /** Repository name; omitted → all repositories in the project. */

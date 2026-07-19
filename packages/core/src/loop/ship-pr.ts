@@ -200,8 +200,8 @@ const shipAdo = async (
   const ado = config.ado
   if (!ado) return { attempted: true, created: false, reason: "ado config missing" }
   if (!ado.repository) return { attempted: true, created: false, reason: "ado.repository not configured (required to open a PR)" }
-  // Data transport per config `ado.access`: "az" shells the az CLI (its own
-  // auth — az login or AZURE_DEVOPS_EXT_PAT); anything else is REST + PAT.
+  // Data transport per config `ado.access`: "az" shells the az CLI (auth via
+  // the pre-provisioned AZURE_DEVOPS_EXT_PAT); anything else is REST + PAT.
   if (ado.access === "az") return shipAdoAz($, log, directory, az, ado, branch, title)
   const pat = process.env[PAT_ENV] ?? ado.pat ?? ""
   let authHeader: string
