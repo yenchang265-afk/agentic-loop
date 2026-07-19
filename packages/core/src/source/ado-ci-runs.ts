@@ -9,6 +9,7 @@ import {
   adoFetch,
   AdoBuildListSchema,
   buildAdoHeaders,
+  makeAdoAuthHeader,
   normalizeAdoBuild,
   resolveAdoHeaders,
 } from "./ado-shared.js"
@@ -71,13 +72,14 @@ export const makeAdoCiRunsSource = (deps: AdoCiRunsDeps): WorkSource => {
   const claimsDir = `${directory}/${tasksDir}/runs/${kind}/.claims`
   let resolvedBranch: string | null = null
 
-  const authHeader = `Basic ${Buffer.from(`:${pat}`).toString("base64")}`
+  // PAT wins; in `az` mode without one, a Bearer token is minted via the az CLI.
+  const authHeader = makeAdoAuthHeader({ pat, access: ado.access })
 
-  /** One authenticated GET. Never throws — a network error reads as a non-ok response, like the CLI's `nothrow()`. */
+  /** One authenticated GET. Never throws — a network error (or missing credential) reads as a non-ok response, like the CLI's `nothrow()`. */
   const get = async (url: string): Promise<{ ok: boolean; status: number; statusText: string; body: string }> => {
     try {
       const res = await http(url, {
-        headers: buildAdoHeaders({ Authorization: authHeader, Accept: "application/json" }, customHeaders),
+        headers: buildAdoHeaders({ Authorization: await authHeader(), Accept: "application/json" }, customHeaders),
       })
       const body = await res.text().catch(() => "")
       return { ok: res.ok, status: res.status, statusText: res.statusText, body }
@@ -186,7 +188,7 @@ export const makeAdoCiRunsSource = (deps: AdoCiRunsDeps): WorkSource => {
         await $`rmdir ${`${claimsDir}/head-${shortSha(judged.sha)}`}`.quiet().nothrow()
         return { item: null, skip: { message: `${kind}: could not pin the red head locally`, actionable: true } }
       }
-      return { item: redHeadWorkItem(loaded, "ado", b, judged.sha, judged.failing), skip: null }
+      return { item: redHeadWorkItem(loaded, "ado", b, judged.sha, judged.failing, deps.ado.access), skip: null }
     },
 
     async release(work) {

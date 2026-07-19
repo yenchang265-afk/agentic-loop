@@ -13,6 +13,9 @@ permission:
     "gh api *": allow
     "curl -sS -u :* https://dev.azure.com/*": allow
     "curl -sS -u :* https://*.visualstudio.com/*": allow
+    # ado.access "az": read-only az CLI equivalents.
+    "az repos pr show*": allow
+    "az repos pr list*": allow
     "git status*": allow
     "git diff*": allow
     "git log*": allow

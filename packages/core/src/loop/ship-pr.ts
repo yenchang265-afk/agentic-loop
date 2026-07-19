@@ -1,6 +1,6 @@
 import type { Log, Shell } from "../host.js"
 import { platformFor } from "../config.js"
-import { ADO_HEADERS_ENV, adoFetch, buildAdoHeaders, resolveAdoHeaders } from "../source/ado-shared.js"
+import { ADO_HEADERS_ENV, adoFetch, buildAdoHeaders, makeAdoAuthHeader, resolveAdoHeaders } from "../source/ado-shared.js"
 import type { Config } from "./state.js"
 import { branchExists, currentBranch, pushBranch } from "./git.js"
 
@@ -66,7 +66,7 @@ const shipGithub = async ($: Shell, log: Log, directory: string, branch: string,
   return { attempted: true, created: false, reason }
 }
 
-// --- Azure DevOps (REST, PAT auth — mirrors source/ado-pr.ts's auth) ---
+// --- Azure DevOps (REST; PAT or az-minted Bearer auth — mirrors source/ado-pr.ts) ---
 
 const PAT_ENV = "AZURE_DEVOPS_EXT_PAT"
 const API_VERSION = "api-version=7.1"
@@ -139,12 +139,17 @@ const shipAdo = async (
   if (!ado) return { attempted: true, created: false, reason: "ado config missing" }
   if (!ado.repository) return { attempted: true, created: false, reason: "ado.repository not configured (required to open a PR)" }
   const pat = process.env[PAT_ENV] ?? ado.pat ?? ""
-  if (!pat) return { attempted: true, created: false, reason: `${PAT_ENV} not set` }
+  // PAT wins; in `az` mode without one, a Bearer token is minted via the az CLI.
+  let authHeader: string
+  try {
+    authHeader = await makeAdoAuthHeader({ pat, access: ado.access })()
+  } catch (err) {
+    return { attempted: true, created: false, reason: (err as Error).message }
+  }
 
   const org = ado.organization.replace(/\/+$/, "")
   const project = encodeURIComponent(ado.project)
   const repo = encodeURIComponent(ado.repository)
-  const authHeader = `Basic ${Buffer.from(`:${pat}`).toString("base64")}`
   const repoBase = `${org}/${project}/_apis/git/repositories/${repo}`
   const prUrl = (id: number): string => `${org}/${ado.project}/_git/${ado.repository}/pullrequest/${id}`
   // Config headers as a base, env `AGENTIC_LOOP_ADO_HEADERS` overriding (env wins, like the PAT).

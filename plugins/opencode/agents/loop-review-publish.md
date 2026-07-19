@@ -12,6 +12,9 @@ permission:
     "gh pr view*": allow
     "curl -sS -u :* https://dev.azure.com/*/threads*": allow
     "curl -sS -u :* https://*.visualstudio.com/*/threads*": allow
+    # ado.access "az": one new review thread only — the invoke glob is pinned
+    # to the pullRequestThreads resource, mirroring /threads*.
+    "az devops invoke --area git --resource pullRequestThreads*": allow
     "git status*": allow
     "git diff*": allow
     "git log*": allow

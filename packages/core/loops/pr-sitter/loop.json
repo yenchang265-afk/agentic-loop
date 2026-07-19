@@ -52,6 +52,12 @@
         "ado": [
           "curl -sS -u :* https://dev.azure.com/*",
           "curl -sS -u :* https://*.visualstudio.com/*"
+        ],
+        "ado:az": [
+          "az repos pr show*",
+          "az repos pr list*",
+          "az repos pr policy list*",
+          "az devops invoke *"
         ]
       }
     },
@@ -196,6 +202,11 @@
         "ado": [
           "curl -sS -u :* https://dev.azure.com/*",
           "curl -sS -u :* https://*.visualstudio.com/*"
+        ],
+        "ado:az": [
+          "az repos pr show*",
+          "az repos pr list*",
+          "az devops invoke *"
         ]
       }
     }

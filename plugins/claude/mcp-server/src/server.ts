@@ -21,7 +21,7 @@ import {
 } from "@agentic-loop/core/loop/orchestrate"
 import type { PolledClaim } from "@agentic-loop/core/scheduler/scheduler"
 import type { WorkSource } from "@agentic-loop/core/source/types"
-import { bareModel, enabledLoopKinds, modelFor, platformFor } from "@agentic-loop/core/config"
+import { adoAccessFor, bareModel, enabledLoopKinds, modelFor, platformFor } from "@agentic-loop/core/config"
 import { failedCriteriaBlock, parseVerdict, worstOf, type CriterionResult, type Verdict, type VerdictRecord } from "@agentic-loop/core/loop/verdict"
 import { renderRunSummary, type Outcome, type StageSample } from "@agentic-loop/core/loop/metrics"
 import { metricsPath, upsertRunMetrics } from "@agentic-loop/core/loop/metrics-file"
@@ -226,12 +226,21 @@ const writeStageMarker = (stage: string | null) => {
       // "never merge / never mutate the PR" backstop (threat-model T8/T1). A stage
       // that declares none (engineering plan/build, pr-sitter fix) writes no list
       // and stays unrestricted — those stages must write code freely.
-      const allowlist = effectiveAllowlist(def, active?.platform ?? platformFor(config, m.manifest.kind))
+      const platform = active?.platform ?? platformFor(config, m.manifest.kind)
+      // Same stamp-wins rule for the ADO access method: a state claimed under
+      // one access must keep that access's allowlist and guard behavior. A
+      // stamp-less ado state falls back to "rest" (curl-era claim), matching
+      // promptContext's fallback.
+      const access = platform === "ado" ? (active?.platformAccess ?? (active ? "rest" : adoAccessFor(config))) : undefined
+      const allowlist = effectiveAllowlist(def, platform, access)
       fs.writeFileSync(
         stageMarkerPath(),
         JSON.stringify({
           kind: m.manifest.kind,
           stage,
+          // The guard's ADO write-backstops key off these (curl vs az vs mcp).
+          platform,
+          ...(access ? { access } : {}),
           // The subagent this stage binds, straight from the manifest — the driver
           // (loop-orchestration SKILL) spawns whatever is named here, so a new kind
           // needs no prose edit.

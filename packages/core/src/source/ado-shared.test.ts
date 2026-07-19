@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { test } from "node:test"
-import { adoFetch, buildAdoHeaders, parseAdoHeadersEnv, resolveAdoHeaders } from "./ado-shared.js"
+import { adoFetch, buildAdoHeaders, makeAdoAuthHeader, parseAdoHeadersEnv, resolveAdoHeaders } from "./ado-shared.js"
 
 /**
  * The pure custom-header helpers shared by the ADO work source and ship gate:
@@ -163,4 +163,34 @@ test("adoFetch verifies certificates by default and only skips verification when
     assert.equal(res.ok, true)
     assert.equal(await res.text(), "ok")
   })
+})
+
+test("makeAdoAuthHeader: a PAT always wins as HTTP Basic, even in az mode", async () => {
+  const auth = makeAdoAuthHeader({ pat: "tok", access: "az", runAz: () => Promise.reject(new Error("must not run")) })
+  assert.equal(await auth(), `Basic ${Buffer.from(":tok").toString("base64")}`)
+})
+
+test("makeAdoAuthHeader: az mode without a PAT mints a Bearer token and caches it ~50 min", async () => {
+  let calls = 0
+  let clock = 0
+  const auth = makeAdoAuthHeader({
+    access: "az",
+    runAz: () => Promise.resolve(`token-${++calls}\n`),
+    now: () => clock,
+  })
+  assert.equal(await auth(), "Bearer token-1")
+  clock += 49 * 60_000
+  assert.equal(await auth(), "Bearer token-1") // cached
+  clock += 2 * 60_000
+  assert.equal(await auth(), "Bearer token-2") // past the TTL → re-minted
+  assert.equal(calls, 2)
+})
+
+test("makeAdoAuthHeader: az mode fails loud when az returns nothing; other modes without a PAT name both remedies", async () => {
+  const empty = makeAdoAuthHeader({ access: "az", runAz: () => Promise.resolve("  \n") })
+  await assert.rejects(empty(), /az login/)
+  for (const access of ["rest", "mcp", undefined] as const) {
+    const none = makeAdoAuthHeader({ access })
+    await assert.rejects(none(), /AZURE_DEVOPS_EXT_PAT.*ado\.access/s)
+  }
 })

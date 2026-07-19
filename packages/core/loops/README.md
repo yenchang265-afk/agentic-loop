@@ -117,8 +117,11 @@ completed stage's captured output; the approved plan under `artifacts.plan`),
 command), `worktree.instructions` (the standard pinning paragraph — every
 kind gets isolation discipline for free by including it), and
 `platform.github`/`platform.ado` (exactly one is truthy, per the resolved
-code platform — pr-sitter stages branch on these to pick `gh` vs ADO REST
-(`curl`) guidance).
+code platform — pr-sitter stages branch on these to pick `gh` vs ADO
+guidance) plus `platform.adoAccess.az`/`.rest`/`.mcp` (exactly one is truthy
+inside an ado block, per the `ado.access` stamped at claim time — the ADO
+sections branch on these to render az CLI, curl REST, or MCP command
+examples; a stamp-less legacy state renders the `rest` branch).
 
 ## Work sources
 

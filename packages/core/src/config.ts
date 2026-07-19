@@ -3,7 +3,7 @@ import os from "node:os"
 import path from "node:path"
 import { z } from "zod"
 import type { Client } from "./host.js"
-import { CODE_PLATFORMS, type Config, type LoopTrigger } from "./loop/state.js"
+import { ADO_ACCESS_METHODS, CODE_PLATFORMS, type AdoAccessMethod, type Config, type LoopTrigger } from "./loop/state.js"
 import type { StageDef } from "./manifest/schema.js"
 import { TRACKER_SYSTEMS, type TrackerSystem } from "./task/schema.js"
 
@@ -117,6 +117,16 @@ const BaseConfigSchema = z.object({
       /** Organization URL, e.g. "https://dev.azure.com/acme". */
       organization: z.string().min(1),
       project: z.string().min(1),
+      /**
+       * How stage agents talk to ADO: `az` (the CLI with the azure-devops
+       * extension — the default), `rest` (raw curl + `AZURE_DEVOPS_EXT_PAT`,
+       * the pre-`access` behavior), or `mcp` (an Azure DevOps MCP server
+       * connected to the agent session). Selects the command examples rendered
+       * into stage prompts and the stage bash allowlist. The engine's poll
+       * sources always speak REST regardless; in `az` mode they mint a Bearer
+       * token via `az account get-access-token` when no PAT resolves.
+       */
+      access: z.enum(ADO_ACCESS_METHODS).default("az"),
       /** Repository name; omitted → all repositories in the project. */
       repository: z.string().min(1).optional(),
       /** The sitter's own login for comment/author filtering — a PAT can't resolve identity. */
@@ -188,6 +198,9 @@ export const enabledLoopKinds = (config: Config): string[] => {
 /** The code platform a loop kind's PR source talks to: per-kind override, else the global default. Pure. */
 export const platformFor = (config: Config, kind: string): CodePlatform =>
   config.loops[kind]?.codePlatform ?? config.codePlatform ?? "github"
+
+/** How stage agents talk to ADO: config `ado.access`, else the `az` default. Pure. */
+export const adoAccessFor = (config: Config): AdoAccessMethod => config.ado?.access ?? "az"
 
 /** How a watching host schedules claims for a loop kind: configured trigger, else poll. Pure. */
 export const triggerFor = (config: Config, kind: string): LoopTrigger =>

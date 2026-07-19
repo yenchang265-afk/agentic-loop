@@ -68,10 +68,15 @@ export const StageDefSchema = z.object({
 })
 export type StageDef = z.infer<typeof StageDefSchema>
 
-/** The bash globs a stage may run on the given code platform. Pure. */
-export const effectiveAllowlist = (def: StageDef, platform: string): string[] => [
+/**
+ * The bash globs a stage may run on the given code platform. For ado, a
+ * non-`rest` access method looks up the composite key `"<platform>:<access>"`
+ * (e.g. `"ado:az"`, `"ado:mcp"`); plain `"ado"` remains the rest/curl list.
+ * A missing composite key yields only `bashAllowlist` — fail-closed. Pure.
+ */
+export const effectiveAllowlist = (def: StageDef, platform: string, access?: string): string[] => [
   ...def.bashAllowlist,
-  ...(def.platformAllowlist[platform] ?? []),
+  ...(def.platformAllowlist[access && access !== "rest" ? `${platform}:${access}` : platform] ?? []),
 ]
 
 const TransitionSchema = z.object({

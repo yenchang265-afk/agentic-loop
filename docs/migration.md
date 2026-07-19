@@ -2,6 +2,23 @@ English | [繁體中文](migration.zh-TW.md)
 
 # Migrating between layouts
 
+## To the az-CLI default for Azure DevOps (`ado.access`)
+
+- **Behavior change for existing ADO configs**: the stage agents' ADO access
+  method is now selected by `ado.access`, and its default is **`"az"`** (the
+  az CLI with the `azure-devops` extension) — not the raw `curl` + PAT the
+  sitters previously hardcoded. On the next *newly claimed* loop, ADO stage
+  prompts render az commands and stages get az bash allowlists. To keep the
+  old behavior, pin `"ado": { "access": "rest" }`.
+- **In-flight loops are unaffected**: a state snapshot claimed before this
+  change carries no access stamp and keeps rendering the curl/REST branch it
+  was claimed under.
+- **Polling still speaks REST either way** — with your PAT when set; under
+  `"az"` with no PAT, the driver mints a Bearer token via
+  `az account get-access-token`. An `"mcp"` setup still needs a PAT or a
+  logged-in az CLI for polling. See
+  [configuration.md](configuration.md#code-platform-codeplatform--ado).
+
 ## To layered configuration (user scope + repo scope)
 
 - Config is now resolved from **two layers**: an optional user-scope

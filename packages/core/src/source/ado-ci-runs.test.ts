@@ -128,6 +128,7 @@ test("claims the red newest head: default branch resolved via git, head pinned t
   assert.equal(item?.entryStage, "diagnose")
   assert.equal(item?.state.kind, "main-sitter")
   assert.equal(item?.state.platform, "ado")
+  assert.equal(item?.state.platformAccess, "az") // config default, stamped at claim
   assert.deepEqual(item?.state.git, { base: "main", branch: `main-sitter/${shortSha(SHA)}` })
   assert.match(item?.state.goal ?? "", /^Red CI on main at abcdef123456/)
   assert.match(item?.state.goal ?? "", /Failing workflow\(s\): CI/)

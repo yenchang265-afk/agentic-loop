@@ -17,6 +17,11 @@ permission:
     "gh run list*": allow
     "curl -sS -u :* https://dev.azure.com/*": allow
     "curl -sS -u :* https://*.visualstudio.com/*": allow
+    # ado.access "az": read-only az CLI equivalents (invoke defaults to GET).
+    "az repos pr show*": allow
+    "az repos pr list*": allow
+    "az repos pr policy list*": allow
+    "az devops invoke --area git --resource pullRequestThreads*": allow
     "git status*": allow
     "git diff*": allow
     "git log*": allow

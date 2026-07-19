@@ -142,6 +142,7 @@ test("claims a PR with a failing policy: refs stripped, goal names the failure, 
   assert.equal(item?.id, "pr-7")
   assert.equal(item?.entryStage, "triage")
   assert.equal(item?.state.platform, "ado")
+  assert.equal(item?.state.platformAccess, "az") // config default, stamped at claim
   assert.deepEqual(item?.state.git, { base: "main", branch: "feat/rate-limit" })
   assert.match(item?.state.goal ?? "", /failing checks: Build/)
   assert.doesNotMatch(item?.state.goal ?? "", /Optional Build/) // non-blocking policies don't gate the merge
@@ -411,6 +412,7 @@ test("review-sitter on ADO claims another author's PR where selfLogin's vote is 
   assert.equal(item?.entryStage, "fetch")
   assert.equal(item?.state.kind, "review-sitter")
   assert.equal(item?.state.platform, "ado")
+  assert.equal(item?.state.platformAccess, "az") // config default, stamped at claim
   assert.match(item?.state.goal ?? "", /one structured review comment/)
   // The reviewer kind's bookkeeping lives in its own runs/ namespace.
   assert.ok(log.some((c) => c.includes("runs/review-sitter/.claims/pr-7")))

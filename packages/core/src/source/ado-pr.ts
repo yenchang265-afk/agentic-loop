@@ -13,6 +13,7 @@ import {
   buildAdoHeaders,
   failingPolicyNames,
   flattenThreadComments,
+  makeAdoAuthHeader,
   newerThan,
   resolveAdoHeaders,
   sameLogin,
@@ -94,13 +95,14 @@ export const makeAdoPrSource = (deps: AdoPrDeps): WorkSource => {
 
   const markers = makeClaimMarkers($, directory, tasksDir, kind)
 
-  const authHeader = `Basic ${Buffer.from(`:${pat}`).toString("base64")}`
+  // PAT wins; in `az` mode without one, a Bearer token is minted via the az CLI.
+  const authHeader = makeAdoAuthHeader({ pat, access: ado.access })
 
-  /** One authenticated GET. Never throws — a network error reads as a non-ok response, like the CLI's `nothrow()`. */
+  /** One authenticated GET. Never throws — a network error (or missing credential) reads as a non-ok response, like the CLI's `nothrow()`. */
   const get = async (url: string): Promise<{ ok: boolean; status: number; statusText: string; body: string }> => {
     try {
       const res = await http(url, {
-        headers: buildAdoHeaders({ Authorization: authHeader, Accept: "application/json" }, customHeaders),
+        headers: buildAdoHeaders({ Authorization: await authHeader(), Accept: "application/json" }, customHeaders),
       })
       const body = await res.text().catch(() => "")
       return { ok: res.ok, status: res.status, statusText: res.statusText, body }
@@ -245,7 +247,7 @@ export const makeAdoPrSource = (deps: AdoPrDeps): WorkSource => {
           await markers.release(number)
           continue
         }
-        return { item: prWorkItem(loaded, "ado", snapshot, triggers), skip: null }
+        return { item: prWorkItem(loaded, "ado", snapshot, triggers, deps.ado.access), skip: null }
       }
       if (heldIds.length) {
         return {

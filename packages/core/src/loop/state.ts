@@ -88,6 +88,15 @@ export interface LoopState {
   readonly isolated?: boolean
   /** The code platform the claiming work source talks to; absent ⇒ `github`. */
   readonly platform?: CodePlatform
+  /**
+   * How stage agents talk to ADO, stamped at claim time from `ado.access` so a
+   * mid-loop config flip can't contradict the rendered prompt or the frozen
+   * stage allowlist. Absent (github, or a pre-`access` snapshot) ⇒ `rest` —
+   * legacy states were claimed under the curl-only regime and their stage
+   * markers allowlist curl, so rendering az/mcp commands there would
+   * contradict the marker.
+   */
+  readonly platformAccess?: AdoAccessMethod
 }
 
 /** What the driver should do next. All state changes are returned, not applied. */
@@ -114,11 +123,24 @@ export type Action =
 export const CODE_PLATFORMS = ["github", "ado"] as const
 export type CodePlatform = (typeof CODE_PLATFORMS)[number]
 
+/**
+ * How stage agents talk to Azure DevOps: the `az` CLI (the default), raw REST
+ * over `curl` with a PAT, or an Azure DevOps MCP server connected to the agent
+ * session. Selects the command examples rendered into stage prompts and the
+ * stage bash allowlist — the engine's own poll sources always speak REST (they
+ * run in the host process, out of MCP's reach; in `az` mode they mint a Bearer
+ * token via `az account get-access-token` when no PAT is set).
+ */
+export const ADO_ACCESS_METHODS = ["az", "rest", "mcp"] as const
+export type AdoAccessMethod = (typeof ADO_ACCESS_METHODS)[number]
+
 /** Azure DevOps coordinates, required when any effective platform is `ado`. */
 export interface AdoConfig {
   /** Organization URL, e.g. "https://dev.azure.com/acme". */
   readonly organization: string
   readonly project: string
+  /** How stage agents talk to ADO: `az` CLI (default), `rest` (curl + PAT), or `mcp`. */
+  readonly access?: AdoAccessMethod
   /** Repository name; omitted → all repositories in the project. */
   readonly repository?: string
   /**

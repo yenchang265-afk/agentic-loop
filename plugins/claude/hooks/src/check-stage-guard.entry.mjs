@@ -21,12 +21,15 @@
  *     (<tasksDir>/runs/.stage.json via loop_stage/loop_advance).
  *  2. Worktree pinning — while a worktree-isolated loop is active, edit/write
  *     tools may not touch absolute paths outside the worktree.
- *  3. Azure DevOps write backstop — ALWAYS ON: every sitter kind reaches ADO over
- *     its REST API (curl + PAT) and may only GET (read), POST a thread-comment
- *     reply, or POST a brand-new pull request (dep-sitter/main-sitter's publish —
- *     ADO drafts a PR the same call as any other, `isDraft: true` in the body).
- *     Any other write — PATCH/PUT/DELETE, or a POST to an EXISTING PR's resource
- *     (complete/abandon/approve/reviewers/run-pipeline) — is denied outright. The
+ *  3. Azure DevOps write backstop — ALWAYS ON: a sitter kind reaches ADO over
+ *     REST (curl + PAT, `ado.access: "rest"`) or the az CLI (`"az"`) and may only
+ *     read, POST a thread-comment reply, or create a brand-new DRAFT pull request
+ *     (dep-sitter/main-sitter's publish — REST drafts via `isDraft: true` in the
+ *     body, az via `--draft`). Any other write — PATCH/PUT/DELETE, a POST to an
+ *     EXISTING PR's resource (complete/abandon/approve/reviewers/run-pipeline),
+ *     or the mutating `az repos pr`/`az pipelines` verbs — is denied outright.
+ *     For `ado.access: "mcp"` there is additionally a BEST-EFFORT name-pattern
+ *     blocklist of mutating ADO MCP tools (gated on a live ado loop marker). The
  *     stage prompts + host-pinned allowlist are the primary control; this is
  *     defense-in-depth (threat-model T8/T12/T13).
  *
@@ -35,7 +38,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import { classifyMutation } from "@agentic-loop/core/task/guard"
-import { VERIFY_ALLOW, REVIEW_ALLOW, commandAllowed, chainedAdoWriteBackstopViolation, chainedGithubPrMutation, chainedGitPushViolation } from "./allowlist.mjs"
+import { VERIFY_ALLOW, REVIEW_ALLOW, commandAllowed, chainedAdoWriteBackstopViolation, chainedAdoAzWriteViolation, chainedGithubPrMutation, chainedGitPushViolation, isAdoMcpMutationTool } from "./allowlist.mjs"
 
 const read = () =>
   new Promise((resolve) => {
@@ -98,6 +101,18 @@ const main = async () => {
     )
   }
 
+  // (3a) ADO az-CLI write backstop — always on, the az mirror of (3): the same
+  // read/thread-reply/draft-PR-create envelope enforced over `az repos`/
+  // `az pipelines`/`az devops invoke` commands (config `ado.access: "az"`).
+  if (tool === "Bash" && chainedAdoAzWriteViolation(String(ti.command ?? ""))) {
+    return block(
+      `agentic-loop: the loop must never mutate an existing pull request — this az CLI call is blocked. ` +
+        `Only reads, thread-comment replies (az devops invoke POST to a pullRequestThreads/pullRequestThreadComments ` +
+        `resource), and creating a new DRAFT PR (az repos pr create --draft) are permitted; completing, abandoning, ` +
+        `voting, reviewer changes, and pipeline runs stay a human call.`,
+    )
+  }
+
   // (0) backlog-mutation guard — always on, marker or not: raw mv/mkdir/rm or
   // Write/Edit under the backlog bypasses the MCP state machine. The classifier
   // is core's classifyMutation — the same code the OpenCode plugin runs.
@@ -114,6 +129,20 @@ const main = async () => {
   if (!backlogVerdict.allow) return block(backlogVerdict.reason)
 
   if (!marker) return allow() // no active loop stage — nothing else to enforce
+
+  // (3d) ADO MCP write blocklist — on whenever an ado-platform loop stage is
+  // live (config `ado.access: "mcp"` sessions, but any ADO MCP tool call during
+  // an ado loop counts). BEST-EFFORT: third-party MCP tool names aren't ours to
+  // enumerate, so this pattern-matches conventional mutating names
+  // (update/complete/merge/vote/…); the stage prompt's NEVER clause stays the
+  // primary control. Creation tools pass — publish stages open draft PRs.
+  if (marker.platform === "ado" && typeof tool === "string" && isAdoMcpMutationTool(tool)) {
+    return block(
+      `agentic-loop: the loop must never mutate an existing pull request — this Azure DevOps MCP tool looks ` +
+        `state-mutating and is blocked. Only reads, thread-comment replies, and creating a new DRAFT PR are ` +
+        `permitted; completing, abandoning, approving, voting, and reviewer changes stay a human call.`,
+    )
+  }
 
   // (3b) GitHub PR-mutation backstop — on whenever a loop stage is live (the
   // mirror of the ADO write backstop above). No loop stage — publish, fix, or any

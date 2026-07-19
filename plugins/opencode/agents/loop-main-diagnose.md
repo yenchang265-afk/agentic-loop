@@ -15,6 +15,12 @@ permission:
     # API via curl+PAT — host-pinned so the PAT never leaves an ADO host.
     "curl -sS -u :* https://dev.azure.com/*": allow
     "curl -sS -u :* https://*.visualstudio.com/*": allow
+    # ado.access "az": read-only az CLI equivalents (invoke defaults to GET).
+    "az pipelines runs list*": allow
+    "az pipelines runs show*": allow
+    "az repos pr list*": allow
+    "az devops invoke --area build --resource logs*": allow
+    "az devops invoke --area git --resource pullRequests*": allow
     "git status*": allow
     "git diff*": allow
     "git log*": allow

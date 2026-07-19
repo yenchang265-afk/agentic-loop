@@ -194,18 +194,59 @@ ensure_gh() {
 # ---------------------------------------------------------------------------
 # Azure DevOps prerequisites (ADO mode only)
 # ---------------------------------------------------------------------------
-# codePlatform "ado" talks to the Azure DevOps REST API over curl (ensured
-# above) with a Personal Access Token — there is nothing extra to install.
+# codePlatform "ado" reaches Azure DevOps per config `ado.access`:
+#   az   (default) — the az CLI with the azure-devops extension; the engine's
+#                    own polling also mints Bearer tokens from it when no PAT
+#                    is set (`az account get-access-token`)
+#   rest           — raw curl + AZURE_DEVOPS_EXT_PAT (nothing to install)
+#   mcp            — an Azure DevOps MCP server configured in the agent host;
+#                    polling still needs a PAT or a logged-in az CLI
+ado_access() {
+  # Best-effort read of ado.access from .agentic-loop.json; defaults to "az".
+  local cfg=".agentic-loop.json"
+  if [ -f "$cfg" ] && command -v node >/dev/null 2>&1; then
+    node -e 'const c=JSON.parse(require("fs").readFileSync(".agentic-loop.json","utf8"));process.stdout.write(c.ado?.access??"az")' 2>/dev/null || echo "az"
+  else
+    echo "az"
+  fi
+}
+
 ensure_ado() {
   if [ "$WANT_ADO" -eq 0 ]; then
     skip "Azure DevOps (--no-ado)"
     return 0
   fi
-  if command -v curl >/dev/null 2>&1; then
-    ok "Azure DevOps: REST API over curl (auth via AZURE_DEVOPS_EXT_PAT)"
-  else
-    todo "Azure DevOps needs curl (see the curl step above)"
-  fi
+  local access
+  access="$(ado_access)"
+  case "$access" in
+    rest)
+      if command -v curl >/dev/null 2>&1; then
+        ok "Azure DevOps (rest): REST API over curl (auth via AZURE_DEVOPS_EXT_PAT)"
+      else
+        todo "Azure DevOps (rest) needs curl (see the curl step above)"
+      fi
+      ;;
+    mcp)
+      ok "Azure DevOps (mcp): configure an Azure DevOps MCP server in your agent host"
+      note_manual "ado.access \"mcp\": the engine's polling still needs AZURE_DEVOPS_EXT_PAT or a logged-in az CLI"
+      ;;
+    *)
+      if ! command -v az >/dev/null 2>&1; then
+        todo "az CLI not found"
+        note_manual "az: https://learn.microsoft.com/cli/azure/install-azure-cli, then: az extension add --name azure-devops && az login"
+        return 0
+      fi
+      if az extension show --name azure-devops >/dev/null 2>&1; then
+        ok "Azure DevOps (az): az CLI with azure-devops extension"
+      elif cannot_install; then
+        note_manual "az azure-devops extension: az extension add --name azure-devops"
+      else
+        az extension add --name azure-devops >/dev/null 2>&1 && ok "az azure-devops extension installed" \
+          || note_manual "az azure-devops extension: az extension add --name azure-devops"
+      fi
+      note_manual "ado auth: az login (or set AZURE_DEVOPS_EXT_PAT — a PAT always wins)"
+      ;;
+  esac
 }
 
 # ---------------------------------------------------------------------------

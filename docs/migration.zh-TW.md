@@ -2,6 +2,21 @@
 
 # 跨版面遷移
 
+## 遷移到 Azure DevOps 的 az CLI 預設值（`ado.access`）
+
+- **既有 ADO 設定的行為變更**：階段代理人的 ADO 存取方式現在由
+  `ado.access` 選擇，而它的預設值是 **`"az"`**（帶 `azure-devops`
+  擴充的 az CLI）——不再是 sitter 先前寫死的原生 `curl` + PAT。從
+  下一個*新認領*的迴圈開始，ADO 階段提示會渲染 az 指令、階段拿到
+  的是 az 的 bash 允許清單。想保留舊行為，固定
+  `"ado": { "access": "rest" }`。
+- **進行中的迴圈不受影響**：在這次變更前認領的狀態快照沒有存取
+  戳記，會繼續渲染它被認領時的 curl/REST 分支。
+- **輪詢無論如何都說 REST**——有 PAT 就用 PAT；在 `"az"` 且沒有
+  PAT 時，driver 會透過 `az account get-access-token` 鑄造 Bearer
+  token。`"mcp"` 的設定在輪詢上仍需要一個 PAT 或已登入的 az CLI。
+  見 [configuration.md](configuration.md#code-platform-codeplatform--ado)。
+
 ## 遷移到分層設定（使用者層級 + 儲存庫層級）
 
 - 設定現在從**兩個層**解析而來：一個可選的使用者層級
