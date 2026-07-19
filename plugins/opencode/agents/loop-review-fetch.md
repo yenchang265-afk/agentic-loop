@@ -30,6 +30,9 @@ permission:
     "gh pr checks*": allow
     "curl -sS -u :* https://dev.azure.com/*": allow
     "curl -sS -u :* https://*.visualstudio.com/*": allow
+    "az repos pr show*": allow
+    "az repos pr list*": allow
+    "az devops invoke *": allow
 ---
 
 You are the **loop-review-fetch** subagent — the FETCH stage of the

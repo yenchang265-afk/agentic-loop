@@ -4,6 +4,7 @@ import os from "node:os"
 import path from "node:path"
 import { test } from "node:test"
 import {
+  adoAccessFor,
   applyAdoPatEnv,
   bareModel,
   DEFAULT_CONFIG,
@@ -243,6 +244,21 @@ test("ado section fields are validated", () => {
       parseConfig({ codePlatform: "ado", ado: { organization: "", project: "p", selfLogin: "sitter@acme.com" } }),
     /Invalid .*ado/,
   )
+})
+
+test("ado.access defaults to az, parses each method, and rejects unknown values", () => {
+  const base = { organization: "https://dev.azure.com/acme", project: "widgets", selfLogin: "sitter@acme.com" }
+  const defaulted = parseConfig({ codePlatform: "ado", ado: base })
+  assert.equal(defaulted.ado?.access, "az")
+  assert.equal(adoAccessFor(defaulted), "az")
+  for (const access of ["az", "rest", "mcp"] as const) {
+    const c = parseConfig({ codePlatform: "ado", ado: { ...base, access } })
+    assert.equal(c.ado?.access, access)
+    assert.equal(adoAccessFor(c), access)
+  }
+  assert.throws(() => parseConfig({ codePlatform: "ado", ado: { ...base, access: "cli" } }), /Invalid .*access/)
+  // No ado section at all (github config) → the pure helper still answers.
+  assert.equal(adoAccessFor(DEFAULT_CONFIG), "az")
 })
 
 test("ado.pat is an accepted optional config field", () => {

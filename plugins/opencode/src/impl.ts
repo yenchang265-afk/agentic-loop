@@ -10,7 +10,7 @@ import { listSnapshotIds } from "@agentic-loop/core/loop/persist"
 import { anyLoopActive, anyWorktreeLoopActive, findSessionDriving, getLoop, hasLoop, planStageTaskId } from "@agentic-loop/core/loop/state"
 import { auditBacklog, formatAnomalies } from "@agentic-loop/core/task/audit"
 import { classifyBash, classifyEdit } from "@agentic-loop/core/task/guard"
-import { chainedAdoWriteBackstopViolation, chainedGithubPrMutation, chainedGitPushViolation } from "@agentic-loop/core/task/write-backstop"
+import { chainedAdoAzWriteViolation, chainedAdoWriteBackstopViolation, chainedGithubPrMutation, chainedGitPushViolation } from "@agentic-loop/core/task/write-backstop"
 import { isOrphanedPlanClaim, listClaimIds, listInProgress, listQueued, releaseOrphanedClaims, wasInterrupted } from "@agentic-loop/core/task/store"
 
 /** Tools that write files — guarded to the worktree while a worktree-mode loop drives. */
@@ -256,10 +256,12 @@ export const makeAgenticLoop: Plugin = async ({ client, directory, $ }) => {
           // never make a write beyond thread replies / PR creation); the gh/push
           // rules apply only while a loop drives this session, so a human's
           // manual `gh pr merge` in a non-loop session is untouched.
-          if (chainedAdoWriteBackstopViolation(cmd)) {
+          if (chainedAdoWriteBackstopViolation(cmd) || chainedAdoAzWriteViolation(cmd)) {
             throw new Error(
-              "agentic-loop: blocked an Azure DevOps write — loops may only GET, reply to a comment thread " +
-                "(POST …/threads…), or create a PR (POST …/pullrequests); completing/abandoning/approving stays a human call.",
+              "agentic-loop: blocked an Azure DevOps write — loops may only read, reply to a comment thread, " +
+                "or create a DRAFT PR (curl: GET / POST …/threads… / POST …/pullrequests; az: reads, " +
+                "invoke POST to a thread resource, az repos pr create --draft); " +
+                "completing/abandoning/approving stays a human call.",
             )
           }
           if (loop && (chainedGithubPrMutation(cmd) || chainedGitPushViolation(cmd))) {

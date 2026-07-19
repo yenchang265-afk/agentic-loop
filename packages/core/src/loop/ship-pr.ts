@@ -1,6 +1,7 @@
 import type { Log, Shell } from "../host.js"
 import { platformFor } from "../config.js"
-import { ADO_HEADERS_ENV, adoFetch, buildAdoHeaders, resolveAdoHeaders } from "../source/ado-shared.js"
+import { ADO_HEADERS_ENV, adoFetch, buildAdoHeaders, makeAdoAuthHeader, resolveAdoHeaders } from "../source/ado-shared.js"
+import { execAz, type AzExec } from "../source/ado-az.js"
 import type { Config } from "./state.js"
 import { branchExists, currentBranch, pushBranch } from "./git.js"
 
@@ -66,7 +67,7 @@ const shipGithub = async ($: Shell, log: Log, directory: string, branch: string,
   return { attempted: true, created: false, reason }
 }
 
-// --- Azure DevOps (REST, PAT auth — mirrors source/ado-pr.ts's auth) ---
+// --- Azure DevOps (REST; PAT or az-minted Bearer auth — mirrors source/ado-pr.ts) ---
 
 const PAT_ENV = "AZURE_DEVOPS_EXT_PAT"
 const API_VERSION = "api-version=7.1"
@@ -126,11 +127,72 @@ const adoExistingPrId = async (
   }
 }
 
+/** The ship gate over the az CLI (config `ado.access: "az"`): repo show for the default branch, pr list for reuse, pr create --draft. */
+const shipAdoAz = async (
+  $: Shell,
+  log: Log,
+  directory: string,
+  az: AzExec,
+  ado: NonNullable<Config["ado"]>,
+  branch: string,
+  title: string,
+): Promise<ShipPrResult> => {
+  const org = ado.organization.replace(/\/+$/, "")
+  const repo = ado.repository as string
+  const scope = ["--organization", org, "--project", ado.project, "--repository", repo, "--output", "json"]
+  const prUrl = (id: number): string => `${org}/${ado.project}/_git/${repo}/pullrequest/${id}`
+
+  const existing = await az(["repos", "pr", "list", "--source-branch", branch, "--status", "active", ...scope])
+  if (existing.ok) {
+    try {
+      // Native az verbs return the bare array (no { value } envelope).
+      const prs = JSON.parse(existing.body || "[]") as Array<{ pullRequestId?: number }>
+      const id = prs[0]?.pullRequestId
+      if (id) return { attempted: true, created: false, url: prUrl(id) }
+    } catch {
+      /* fall through to create — same leniency as the REST path's null on parse failure */
+    }
+  }
+
+  const repoOut = await az(["repos", "show", "--organization", org, "--project", ado.project, "--repository", repo, "--output", "json"])
+  let base: string | null = null
+  if (repoOut.ok) {
+    try {
+      const data = JSON.parse(repoOut.body || "{}") as { defaultBranch?: string }
+      base = data.defaultBranch ? data.defaultBranch.replace(/^refs\/heads\//, "") : null
+    } catch {
+      base = null
+    }
+  }
+  base = base ?? (await currentBranch($, directory)) ?? "main"
+
+  const createOut = await az([
+    "repos", "pr", "create", "--draft",
+    "--source-branch", branch,
+    "--target-branch", base,
+    "--title", title,
+    ...scope,
+  ])
+  if (!createOut.ok) {
+    const reason = `ADO PR create failed (az CLI) — ${createOut.statusText}`
+    await log("warn", `ship: ${reason} (${branch})`)
+    return { attempted: true, created: false, reason }
+  }
+  try {
+    const data = JSON.parse(createOut.body || "{}") as { pullRequestId?: number }
+    if (!data.pullRequestId) return { attempted: true, created: false, reason: "ADO PR create: no pullRequestId in response" }
+    return { attempted: true, created: true, url: prUrl(data.pullRequestId) }
+  } catch (err) {
+    return { attempted: true, created: false, reason: `ADO PR create: could not parse response — ${(err as Error).message}` }
+  }
+}
+
 const shipAdo = async (
   $: Shell,
   log: Log,
   directory: string,
   http: ShipHttp,
+  az: AzExec,
   config: Config,
   branch: string,
   title: string,
@@ -138,13 +200,20 @@ const shipAdo = async (
   const ado = config.ado
   if (!ado) return { attempted: true, created: false, reason: "ado config missing" }
   if (!ado.repository) return { attempted: true, created: false, reason: "ado.repository not configured (required to open a PR)" }
+  // Data transport per config `ado.access`: "az" shells the az CLI (auth via
+  // the pre-provisioned AZURE_DEVOPS_EXT_PAT); anything else is REST + PAT.
+  if (ado.access === "az") return shipAdoAz($, log, directory, az, ado, branch, title)
   const pat = process.env[PAT_ENV] ?? ado.pat ?? ""
-  if (!pat) return { attempted: true, created: false, reason: `${PAT_ENV} not set` }
+  let authHeader: string
+  try {
+    authHeader = await makeAdoAuthHeader({ pat })()
+  } catch (err) {
+    return { attempted: true, created: false, reason: (err as Error).message }
+  }
 
   const org = ado.organization.replace(/\/+$/, "")
   const project = encodeURIComponent(ado.project)
   const repo = encodeURIComponent(ado.repository)
-  const authHeader = `Basic ${Buffer.from(`:${pat}`).toString("base64")}`
   const repoBase = `${org}/${project}/_apis/git/repositories/${repo}`
   const prUrl = (id: number): string => `${org}/${ado.project}/_git/${ado.repository}/pullrequest/${id}`
   // Config headers as a base, env `AGENTIC_LOOP_ADO_HEADERS` overriding (env wins, like the PAT).
@@ -190,6 +259,7 @@ export const shipPr = async (
   id: string,
   title: string,
   http: ShipHttp = adoFetch(config.ado?.insecureSkipTlsVerify),
+  az: AzExec = execAz,
 ): Promise<ShipPrResult> => {
   try {
     const branch = `feature/${id}`
@@ -199,7 +269,7 @@ export const shipPr = async (
       return { attempted: true, created: false, reason: "git push failed" }
     }
     const platform = platformFor(config, kind)
-    return platform === "ado" ? await shipAdo($, log, directory, http, config, branch, title) : await shipGithub($, log, directory, branch, title)
+    return platform === "ado" ? await shipAdo($, log, directory, http, az, config, branch, title) : await shipGithub($, log, directory, branch, title)
   } catch (err) {
     return { attempted: true, created: false, reason: (err as Error).message }
   }

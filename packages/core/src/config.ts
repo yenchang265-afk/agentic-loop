@@ -3,7 +3,7 @@ import os from "node:os"
 import path from "node:path"
 import { z } from "zod"
 import type { Client } from "./host.js"
-import { CODE_PLATFORMS, type Config, type LoopTrigger } from "./loop/state.js"
+import { ADO_ACCESS_METHODS, CODE_PLATFORMS, type AdoAccessMethod, type Config, type LoopTrigger } from "./loop/state.js"
 import type { StageDef } from "./manifest/schema.js"
 import { TRACKER_SYSTEMS, type TrackerSystem } from "./task/schema.js"
 
@@ -117,6 +117,19 @@ const BaseConfigSchema = z.object({
       /** Organization URL, e.g. "https://dev.azure.com/acme". */
       organization: z.string().min(1),
       project: z.string().min(1),
+      /**
+       * How ADO is reached: `az` (the CLI with the azure-devops extension —
+       * the default), `rest` (raw curl/fetch + `AZURE_DEVOPS_EXT_PAT`, the
+       * pre-`access` behavior), or `mcp` (an Azure DevOps MCP server in the
+       * agent session). Selects the stage prompts' command examples, the
+       * stage bash allowlist, and the driver's own data transport: under
+       * `az` the poll sources and ship gate shell the az CLI too (auth via
+       * the pre-provisioned AZURE_DEVOPS_EXT_PAT, which the extension
+       * honors); under `rest` they fetch REST with the PAT; `mcp` covers
+       * stage agents only (out of the host process's reach), so its driver
+       * side polls REST+PAT.
+       */
+      access: z.enum(ADO_ACCESS_METHODS).default("az"),
       /** Repository name; omitted → all repositories in the project. */
       repository: z.string().min(1).optional(),
       /** The sitter's own login for comment/author filtering — a PAT can't resolve identity. */
@@ -188,6 +201,9 @@ export const enabledLoopKinds = (config: Config): string[] => {
 /** The code platform a loop kind's PR source talks to: per-kind override, else the global default. Pure. */
 export const platformFor = (config: Config, kind: string): CodePlatform =>
   config.loops[kind]?.codePlatform ?? config.codePlatform ?? "github"
+
+/** How stage agents talk to ADO: config `ado.access`, else the `az` default. Pure. */
+export const adoAccessFor = (config: Config): AdoAccessMethod => config.ado?.access ?? "az"
 
 /** How a watching host schedules claims for a loop kind: configured trigger, else poll. Pure. */
 export const triggerFor = (config: Config, kind: string): LoopTrigger =>

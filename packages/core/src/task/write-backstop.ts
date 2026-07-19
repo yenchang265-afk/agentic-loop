@@ -128,6 +128,58 @@ export const isAdoWriteBackstopViolation = (cmd: string): boolean => {
   return !(method === "GET" || (method === "POST" && (targetsThread || createsNewPr)))
 }
 
+/** An `az` CLI call against Azure DevOps (the azure-devops extension's command
+ *  groups, plus the generic `az devops invoke` REST escape hatch). */
+export const isAdoAz = (cmd: string): boolean => /^az\s+(?:repos|pipelines|boards|devops)\b/.test(cmd.trim())
+
+/**
+ * An `az` CLI call that mutates Azure DevOps state beyond what the sitter family
+ * is allowed — the az mirror of `isAdoWriteBackstopViolation` (config
+ * `ado.access: "az"`). Allowed writes: `az repos pr create` ONLY with `--draft`,
+ * and `az devops invoke` POSTs to a thread resource (thread-comment reply / new
+ * thread) or the bare pull-request collection (PR creation — ADO drafts via
+ * `isDraft` in the body, not a separate verb). Everything else that writes —
+ * `az repos pr update|set-vote`, reviewer/work-item changes, queueing a policy
+ * or a pipeline run, or an `invoke` with any other method/resource — is a
+ * mutation the loop must never make.
+ */
+export const isAdoAzWriteViolation = (cmd: string): boolean => {
+  const c = cmd.trim()
+  if (!isAdoAz(c)) return false
+  if (/^az\s+repos\s+pr\s+create\b/.test(c)) return !/(?:^|\s)--draft\b/.test(c)
+  if (/^az\s+repos\s+pr\s+(?:update|set-vote)\b/.test(c)) return true
+  if (/^az\s+repos\s+pr\s+(?:reviewer|work-item)\s+(?:add|remove)\b/.test(c)) return true
+  if (/^az\s+repos\s+(?:policy|ref|import)\b/.test(c)) return true
+  if (/^az\s+repos\s+pr\s+policy\s+queue\b/.test(c)) return true
+  if (/^az\s+pipelines\s+(?:run\b|build\s+queue\b)/.test(c)) return true
+  if (/^az\s+devops\s+invoke\b/.test(c)) {
+    const m = /--http-method[ =]+([A-Za-z]+)/i.exec(c)
+    const method = m ? m[1]!.toUpperCase() : "GET"
+    if (method === "GET") return false
+    if (method !== "POST") return true
+    const resource = (/--resource[ =]+([\w-]+)/.exec(c)?.[1] ?? "").toLowerCase()
+    return !["pullrequestthreads", "pullrequestthreadcomments", "pullrequests"].includes(resource)
+  }
+  return false
+}
+
+/**
+ * An MCP tool name that looks like an Azure DevOps server's state-mutating tool
+ * (merge/complete/vote/approve/reviewer changes…). Best-effort by design: MCP
+ * server tool names are third-party and vary, so this pattern-matches the
+ * conventional shapes rather than an exact list — the stage prompt's NEVER
+ * clause stays the primary control. Creation tools (`create_pull_request`) stay
+ * allowed: the publish stages legitimately open draft PRs, and draftness lives
+ * in tool ARGUMENTS this name-level check can't see.
+ */
+export const isAdoMcpMutationTool = (toolName: string): boolean => {
+  const m = /^mcp__(.+?)__(.+)$/.exec(toolName)
+  if (!m) return false
+  const [, server, tool] = m
+  if (!/(?:azure|ado|devops)/i.test(server!)) return false
+  return /(?:update|complete|abandon|merge|vote|approve|reject|delete|reviewer|publish)/i.test(tool!)
+}
+
 /**
  * A `git push` that could move a branch the loop must never move. The sitters push
  * ONLY their own head fast-forward, never the watched or default branch, never
@@ -177,4 +229,5 @@ export const isGitPushViolation = (cmd: string): boolean => {
  */
 export const chainedGithubPrMutation = (cmd: string): boolean => splitSegments(cmd).some(isGithubPrMutation)
 export const chainedAdoWriteBackstopViolation = (cmd: string): boolean => splitSegments(cmd).some(isAdoWriteBackstopViolation)
+export const chainedAdoAzWriteViolation = (cmd: string): boolean => splitSegments(cmd).some(isAdoAzWriteViolation)
 export const chainedGitPushViolation = (cmd: string): boolean => splitSegments(cmd).some(isGitPushViolation)

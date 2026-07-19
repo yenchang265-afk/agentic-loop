@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { test } from "node:test"
-import { adoFetch, buildAdoHeaders, parseAdoHeadersEnv, resolveAdoHeaders } from "./ado-shared.js"
+import { adoFetch, buildAdoHeaders, makeAdoAuthHeader, parseAdoHeadersEnv, resolveAdoHeaders } from "./ado-shared.js"
 
 /**
  * The pure custom-header helpers shared by the ADO work source and ship gate:
@@ -163,4 +163,11 @@ test("adoFetch verifies certificates by default and only skips verification when
     assert.equal(res.ok, true)
     assert.equal(await res.text(), "ok")
   })
+})
+
+test("makeAdoAuthHeader: a PAT becomes HTTP Basic; without one the REST transport fails loud", async () => {
+  const auth = makeAdoAuthHeader({ pat: "tok" })
+  assert.equal(await auth(), `Basic ${Buffer.from(":tok").toString("base64")}`)
+  const none = makeAdoAuthHeader({})
+  await assert.rejects(none(), /AZURE_DEVOPS_EXT_PAT.*az CLI/s)
 })

@@ -4,6 +4,7 @@ import type { LoadedManifest } from "../manifest/schema.js"
 import type { AdoConfig } from "../loop/state.js"
 import { attentionTriggers, loadLedger, saveLedger, type PrSnapshot, type PrTrigger } from "./ledger.js"
 import { fetchHead, makeClaimMarkers, prWorkItem, terminalLedgerUpdate } from "./pr-shared.js"
+import { azInvokeArgs, azToHttp, execAz, type AzExec } from "./ado-az.js"
 import {
   ADO_HEADERS_ENV,
   adoFetch,
@@ -13,6 +14,7 @@ import {
   buildAdoHeaders,
   failingPolicyNames,
   flattenThreadComments,
+  makeAdoAuthHeader,
   newerThan,
   resolveAdoHeaders,
   sameLogin,
@@ -68,6 +70,8 @@ interface AdoPrDeps {
   readonly ado: AdoConfig
   /** HTTP transport for ADO REST calls; defaults to `adoFetch(ado.insecureSkipTlsVerify)`. */
   readonly http?: AdoHttp
+  /** az CLI runner for the `ado.access: "az"` data transport; defaults to the real CLI. */
+  readonly azExec?: AzExec
   /** The Personal Access Token; defaults to `process.env.AZURE_DEVOPS_EXT_PAT`. */
   readonly pat?: string
   /** Clock injection for ledger stamps; defaults to the real time. */
@@ -94,13 +98,19 @@ export const makeAdoPrSource = (deps: AdoPrDeps): WorkSource => {
 
   const markers = makeClaimMarkers($, directory, tasksDir, kind)
 
-  const authHeader = `Basic ${Buffer.from(`:${pat}`).toString("base64")}`
+  // Data transport per config `ado.access`: "az" shells the az CLI (auth via
+  // the pre-provisioned AZURE_DEVOPS_EXT_PAT); anything else is REST fetch
+  // with a PAT. `az devops invoke` is a REST passthrough, so both transports
+  // return the same JSON envelopes and share the schema parsing.
+  const useAz = ado.access === "az"
+  const az = deps.azExec ?? execAz
+  const authHeader = makeAdoAuthHeader({ pat })
 
-  /** One authenticated GET. Never throws — a network error reads as a non-ok response, like the CLI's `nothrow()`. */
+  /** One authenticated GET. Never throws — a network error (or missing credential) reads as a non-ok response, like the CLI's `nothrow()`. */
   const get = async (url: string): Promise<{ ok: boolean; status: number; statusText: string; body: string }> => {
     try {
       const res = await http(url, {
-        headers: buildAdoHeaders({ Authorization: authHeader, Accept: "application/json" }, customHeaders),
+        headers: buildAdoHeaders({ Authorization: await authHeader(), Accept: "application/json" }, customHeaders),
       })
       const body = await res.text().catch(() => "")
       return { ok: res.ok, status: res.status, statusText: res.statusText, body }
@@ -109,12 +119,44 @@ export const makeAdoPrSource = (deps: AdoPrDeps): WorkSource => {
     }
   }
 
+  /** The active-PR list, over whichever transport the access method selects. */
+  const listPrs = (): Promise<{ ok: boolean; status: number; statusText: string; body: string }> =>
+    useAz
+      ? az(
+          azInvokeArgs({
+            area: "git",
+            resource: "pullrequests",
+            organization: org,
+            routeParameters: {
+              project: ado.project,
+              ...(ado.repository ? { repositoryId: ado.repository } : {}),
+            },
+            queryParameters: { "searchCriteria.status": "active", $top: "100" },
+          }),
+        ).then(azToHttp)
+      : get(
+          ado.repository
+            ? `${org}/${project}/_apis/git/repositories/${encodeURIComponent(ado.repository)}/pullrequests?searchCriteria.status=active&$top=100&${API_VERSION}`
+            : `${org}/${project}/_apis/git/pullrequests?searchCriteria.status=active&$top=100&${API_VERSION}`,
+        )
+
   /** Names of blocking policies currently failing on the PR (ADO's nearest equivalent of failing checks). */
   const failingPolicies = async (projectId: string, pr: number): Promise<string[]> => {
     if (!projectId) return []
     const artifactId = `vstfs:///CodeReview/CodeReviewId/${projectId}/${pr}`
-    const url = `${org}/${project}/_apis/policy/evaluations?artifactId=${encodeURIComponent(artifactId)}&${API_VERSION}`
-    const out = await get(url)
+    const out = useAz
+      ? azToHttp(
+          await az(
+            azInvokeArgs({
+              area: "policy",
+              resource: "evaluations",
+              organization: org,
+              routeParameters: { project: ado.project },
+              queryParameters: { artifactId },
+            }),
+          ),
+        )
+      : await get(`${org}/${project}/_apis/policy/evaluations?artifactId=${encodeURIComponent(artifactId)}&${API_VERSION}`)
     if (!out.ok) return []
     try {
       const json = JSON.parse(out.body || "{}") as { value?: unknown }
@@ -127,8 +169,20 @@ export const makeAdoPrSource = (deps: AdoPrDeps): WorkSource => {
   /** Non-system PR thread comments, flattened to `{ author, at }`, from the `pullRequestThreads` resource. */
   const threadComments = async (repositoryId: string, pr: number): Promise<{ author: string; at: string }[]> => {
     if (!repositoryId) return []
-    const url = `${org}/${project}/_apis/git/repositories/${encodeURIComponent(repositoryId)}/pullRequests/${pr}/threads?${API_VERSION}`
-    const out = await get(url)
+    const out = useAz
+      ? azToHttp(
+          await az(
+            azInvokeArgs({
+              area: "git",
+              resource: "pullRequestThreads",
+              organization: org,
+              routeParameters: { project: ado.project, repositoryId, pullRequestId: String(pr) },
+            }),
+          ),
+        )
+      : await get(
+          `${org}/${project}/_apis/git/repositories/${encodeURIComponent(repositoryId)}/pullRequests/${pr}/threads?${API_VERSION}`,
+        )
     if (!out.ok) return []
     try {
       const threads = AdoThreadsSchema.parse(JSON.parse(out.body || "{}"))
@@ -142,7 +196,9 @@ export const makeAdoPrSource = (deps: AdoPrDeps): WorkSource => {
     loopKind: kind,
 
     async claimNext() {
-      if (!pat) {
+      // az mode needs no PAT check — the pre-provisioned CLI carries its own
+      // auth; a broken environment surfaces as a failed list below.
+      if (!pat && !useAz) {
         return {
           item: null,
           skip: {
@@ -166,17 +222,16 @@ export const makeAdoPrSource = (deps: AdoPrDeps): WorkSource => {
           } satisfies ClaimSkipReason,
         }
       }
-      const listUrl = ado.repository
-        ? `${org}/${project}/_apis/git/repositories/${encodeURIComponent(ado.repository)}/pullrequests?searchCriteria.status=active&$top=100&${API_VERSION}`
-        : `${org}/${project}/_apis/git/pullrequests?searchCriteria.status=active&$top=100&${API_VERSION}`
-      const out = await get(listUrl)
+      const out = await listPrs()
       if (!out.ok) {
         return {
           item: null,
           skip: {
-            message:
-              `${kind}: Azure DevOps pull-request list failed — HTTP ${out.status} ${out.statusText}. ` +
-              `Is ${PAT_ENV} a valid token with Code (read) scope, and are ado.organization/project correct?`,
+            message: useAz
+              ? `${kind}: Azure DevOps pull-request list failed (az CLI) — ${out.statusText}. ` +
+                `Are ado.organization/project correct?`
+              : `${kind}: Azure DevOps pull-request list failed — HTTP ${out.status} ${out.statusText}. ` +
+                `Is ${PAT_ENV} a valid token with Code (read) scope, and are ado.organization/project correct?`,
             actionable: true,
           } satisfies ClaimSkipReason,
         }
@@ -245,7 +300,7 @@ export const makeAdoPrSource = (deps: AdoPrDeps): WorkSource => {
           await markers.release(number)
           continue
         }
-        return { item: prWorkItem(loaded, "ado", snapshot, triggers), skip: null }
+        return { item: prWorkItem(loaded, "ado", snapshot, triggers, deps.ado.access), skip: null }
       }
       if (heldIds.length) {
         return {

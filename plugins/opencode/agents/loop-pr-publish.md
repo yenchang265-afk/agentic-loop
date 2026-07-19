@@ -35,6 +35,9 @@ permission:
     "gh api repos/*/pulls/*/comments*": allow
     "curl -sS -u :* https://dev.azure.com/*/threads*": allow
     "curl -sS -u :* https://*.visualstudio.com/*/threads*": allow
+    "az repos pr show*": allow
+    "az repos pr list*": allow
+    "az devops invoke --area git --resource pullRequestThreadComments*": allow
 ---
 
 You are the **loop-pr-publish** subagent — the PUBLISH stage of the PR-sitter

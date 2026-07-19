@@ -9,10 +9,12 @@ import {
   adoFetch,
   AdoBuildListSchema,
   buildAdoHeaders,
+  makeAdoAuthHeader,
   normalizeAdoBuild,
   resolveAdoHeaders,
 } from "./ado-shared.js"
 import type { AdoHttp } from "./ado-pr.js"
+import { azInvokeArgs, azToHttp, execAz, type AzExec } from "./ado-az.js"
 import type { ClaimSkipReason, TerminalOutcome, WorkSource } from "./types.js"
 
 /**
@@ -26,9 +28,11 @@ import type { ClaimSkipReason, TerminalOutcome, WorkSource } from "./types.js"
  * both platforms identically, and the ledger/claim/WorkItem mechanics are
  * shared verbatim via `ci-runs-shared.ts`.
  *
- * Auth is the same Personal Access Token (HTTP Basic) as `ado-pr.ts`, read
- * from `AZURE_DEVOPS_EXT_PAT`, falling back to config `ado.pat`. Unlike the PR
- * sources, no `ado.selfLogin` is needed — CI status isn't scoped to an
+ * Transport and auth follow config `ado.access` (same rules as `ado-pr.ts`):
+ * `"az"` (the default) shells the az CLI, authenticated by the
+ * pre-provisioned `AZURE_DEVOPS_EXT_PAT`; otherwise raw REST
+ * with the PAT (env, falling back to config `ado.pat`) as HTTP Basic. Unlike
+ * the PR sources, no `ado.selfLogin` is needed — CI status isn't scoped to an
  * identity, only to the watched branch.
  */
 
@@ -46,6 +50,8 @@ interface AdoCiRunsDeps {
   readonly ado: AdoConfig
   /** HTTP transport for ADO REST calls; defaults to `adoFetch(ado.insecureSkipTlsVerify)`. */
   readonly http?: AdoHttp
+  /** az CLI runner for the `ado.access: "az"` data transport; defaults to the real CLI. */
+  readonly azExec?: AzExec
   /** The Personal Access Token; defaults to `process.env.AZURE_DEVOPS_EXT_PAT`. */
   readonly pat?: string
   /** Config override of the manifest's watched branch (`loops.<kind>.branch`). */
@@ -71,13 +77,17 @@ export const makeAdoCiRunsSource = (deps: AdoCiRunsDeps): WorkSource => {
   const claimsDir = `${directory}/${tasksDir}/runs/${kind}/.claims`
   let resolvedBranch: string | null = null
 
-  const authHeader = `Basic ${Buffer.from(`:${pat}`).toString("base64")}`
+  // Data transport per config `ado.access`: "az" shells the az CLI (its own
+  // auth); anything else is REST fetch with a PAT (see ado-az.ts).
+  const useAz = ado.access === "az"
+  const az = deps.azExec ?? execAz
+  const authHeader = makeAdoAuthHeader({ pat })
 
-  /** One authenticated GET. Never throws — a network error reads as a non-ok response, like the CLI's `nothrow()`. */
+  /** One authenticated GET. Never throws — a network error (or missing credential) reads as a non-ok response, like the CLI's `nothrow()`. */
   const get = async (url: string): Promise<{ ok: boolean; status: number; statusText: string; body: string }> => {
     try {
       const res = await http(url, {
-        headers: buildAdoHeaders({ Authorization: authHeader, Accept: "application/json" }, customHeaders),
+        headers: buildAdoHeaders({ Authorization: await authHeader(), Accept: "application/json" }, customHeaders),
       })
       const body = await res.text().catch(() => "")
       return { ok: res.ok, status: res.status, statusText: res.statusText, body }
@@ -104,7 +114,9 @@ export const makeAdoCiRunsSource = (deps: AdoCiRunsDeps): WorkSource => {
     loopKind: kind,
 
     async claimNext() {
-      if (!pat) {
+      // az mode needs no PAT check — the pre-provisioned CLI carries its own
+      // auth; a broken environment surfaces as a failed list below.
+      if (!pat && !useAz) {
         return {
           item: null,
           skip: {
@@ -116,16 +128,30 @@ export const makeAdoCiRunsSource = (deps: AdoCiRunsDeps): WorkSource => {
         }
       }
       const b = await branch()
-      const branchName = encodeURIComponent(`refs/heads/${b}`)
-      const listUrl = `${org}/${project}/_apis/build/builds?branchName=${branchName}&$top=30&queryOrder=queueTimeDescending&${API_VERSION}`
-      const out = await get(listUrl)
+      const out = useAz
+        ? azToHttp(
+            await az(
+              azInvokeArgs({
+                area: "build",
+                resource: "builds",
+                organization: org,
+                routeParameters: { project: ado.project },
+                queryParameters: { branchName: `refs/heads/${b}`, $top: "30", queryOrder: "queueTimeDescending" },
+              }),
+            ),
+          )
+        : await get(
+            `${org}/${project}/_apis/build/builds?branchName=${encodeURIComponent(`refs/heads/${b}`)}&$top=30&queryOrder=queueTimeDescending&${API_VERSION}`,
+          )
       if (!out.ok) {
         return {
           item: null,
           skip: {
-            message:
-              `${kind}: Azure DevOps build list failed — HTTP ${out.status} ${out.statusText}. ` +
-              `Is ${PAT_ENV} a valid token with Build (read) scope, and are ado.organization/project correct?`,
+            message: useAz
+              ? `${kind}: Azure DevOps build list failed (az CLI) — ${out.statusText}. ` +
+                `Are ado.organization/project correct?`
+              : `${kind}: Azure DevOps build list failed — HTTP ${out.status} ${out.statusText}. ` +
+                `Is ${PAT_ENV} a valid token with Build (read) scope, and are ado.organization/project correct?`,
             actionable: true,
           } satisfies ClaimSkipReason,
         }
@@ -186,7 +212,7 @@ export const makeAdoCiRunsSource = (deps: AdoCiRunsDeps): WorkSource => {
         await $`rmdir ${`${claimsDir}/head-${shortSha(judged.sha)}`}`.quiet().nothrow()
         return { item: null, skip: { message: `${kind}: could not pin the red head locally`, actionable: true } }
       }
-      return { item: redHeadWorkItem(loaded, "ado", b, judged.sha, judged.failing), skip: null }
+      return { item: redHeadWorkItem(loaded, "ado", b, judged.sha, judged.failing, deps.ado.access), skip: null }
     },
 
     async release(work) {

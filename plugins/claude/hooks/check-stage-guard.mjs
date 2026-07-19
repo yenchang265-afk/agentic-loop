@@ -190,6 +190,33 @@ var isAdoWriteBackstopViolation = (cmd) => {
   const createsNewPr = /\/pullrequests(?![a-zA-Z0-9/])/i.test(cmd);
   return !(method === "GET" || method === "POST" && (targetsThread || createsNewPr));
 };
+var isAdoAz = (cmd) => /^az\s+(?:repos|pipelines|boards|devops)\b/.test(cmd.trim());
+var isAdoAzWriteViolation = (cmd) => {
+  const c = cmd.trim();
+  if (!isAdoAz(c)) return false;
+  if (/^az\s+repos\s+pr\s+create\b/.test(c)) return !/(?:^|\s)--draft\b/.test(c);
+  if (/^az\s+repos\s+pr\s+(?:update|set-vote)\b/.test(c)) return true;
+  if (/^az\s+repos\s+pr\s+(?:reviewer|work-item)\s+(?:add|remove)\b/.test(c)) return true;
+  if (/^az\s+repos\s+(?:policy|ref|import)\b/.test(c)) return true;
+  if (/^az\s+repos\s+pr\s+policy\s+queue\b/.test(c)) return true;
+  if (/^az\s+pipelines\s+(?:run\b|build\s+queue\b)/.test(c)) return true;
+  if (/^az\s+devops\s+invoke\b/.test(c)) {
+    const m = /--http-method[ =]+([A-Za-z]+)/i.exec(c);
+    const method = m ? m[1].toUpperCase() : "GET";
+    if (method === "GET") return false;
+    if (method !== "POST") return true;
+    const resource = (/--resource[ =]+([\w-]+)/.exec(c)?.[1] ?? "").toLowerCase();
+    return !["pullrequestthreads", "pullrequestthreadcomments", "pullrequests"].includes(resource);
+  }
+  return false;
+};
+var isAdoMcpMutationTool = (toolName) => {
+  const m = /^mcp__(.+?)__(.+)$/.exec(toolName);
+  if (!m) return false;
+  const [, server, tool] = m;
+  if (!/(?:azure|ado|devops)/i.test(server)) return false;
+  return /(?:update|complete|abandon|merge|vote|approve|reject|delete|reviewer|publish)/i.test(tool);
+};
 var isGitPushViolation = (cmd) => {
   const c = cmd.trim();
   if (!/^git\s+(?:-\S+\s+|-C\s+\S+\s+)*push\b/.test(c)) return false;
@@ -219,6 +246,7 @@ var isGitPushViolation = (cmd) => {
 };
 var chainedGithubPrMutation = (cmd) => splitSegments(cmd).some(isGithubPrMutation);
 var chainedAdoWriteBackstopViolation = (cmd) => splitSegments(cmd).some(isAdoWriteBackstopViolation);
+var chainedAdoAzWriteViolation = (cmd) => splitSegments(cmd).some(isAdoAzWriteViolation);
 var chainedGitPushViolation = (cmd) => splitSegments(cmd).some(isGitPushViolation);
 
 // plugins/claude/hooks/src/check-stage-guard.entry.mjs
@@ -263,6 +291,11 @@ var main = async () => {
       `agentic-loop: the loop must never mutate an existing pull request \u2014 this Azure DevOps REST call is blocked. Only GET reads, thread-comment replies (POST to a /threads resource), and creating a new draft PR (POST to .../pullrequests) are permitted; completing, abandoning, approving, reviewer changes, and pipeline runs stay a human call.`
     );
   }
+  if (tool === "Bash" && chainedAdoAzWriteViolation(String(ti.command ?? ""))) {
+    return block2(
+      `agentic-loop: the loop must never mutate an existing pull request \u2014 this az CLI call is blocked. Only reads, thread-comment replies (az devops invoke POST to a pullRequestThreads/pullRequestThreadComments resource), and creating a new DRAFT PR (az repos pr create --draft) are permitted; completing, abandoning, voting, reviewer changes, and pipeline runs stay a human call.`
+    );
+  }
   const planTaskId = marker && marker.stage === "plan" && typeof marker.taskId === "string" ? marker.taskId : null;
   const filePath = ti.file_path ?? ti.path ?? ti.notebook_path;
   const backlogVerdict = classifyMutation(
@@ -275,6 +308,11 @@ var main = async () => {
   );
   if (!backlogVerdict.allow) return block2(backlogVerdict.reason);
   if (!marker) return allow();
+  if (marker.platform === "ado" && typeof tool === "string" && isAdoMcpMutationTool(tool)) {
+    return block2(
+      `agentic-loop: the loop must never mutate an existing pull request \u2014 this Azure DevOps MCP tool looks state-mutating and is blocked. Only reads, thread-comment replies, and creating a new DRAFT PR are permitted; completing, abandoning, approving, voting, and reviewer changes stay a human call.`
+    );
+  }
   if (tool === "Bash" && chainedGithubPrMutation(String(ti.command ?? ""))) {
     return block2(
       `agentic-loop: the loop must never mutate a pull request \u2014 this GitHub command is blocked. Only reads and comment replies (gh pr comment, or gh api GET, or a POST to an issues/N/comments resource) are permitted; merging, closing, approving, requesting changes, reviewer changes, and edits stay a human call.`

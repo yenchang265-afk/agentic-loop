@@ -34,6 +34,10 @@ permission:
     "gh run list*": allow
     "curl -sS -u :* https://dev.azure.com/*": allow
     "curl -sS -u :* https://*.visualstudio.com/*": allow
+    "az repos pr show*": allow
+    "az repos pr list*": allow
+    "az repos pr policy list*": allow
+    "az devops invoke *": allow
 ---
 
 You are the **loop-pr-triage** subagent — the TRIAGE stage of the PR-sitter

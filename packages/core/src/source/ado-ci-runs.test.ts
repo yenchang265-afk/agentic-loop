@@ -5,6 +5,7 @@ import type { Client, Shell } from "../host.js"
 import { loadManifest } from "../manifest/load.js"
 import { shortSha } from "./ci-runs.js"
 import { makeAdoCiRunsSource, type AdoHttp } from "./ado-ci-runs.js"
+import type { AzExec } from "./ado-az.js"
 
 /**
  * The ado-ci-runs source over the real main-sitter manifest, against a
@@ -128,6 +129,7 @@ test("claims the red newest head: default branch resolved via git, head pinned t
   assert.equal(item?.entryStage, "diagnose")
   assert.equal(item?.state.kind, "main-sitter")
   assert.equal(item?.state.platform, "ado")
+  assert.equal(item?.state.platformAccess, "az") // config default, stamped at claim
   assert.deepEqual(item?.state.git, { base: "main", branch: `main-sitter/${shortSha(SHA)}` })
   assert.match(item?.state.goal ?? "", /^Red CI on main at abcdef123456/)
   assert.match(item?.state.goal ?? "", /Failing workflow\(s\): CI/)
@@ -206,4 +208,42 @@ test("a configured branch override skips default-branch detection", async () => 
   assert.match(skip?.message ?? "", /release\/v2 is green/)
   assert.ok(shellLog.every((c) => !c.startsWith("git -C /r symbolic-ref")))
   assert.ok(httpLog.some((u) => u.includes("branchName=refs%2Fheads%2Frelease%2Fv2")))
+})
+
+// --- the az-CLI data transport (config ado.access "az") ---
+
+test("access az: polls builds over the az CLI with no PAT — REST transport never touched", async () => {
+  const azLog: string[] = []
+  const httpLog: string[] = []
+  const azExec: AzExec = async (args) => {
+    const cmd = args.join(" ")
+    azLog.push(cmd)
+    return cmd.includes("--resource builds")
+      ? { ok: true, statusText: "OK", body: listBody([build()]) }
+      : { ok: false, statusText: "unexpected az call", body: "" }
+  }
+  const src = makeAdoCiRunsSource({
+    $: scriptedShell([
+      { cmd: "git -C /r symbolic-ref refs/remotes/origin/HEAD", result: { stdout: "refs/remotes/origin/main\n" } },
+      { cmd: "git -C /r rev-parse refs/remotes/origin/main", result: { stdout: `${SHA}\n` } },
+    ]),
+    http: scriptedHttp([], httpLog),
+    azExec,
+    client: ledgerClient({}),
+    directory: "/r",
+    tasksDir: "docs/tasks",
+    log: () => {},
+    loaded: sitter,
+    ado: { organization: "https://dev.azure.com/acme", project: "widgets", access: "az" },
+    pat: "",
+    now: () => "2026-07-05T00:00:00Z",
+  })
+  const { item, skip } = await src.claimNext()
+  assert.equal(skip, null)
+  assert.equal(item?.state.platform, "ado")
+  assert.equal(item?.state.platformAccess, "az")
+  assert.equal(httpLog.length, 0)
+  const list = azLog.find((c) => c.includes("--resource builds"))
+  assert.match(list ?? "", /devops invoke --area build/)
+  assert.match(list ?? "", /--query-parameters branchName=refs\/heads\/main \$top=30 queryOrder=queueTimeDescending/)
 })

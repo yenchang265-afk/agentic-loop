@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import { test } from "node:test"
 import type { Shell } from "../host.js"
 import type { Config } from "./state.js"
+import type { AzExec } from "../source/ado-az.js"
 import { shipPr, type ShipHttp } from "./ship-pr.js"
 
 /**
@@ -238,4 +239,60 @@ test("shipPr never throws on an unexpected error", async () => {
   assert.equal(result.attempted, true)
   assert.equal(result.created, false)
   assert.ok(result.reason)
+})
+
+// --- the az-CLI ship transport (config ado.access "az") ---
+
+const scriptedAz =
+  (routes: { match: string; ok?: boolean; body?: string; statusText?: string }[], log: string[] = []): AzExec =>
+  async (args) => {
+    const cmd = args.join(" ")
+    log.push(cmd)
+    const hit = routes.find((r) => cmd.includes(r.match))
+    return { ok: hit?.ok ?? true, statusText: hit?.statusText ?? "OK", body: hit?.body ?? "" }
+  }
+
+test("shipPr (ado, access az) opens a draft PR through the az CLI — no REST, no PAT", async () => {
+  const $ = scriptedShell([BRANCH_EXISTS, PUSH_OK])
+  const azLog: string[] = []
+  const az = scriptedAz(
+    [
+      { match: "repos pr list", body: "[]" },
+      { match: "repos show", body: JSON.stringify({ defaultBranch: "refs/heads/main" }) },
+      { match: "repos pr create", body: JSON.stringify({ pullRequestId: 99 }) },
+    ],
+    azLog,
+  )
+  const cfg: Config = { ...adoConfig, ado: { ...adoConfig.ado!, access: "az", pat: undefined } }
+  const failingHttp = scriptedHttp([{ match: "https://", status: 500 }])
+  const result = await shipPr($, noop, "/repo", cfg, "engineering", "task-1", "Add rate limiting", failingHttp, az)
+  assert.deepEqual(result, {
+    attempted: true,
+    created: true,
+    url: "https://dev.azure.com/acme/Widgets/_git/widgets/pullrequest/99",
+  })
+  const create = azLog.find((c) => c.includes("repos pr create"))
+  assert.match(create ?? "", /--draft/)
+  assert.match(create ?? "", /--source-branch feature\/task-1 --target-branch main/)
+  assert.match(create ?? "", /--organization https:\/\/dev\.azure\.com\/acme --project Widgets --repository widgets/)
+})
+
+test("shipPr (ado, access az) reuses an existing active PR and reports az create failures", async () => {
+  const $ = scriptedShell([BRANCH_EXISTS, PUSH_OK])
+  const cfg: Config = { ...adoConfig, ado: { ...adoConfig.ado!, access: "az" } }
+  const reuse = await shipPr($, noop, "/repo", cfg, "engineering", "task-1", "t", scriptedHttp([]),
+    scriptedAz([{ match: "repos pr list", body: JSON.stringify([{ pullRequestId: 42 }]) }]))
+  assert.deepEqual(reuse, {
+    attempted: true,
+    created: false,
+    url: "https://dev.azure.com/acme/Widgets/_git/widgets/pullrequest/42",
+  })
+  const failed = await shipPr($, noop, "/repo", cfg, "engineering", "task-1", "t", scriptedHttp([]),
+    scriptedAz([
+      { match: "repos pr list", body: "[]" },
+      { match: "repos show", body: JSON.stringify({ defaultBranch: "refs/heads/main" }) },
+      { match: "repos pr create", ok: false, statusText: "ERROR: az login required" },
+    ]))
+  assert.equal(failed.created, false)
+  assert.match(failed.reason ?? "", /az CLI.*az login required/s)
 })

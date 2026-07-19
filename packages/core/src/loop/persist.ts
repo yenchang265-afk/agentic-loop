@@ -2,7 +2,7 @@ import path from "node:path"
 import { writeFileAtomic } from "../fsatomic.js"
 import type { Client, Shell } from "../host.js"
 import { z } from "zod"
-import { CODE_PLATFORMS, STAGES, type LoopState } from "./state.js"
+import { ADO_ACCESS_METHODS, CODE_PLATFORMS, STAGES, type LoopState } from "./state.js"
 
 /**
  * Durable snapshots of a task-driven loop's `LoopState`, so a crash or opencode
@@ -51,6 +51,8 @@ const LoopStateSchema = z.object({
   git: GitRefSchema.optional(),
   /** Code platform stamped by the claiming work source; absent (old snapshots) ⇒ github. */
   platform: z.enum(CODE_PLATFORMS).optional(),
+  /** ADO access method stamped at claim; absent (old snapshots) ⇒ rest (curl-era claim). */
+  platformAccess: z.enum(ADO_ACCESS_METHODS).optional(),
 })
 
 /** Absolute path of a task's state snapshot. Pure. */

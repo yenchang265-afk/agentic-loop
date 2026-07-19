@@ -1,5 +1,5 @@
 import type { Client, Log, Shell } from "../host.js"
-import { enabledLoopKinds, platformFor } from "../config.js"
+import { adoAccessFor, enabledLoopKinds, platformFor } from "../config.js"
 import { loadManifest } from "../manifest/load.js"
 import type { LoadedManifest } from "../manifest/schema.js"
 import { makeAdoCiRunsSource } from "../source/ado-ci-runs.js"
@@ -121,6 +121,7 @@ export const buildWorkSources = (
           makeDependencyScanSource({
             ...base,
             platform: platformFor(config, kind),
+            platformAccess: adoAccessFor(config),
             ...(typeof knobs["severityFloor"] === "string" ? { severityFloor: knobs["severityFloor"] } : {}),
             ...(typeof knobs["includeOutdated"] === "boolean" ? { includeOutdated: knobs["includeOutdated"] } : {}),
             ...(typeof knobs["ecosystem"] === "string" ? { ecosystem: knobs["ecosystem"] } : {}),

@@ -20,6 +20,11 @@ permission:
     # through even via a broader curl call.
     "curl -sS -u :* https://dev.azure.com/*": allow
     "curl -sS -u :* https://*.visualstudio.com/*": allow
+    # ado.access "az": draft-PR creation, reads, and thread comments only.
+    "az repos pr create --draft*": allow
+    "az repos pr show*": allow
+    "az repos pr list*": allow
+    "az devops invoke --area git --resource pullRequestThreads*": allow
     "git status*": allow
     "git diff*": allow
     "git log*": allow

@@ -3,7 +3,7 @@ import path from "node:path"
 import { z } from "zod"
 import type { Client, Log, Shell } from "../host.js"
 import type { LoadedManifest } from "../manifest/schema.js"
-import type { CodePlatform, LoopState } from "../loop/state.js"
+import type { AdoAccessMethod, CodePlatform, LoopState } from "../loop/state.js"
 import { writeFileAtomic } from "../fsatomic.js"
 import { osvCandidates, OsvReportSchema } from "./osv.js"
 import { slugify } from "../task/schema.js"
@@ -204,6 +204,8 @@ interface DependencyScanDeps {
   readonly ecosystem?: string
   /** The resolved code platform (`platformFor(config, kind)`) stamped onto entry state; defaults to `github`. */
   readonly platform?: CodePlatform
+  /** ADO access method (`adoAccessFor(config)`) stamped onto entry state when the platform is ado. */
+  readonly platformAccess?: AdoAccessMethod
   /** Clock injection for ledger stamps; defaults to the real time. */
   readonly now?: () => string
 }
@@ -224,6 +226,7 @@ export const makeDependencyScanSource = (deps: DependencyScanDeps): WorkSource =
   }
   const now = deps.now ?? (() => new Date().toISOString())
   const platform: CodePlatform = deps.platform ?? "github"
+  const access: AdoAccessMethod | undefined = deps.platformAccess
   const requested: "auto" | DepEcosystem =
     deps.ecosystem === "npm" || deps.ecosystem === "maven" || deps.ecosystem === "gradle" || deps.ecosystem === "auto"
       ? deps.ecosystem
@@ -410,6 +413,7 @@ export const makeDependencyScanSource = (deps: DependencyScanDeps): WorkSource =
       iteration: 0,
       artifacts: {},
       platform,
+      ...(platform === "ado" ? { platformAccess: access ?? "az" } : {}),
     }
     return {
       id: depKey(c.pkg),

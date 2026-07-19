@@ -5,6 +5,7 @@ import path from "node:path"
 import type { Client, Shell } from "../host.js"
 import { loadManifest } from "../manifest/load.js"
 import { makeAdoPrSource, type AdoHttp } from "./ado-pr.js"
+import type { AzExec } from "./ado-az.js"
 import type { AdoHttpResponse } from "./ado-pr.js"
 
 /**
@@ -142,6 +143,7 @@ test("claims a PR with a failing policy: refs stripped, goal names the failure, 
   assert.equal(item?.id, "pr-7")
   assert.equal(item?.entryStage, "triage")
   assert.equal(item?.state.platform, "ado")
+  assert.equal(item?.state.platformAccess, "az") // config default, stamped at claim
   assert.deepEqual(item?.state.git, { base: "main", branch: "feat/rate-limit" })
   assert.match(item?.state.goal ?? "", /failing checks: Build/)
   assert.doesNotMatch(item?.state.goal ?? "", /Optional Build/) // non-blocking policies don't gate the merge
@@ -411,6 +413,7 @@ test("review-sitter on ADO claims another author's PR where selfLogin's vote is 
   assert.equal(item?.entryStage, "fetch")
   assert.equal(item?.state.kind, "review-sitter")
   assert.equal(item?.state.platform, "ado")
+  assert.equal(item?.state.platformAccess, "az") // config default, stamped at claim
   assert.match(item?.state.goal ?? "", /one structured review comment/)
   // The reviewer kind's bookkeeping lives in its own runs/ namespace.
   assert.ok(log.some((c) => c.includes("runs/review-sitter/.claims/pr-7")))
@@ -428,4 +431,71 @@ test("review-sitter on ADO skips its own PRs, PRs it isn't a reviewer on, and PR
   const { item, skip } = await source(prs, { loaded: reviewSitter }).claimNext()
   assert.equal(item, null)
   assert.match(skip?.message ?? "", /^review-sitter: no PRs need attention \(3 active/)
+})
+
+// --- the az-CLI data transport (config ado.access "az") ---
+
+const scriptedAz =
+  (routes: { match: string; ok?: boolean; body?: string; statusText?: string }[], log: string[] = []): AzExec =>
+  async (args) => {
+    const cmd = args.join(" ")
+    log.push(cmd)
+    const hit = routes.find((r) => cmd.includes(r.match))
+    return { ok: hit?.ok ?? true, statusText: hit?.statusText ?? "OK", body: hit?.body ?? "" }
+  }
+
+test("access az: claims over the az CLI with no PAT at all — REST transport never touched", async () => {
+  const azLog: string[] = []
+  const httpLog: string[] = []
+  const src = makeAdoPrSource({
+    $: scriptedShell([]),
+    http: scriptedHttp([], httpLog),
+    azExec: scriptedAz(
+      [
+        { match: "--resource pullrequests", body: listBody([pr()]) },
+        { match: "--resource evaluations", body: failingPolicy.body ?? "" },
+        { match: "--resource pullRequestThreads", body: threads([]) },
+      ],
+      azLog,
+    ),
+    client: ledgerClient({}),
+    directory: "/r",
+    tasksDir: "docs/tasks",
+    log: () => {},
+    loaded: sitter,
+    ado: { organization: "https://dev.azure.com/acme", project: "widgets", selfLogin: "sitter@acme.com", access: "az" },
+    pat: "",
+    now: () => "2026-07-05T00:00:00Z",
+  })
+  const { item, skip } = await src.claimNext()
+  assert.equal(skip, null)
+  assert.equal(item?.id, "pr-7")
+  assert.equal(item?.state.platformAccess, "az")
+  assert.equal(httpLog.length, 0) // every data call went through the CLI
+  const list = azLog.find((c) => c.includes("--resource pullrequests"))
+  assert.ok(list)
+  assert.match(list ?? "", /devops invoke --area git/)
+  assert.match(list ?? "", /--organization https:\/\/dev\.azure\.com\/acme/)
+  assert.match(list ?? "", /--route-parameters project=widgets/)
+  assert.match(list ?? "", /--query-parameters searchCriteria\.status=active \$top=100/)
+})
+
+test("access az: a failed az call surfaces as an actionable skip carrying the CLI's stderr", async () => {
+  const src = makeAdoPrSource({
+    $: scriptedShell([]),
+    http: scriptedHttp([]),
+    azExec: scriptedAz([{ match: "--resource pullrequests", ok: false, statusText: "ERROR: Please run 'az login'" }]),
+    client: ledgerClient({}),
+    directory: "/r",
+    tasksDir: "docs/tasks",
+    log: () => {},
+    loaded: sitter,
+    ado: { organization: "https://dev.azure.com/acme", project: "widgets", selfLogin: "sitter@acme.com", access: "az" },
+    pat: "",
+    now: () => "2026-07-05T00:00:00Z",
+  })
+  const { item, skip } = await src.claimNext()
+  assert.equal(item, null)
+  assert.match(skip?.message ?? "", /az CLI.*ERROR: Please run 'az login'/s) // the CLI's own stderr, verbatim
+  assert.equal(skip?.actionable, true)
 })

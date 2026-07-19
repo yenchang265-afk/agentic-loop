@@ -99,6 +99,31 @@ export const adoFetch =
       ? undiciFetch(url, { ...init, dispatcher: getInsecureDispatcher() })
       : fetch(url, init)
 
+export interface AdoAuthDeps {
+  /** The resolved PAT ("" / undefined when none). */
+  readonly pat?: string
+}
+
+/**
+ * Build the async `Authorization` header producer the driver's REST-transport
+ * ADO calls (poll sources, ship gate — `ado.access` other than `"az"`)
+ * authenticate with. REST always needs a PAT; without one it fails loud
+ * naming both remedies. Under `ado.access: "az"` the driver's data calls go
+ * through the az CLI instead (see `ado-az.ts`) and never reach this — and an
+ * MCP server can never cover these calls at all (the driver runs in the host
+ * process, outside the agent session), so `mcp` mode polls REST+PAT.
+ */
+export const makeAdoAuthHeader = (deps: AdoAuthDeps): (() => Promise<string>) => {
+  const { pat } = deps
+  if (pat) return () => Promise.resolve(`Basic ${Buffer.from(`:${pat}`).toString("base64")}`)
+  return () =>
+    Promise.reject(
+      new Error(
+        "no Azure DevOps credential: set AZURE_DEVOPS_EXT_PAT (or ado.pat) — REST polling always needs a PAT; ado.access \"az\" polls through the az CLI instead",
+      ),
+    )
+}
+
 /** `refs/heads/x` → `x`. */
 export const stripRef = (ref: string): string => ref.replace(/^refs\/heads\//, "")
 

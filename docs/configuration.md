@@ -106,8 +106,8 @@ hand-edited afterward.
 | `stageTimeoutMinutes` | `60` | Wall-clock cap on a single stage; a stage exceeding it fails the loop instead of hanging it. |
 | `watchIntervalMinutes` | `5` | Default polling cadence for `/agentic-loop:engineering watch`; overridable per session via `/agentic-loop:engineering watch <interval>`. **OpenCode-only** — this field is an extension the OpenCode plugin adds in `src/config.ts` on top of the shared core schema (`packages/core/src/config.ts`); the Claude Code plugin has no watch timer. |
 | `loops` | `{}` | Per-loop-kind sections — see below. |
-| `codePlatform` | `"github"` | Which platform PR-shaped work sources talk to: `"github"` (the `gh` CLI) or `"ado"` (Azure DevOps via its REST API, PAT auth). Overridable per kind with `loops.<kind>.codePlatform`. See below. |
-| `ado` | unset | Azure DevOps coordinates (`organization`, `project`, optional `repository`, `selfLogin`, `customHeaders`, `insecureSkipTlsVerify`); **required** when any effective platform is `"ado"` — the config fails fast without it. `selfLogin` is **required** for `"ado"` (a PAT can't resolve the sitter's identity). |
+| `codePlatform` | `"github"` | Which platform PR-shaped work sources talk to: `"github"` (the `gh` CLI) or `"ado"` (Azure DevOps — via the az CLI, raw REST, or an MCP server per `ado.access`). Overridable per kind with `loops.<kind>.codePlatform`. See below. |
+| `ado` | unset | Azure DevOps coordinates (`organization`, `project`, optional `access`, `repository`, `selfLogin`, `customHeaders`, `insecureSkipTlsVerify`); **required** when any effective platform is `"ado"` — the config fails fast without it. `selfLogin` is **required** for `"ado"` (a PAT can't resolve the sitter's identity). `access` picks how stage agents reach ADO: `"az"` (default), `"rest"`, or `"mcp"`. |
 | `projectManagement` | unset | The team's task tracker (Jira / Azure DevOps) and how local tasks pair to it. Drives task-authoring defaults and the pairing view in `/agentic-loop:engineering status`. See below. |
 | `worktreesDir` | `".loop-worktrees"` | See hardening below. Set to `false` to opt out. |
 | `worktreeSetup` | unset | Shell command run inside a freshly created worktree (e.g. `"npm ci"`). |
@@ -305,16 +305,21 @@ API instead of `gh pr create` when the platform resolves to `ado`. The
 into the same judged shape the GitHub source produces — the "only the newest
 head, never mid-run" logic is identical either way. Neither `dependency-scan`
 nor `ci-runs` needs `ado.selfLogin` (unlike the PR-shaped sources, they
-aren't scoped to an identity), but a PAT is still required.
+aren't scoped to an identity), but the PAT (`AZURE_DEVOPS_EXT_PAT`) is still
+required in every access mode.
 
 Every sitter kind's publish stage — on ADO — opens PRs and posts thread
 comments through the Claude host's write backstop hook (`check-stage-guard`),
-which permits exactly three ADO write shapes: a GET read, a thread-comment
-POST, and a POST creating a brand-new pull request (`.../pullrequests` with
-no id segment — how ADO drafts a PR, `isDraft: true` in the body, is the same
-call as any other). Every mutation of an *existing* PR — completing,
-abandoning, voting, adding reviewers, or any PATCH/PUT/DELETE — is blocked
-outright, regardless of loop kind or stage.
+which permits exactly three ADO write shapes: a read, a thread-comment
+reply, and creating a brand-new draft pull request. Over REST that means a
+GET, a POST to a `/threads` resource, and a POST to `.../pullrequests` with
+no id segment (how ADO drafts a PR — `isDraft: true` in the body, the same
+call as any other); over the az CLI the same envelope is enforced on
+`az repos pr`/`az pipelines`/`az devops invoke` commands (`create` only with
+`--draft`, `invoke` POSTs only to thread/PR-collection resources). Every
+mutation of an *existing* PR — completing, abandoning, voting, adding
+reviewers, or any PATCH/PUT/DELETE — is blocked outright, regardless of loop
+kind or stage; mutating-looking ADO MCP tool names are blocked best-effort.
 
 ```json
 {
@@ -329,6 +334,36 @@ outright, regardless of loop kind or stage.
 }
 ```
 
+- **`ado.access`** — optional, `"az"` by default; **how Azure DevOps is
+  reached** — it selects the command examples rendered into the stage
+  prompts, the stage's bash allowlist, and the driver's own data transport
+  (poll sources + the ship gate):
+  - `"az"` (default) — the `az` CLI with the `azure-devops` extension,
+    end to end: stage agents run `az repos pr …` / `az pipelines runs …`
+    (and the generic `az devops invoke` for what the CLI lacks a verb for,
+    e.g. thread-comment replies), and the driver's polling and ship-gate
+    calls shell the same CLI (`az devops invoke` is a REST passthrough, so
+    responses parse identically). Auth is `AZURE_DEVOPS_EXT_PAT`, set up
+    beforehand — the azure-devops extension honors it directly.
+  - `"rest"` — raw REST, authenticated with `AZURE_DEVOPS_EXT_PAT`: `curl`
+    in the stage prompts, fetch in the driver (the pre-`access` behavior;
+    pin this to keep it). This is the only mode where `ado.customHeaders`
+    and `ado.insecureSkipTlsVerify` apply to the driver's calls — the az
+    CLI manages its own transport (proxy/TLS via its own configuration).
+  - `"mcp"` — an Azure DevOps MCP server (e.g. `microsoft/azure-devops-mcp`)
+    configured in your agent host — **stage agents only**: an MCP server is
+    unreachable from the driver's host process, so its polling and ship gate
+    run the `rest` transport and need a PAT. Prompts are capability-phrased
+    since tool names vary by server; a stage that finds no ADO tools records
+    an ERROR verdict naming the missing capability. The write backstop for
+    MCP is a **best-effort name-pattern blocklist** (third-party tool names
+    aren't ours to enumerate) — the prompts' NEVER clauses stay the primary
+    control.
+
+  The access method is **stamped into the loop state at claim time** (like
+  `platform` itself), so a mid-loop config flip can't contradict a running
+  loop's prompt or allowlist; pre-existing snapshots without the stamp keep
+  the `rest` behavior they were claimed under.
 - **`ado.organization` / `ado.project`** — required ADO coordinates.
 - **`ado.repository`** — optional for the `pr-sitter`/`review-sitter`/
   `main-sitter` kinds (omitted → `pr-sitter`/`review-sitter` see all active

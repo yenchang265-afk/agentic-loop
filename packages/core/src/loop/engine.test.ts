@@ -377,16 +377,50 @@ test("pr-sitter prompts render gh guidance by default and ADO REST guidance when
   const gh = composePrompt(sitter, state, "triage")
   assert.match(gh, /gh pr view/)
   assert.doesNotMatch(gh, /AZURE_DEVOPS_EXT_PAT/)
+  // An ado state WITHOUT a platformAccess stamp is a curl-era claim: it must
+  // keep rendering the REST branch (stage markers froze a curl allowlist).
   const ado = composePrompt(sitter, { ...state, platform: "ado" }, "triage")
   assert.match(ado, /_apis\/git\/pullrequests/)
   assert.match(ado, /curl -sS -u :"\$AZURE_DEVOPS_EXT_PAT"/)
   assert.doesNotMatch(ado, /gh pr view/)
-  assert.doesNotMatch(ado, /az repos/) // the az CLI is fully gone from the ado path
+  assert.doesNotMatch(ado, /az repos/) // exactly one access branch renders
   const publish = composePrompt(sitter, { ...state, platform: "ado", stage: "publish" }, "publish")
   assert.match(publish, /threads\/<threadId>\/comments/)
   assert.match(publish, /NEVER complete, abandon, or approve/)
   assert.doesNotMatch(publish, /gh pr comment/)
   assert.doesNotMatch(publish, /az devops invoke/)
+})
+
+test("pr-sitter ado prompts branch on the platformAccess stamp: az CLI, explicit rest, and mcp", () => {
+  const sitter = loadManifest(LOOPS_DIR, "pr-sitter")
+  const state: LoopState = {
+    kind: "pr-sitter",
+    goal: "PR #7",
+    stage: "triage",
+    iteration: 0,
+    artifacts: {},
+    git: { base: "main", branch: "feat/x" },
+    platform: "ado",
+  }
+  const az = composePrompt(sitter, { ...state, platformAccess: "az" }, "triage")
+  assert.match(az, /az repos pr show --id <n>/)
+  assert.match(az, /az repos pr policy list/)
+  assert.doesNotMatch(az, /AZURE_DEVOPS_EXT_PAT/)
+  assert.doesNotMatch(az, /gh pr view/)
+  const azPublish = composePrompt(sitter, { ...state, platformAccess: "az", stage: "publish" }, "publish")
+  assert.match(azPublish, /az devops invoke --area git --resource pullRequestThreadComments/)
+  assert.match(azPublish, /NEVER complete, abandon, or approve/)
+  assert.doesNotMatch(azPublish, /curl/)
+  const rest = composePrompt(sitter, { ...state, platformAccess: "rest" }, "triage")
+  assert.match(rest, /curl -sS -u :"\$AZURE_DEVOPS_EXT_PAT"/)
+  assert.doesNotMatch(rest, /az repos/)
+  const mcp = composePrompt(sitter, { ...state, platformAccess: "mcp" }, "triage")
+  assert.match(mcp, /Azure DevOps MCP server/)
+  assert.match(mcp, /ERROR verdict naming the missing capability/)
+  assert.doesNotMatch(mcp, /curl/)
+  assert.doesNotMatch(mcp, /az repos/)
+  const mcpPublish = composePrompt(sitter, { ...state, platformAccess: "mcp", stage: "publish" }, "publish")
+  assert.match(mcpPublish, /NEVER complete, abandon, or approve/)
 })
 
 // --- the review-sitter manifest walks end-to-end through the same engine ---
@@ -558,6 +592,12 @@ test("dep-sitter publish pushes only feature/ branches and opens draft PRs — n
   const adoAllow = effectiveAllowlist(publish, "ado")
   assert.ok(adoAllow.some((g) => g.includes("dev.azure.com")))
   assert.ok(adoAllow.every((g) => !/gh /.test(g)))
+  // az access swaps the curl globs for az ones (the guard's az backstop pins
+  // create to --draft); mcp grants no extra bash — fail-closed to the base list.
+  const azAllow = effectiveAllowlist(publish, "ado", "az")
+  assert.ok(azAllow.includes("az repos pr create*"))
+  assert.ok(azAllow.every((g) => !/curl|gh /.test(g)))
+  assert.deepEqual(effectiveAllowlist(publish, "ado", "mcp"), publish.bashAllowlist)
 })
 
 test("dep-sitter allowlists cover all three ecosystems' read/test verbs; publish stays unchanged", () => {
@@ -637,6 +677,9 @@ test("main-sitter can never push the watched branch: the push glob is scoped to 
   const adoAllow = effectiveAllowlist(publish, "ado")
   assert.ok(adoAllow.some((g) => g.includes("dev.azure.com")))
   assert.ok(adoAllow.every((g) => !/gh /.test(g)))
+  const azAllow = effectiveAllowlist(publish, "ado", "az")
+  assert.ok(azAllow.includes("az repos pr create*"))
+  assert.ok(azAllow.every((g) => !/curl|gh /.test(g)))
 })
 
 test("main-sitter renders gh guidance by default and ADO REST guidance when stamped ado", () => {
@@ -658,4 +701,26 @@ test("main-sitter renders gh guidance by default and ADO REST guidance when stam
   assert.match(adoPublish, /"isDraft":true/)
   assert.match(adoPublish, /NEVER push main/)
   assert.doesNotMatch(adoPublish, /gh pr create/)
+})
+
+test("main-sitter and dep-sitter render az CLI guidance when the state is stamped access az", () => {
+  const azDiag = composePrompt(mainSitter, { ...mainState("diagnose"), platform: "ado", platformAccess: "az" }, "diagnose")
+  assert.match(azDiag, /az pipelines runs list --branch main/)
+  assert.match(azDiag, /az devops invoke --area build --resource logs/)
+  assert.doesNotMatch(azDiag, /curl/)
+  const azPub = composePrompt(
+    mainSitter,
+    { ...mainState("publish", { diagnose: "D", verify: "OK" }), platform: "ado", platformAccess: "az" },
+    "publish",
+  )
+  assert.match(azPub, /az repos pr create --draft --source-branch main-sitter\/abcdef123456 --target-branch main/)
+  assert.match(azPub, /NEVER push main/)
+  assert.doesNotMatch(azPub, /curl/)
+  const azDep = composePrompt(
+    depSitter,
+    { ...depState("publish", { scan: "W", verify: "OK" }), platform: "ado", platformAccess: "az" },
+    "publish",
+  )
+  assert.match(azDep, /az repos pr create --draft/)
+  assert.doesNotMatch(azDep, /AZURE_DEVOPS_EXT_PAT/)
 })
