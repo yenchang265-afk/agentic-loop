@@ -4,7 +4,7 @@ import { resolveValidateHook } from "../manifest/registry.js"
 import { appendNote, auditNote, findByIdIn, hasPlan, moveTask, releaseClaim } from "../task/store.js"
 import type { TaskStatus } from "../task/statuses.js"
 import { clearState } from "./persist.js"
-import { loopId, teardownIsolation } from "./isolate.js"
+import { loopId, releaseWorktreeAt, teardownIsolation } from "./isolate.js"
 import type { Action, Config, LoopState } from "./state.js"
 import type { Outcome } from "./metrics.js"
 
@@ -150,6 +150,13 @@ const runDone = async (ctx: TerminalCtx, action: Extract<Action, { kind: "done" 
   // the base branch, so the note/move/commit below land where the human (and the
   // ship gate) will actually look.
   await closeIsolation(ctx, `loop(${loopId(state)}): done — review passed`)
+  // A task-less loop (free-text goal, sitter kind) never reaches the ship gate —
+  // the only other place a worktree is released — so a done here is its last
+  // chance to reclaim the directory. The work is already checkpointed on the
+  // branch; a stop keeps the worktree so `recover` can resume in it.
+  if (!state.task && state.isolated && state.git?.worktree) {
+    await releaseWorktreeAt($, log, directory, state.git.worktree, state.git.branch)
+  }
   let moved = false
   if (state.task) {
     // Re-resolve the real current path (shell-authoritative) rather than trust the

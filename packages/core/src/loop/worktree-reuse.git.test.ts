@@ -158,3 +158,63 @@ test("a stopped run keeps its worktree and the next run resumes in it", async ()
     fs.rmSync(repo, { recursive: true, force: true })
   }
 })
+
+test("re-shipping a completed task releases the worktree a mid-ship crash left behind", async () => {
+  const { repo, taskPath } = await seedRepo()
+  try {
+    const isolated = await ensureIsolation(sh, noopLog, repo, config, entryState(taskPath))
+    const wt = wtOf(repo)
+    assert.equal(isolated.git?.worktree, wt)
+    // Simulate the crash window inside shipTask: the task already moved + committed
+    // to completed/, but the process died before releaseWorktree ran.
+    fs.mkdirSync(path.join(repo, config.tasksDir, "completed"), { recursive: true })
+    await git(repo, "mv", `${config.tasksDir}/in-progress/t1.md`, `${config.tasksDir}/completed/t1.md`)
+    await git(repo, "commit", "-q", "-m", "crashed mid-ship")
+    const gateCtx: GateCtx = {
+      $: sh,
+      client: { file: { list: async () => ({ data: [] }), read: async () => ({ data: null }) }, app: { log: async () => undefined } } as unknown as Client,
+      log: noopLog,
+      directory: repo,
+      config,
+      isDriving: () => false,
+    }
+    const retried = await shipTask(gateCtx, "t1")
+    assert.ok(retried.ok, `retry failed: ${retried.message}`)
+    assert.equal(retried.data?.alreadyDone, true)
+    assert.ok(!fs.existsSync(wt), "the ship retry releases the orphaned worktree")
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true })
+  }
+})
+
+/** A free-text (task-less) loop's entry state — no `task`, so no ship gate ever runs for it. */
+const freeState = (): LoopState => ({
+  goal: "Free-text goal",
+  stage: "build",
+  iteration: 0,
+  artifacts: {},
+})
+
+test("a task-less loop keeps its worktree on stop but releases it on done — no ship gate ever will", async () => {
+  const { repo } = await seedRepo()
+  try {
+    // --- stop: a recover may resume this loop, so the worktree survives.
+    let state = await ensureIsolation(sh, noopLog, repo, config, freeState())
+    const wt = path.join(repo, ".loop-worktrees", "free-text-goal")
+    assert.equal(state.git?.worktree, wt)
+    fs.writeFileSync(path.join(wt, "work.txt"), "wip\n")
+    let report = await runTerminal(terminalCtx(repo, state), { kind: "stop", message: "capped" })
+    assert.equal(report.kind, "stop")
+    assert.ok(fs.existsSync(wt), "stop keeps the worktree for recover")
+
+    // --- done: nothing will ever release it later, so done reclaims it now.
+    state = await ensureIsolation(sh, noopLog, repo, config, freeState())
+    report = await runTerminal(terminalCtx(repo, state), { kind: "done", message: "finished" })
+    assert.equal(report.kind, "done")
+    assert.ok(!fs.existsSync(wt), "done releases a task-less loop's worktree")
+    // The checkpointed work survives on the branch.
+    assert.ok((await git(repo, "ls-tree", "-r", "--name-only", "feature/free-text-goal")).includes("work.txt"))
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true })
+  }
+})

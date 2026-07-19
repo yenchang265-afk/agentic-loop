@@ -323,8 +323,22 @@ export const makeAdoPrSource = (deps: AdoPrDeps): WorkSource => {
       const { snapshot, triggers } = work.ref as { snapshot: PrSnapshot; triggers: PrTrigger[] }
       const ledger = await loadLedger(client, directory, tasksDir, kind, snapshot.number, now())
       // Re-read the PR head: after a publish it is the sitter's own push, and
-      // recording it as handled is exactly what prevents self-triggering.
-      const fresh = await get(`${org}/${project}/_apis/git/pullrequests/${snapshot.number}?${API_VERSION}`)
+      // recording it as handled is exactly what prevents self-triggering. Must
+      // follow the configured transport like every other data call — az mode
+      // may run with no PAT at all, where the REST fallback silently fails and
+      // the stale ledger head turns the sitter's own push into a new trigger.
+      const fresh = useAz
+        ? azToHttp(
+            await az(
+              azInvokeArgs({
+                area: "git",
+                resource: "pullrequests",
+                organization: org,
+                routeParameters: { project: ado.project, pullRequestId: String(snapshot.number) },
+              }),
+            ),
+          )
+        : await get(`${org}/${project}/_apis/git/pullrequests/${snapshot.number}?${API_VERSION}`)
       let head = snapshot.headRefOid
       let repositoryId = ""
       if (fresh.ok) {
