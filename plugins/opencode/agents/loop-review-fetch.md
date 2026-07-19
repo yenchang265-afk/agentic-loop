@@ -8,15 +8,6 @@ permission:
     "*": deny
     # Both platforms are allowed here (static frontmatter can't switch); config
     # codePlatform decides which the stage prompt actually uses.
-    "gh pr view*": allow
-    "gh pr diff*": allow
-    "gh pr checks*": allow
-    "gh api *": allow
-    "curl -sS -u :* https://dev.azure.com/*": allow
-    "curl -sS -u :* https://*.visualstudio.com/*": allow
-    # ado.access "az": read-only az CLI equivalents.
-    "az repos pr show*": allow
-    "az repos pr list*": allow
     "git status*": allow
     "git diff*": allow
     "git log*": allow
@@ -34,6 +25,14 @@ permission:
     "grep *": allow
     "find *": allow
     "wc *": allow
+    "gh pr view*": allow
+    "gh pr diff*": allow
+    "gh pr checks*": allow
+    "curl -sS -u :* https://dev.azure.com/*": allow
+    "curl -sS -u :* https://*.visualstudio.com/*": allow
+    "az repos pr show*": allow
+    "az repos pr list*": allow
+    "az devops invoke *": allow
 ---
 
 You are the **loop-review-fetch** subagent — the FETCH stage of the
