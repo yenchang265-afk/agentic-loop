@@ -118,13 +118,15 @@ const BaseConfigSchema = z.object({
       organization: z.string().min(1),
       project: z.string().min(1),
       /**
-       * How stage agents talk to ADO: `az` (the CLI with the azure-devops
-       * extension — the default), `rest` (raw curl + `AZURE_DEVOPS_EXT_PAT`,
-       * the pre-`access` behavior), or `mcp` (an Azure DevOps MCP server
-       * connected to the agent session). Selects the command examples rendered
-       * into stage prompts and the stage bash allowlist. The engine's poll
-       * sources always speak REST regardless; in `az` mode they mint a Bearer
-       * token via `az account get-access-token` when no PAT resolves.
+       * How ADO is reached: `az` (the CLI with the azure-devops extension —
+       * the default), `rest` (raw curl/fetch + `AZURE_DEVOPS_EXT_PAT`, the
+       * pre-`access` behavior), or `mcp` (an Azure DevOps MCP server in the
+       * agent session). Selects the stage prompts' command examples, the
+       * stage bash allowlist, and the driver's own data transport: under
+       * `az` the poll sources and ship gate shell the az CLI too (auth via
+       * az login, or AZURE_DEVOPS_EXT_PAT which the extension honors); under
+       * `rest` they fetch REST with the PAT; `mcp` covers stage agents only
+       * (out of the host process's reach), so its driver side polls REST+PAT.
        */
       access: z.enum(ADO_ACCESS_METHODS).default("az"),
       /** Repository name; omitted → all repositories in the project. */

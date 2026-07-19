@@ -1,7 +1,5 @@
-import { execFile } from "node:child_process"
 import { Agent, fetch as undiciFetch } from "undici"
 import { z } from "zod"
-import type { AdoAccessMethod } from "../loop/state.js"
 
 /**
  * The pure Azure DevOps normalizers for the `ado-pr.ts` work source, which
@@ -101,70 +99,29 @@ export const adoFetch =
       ? undiciFetch(url, { ...init, dispatcher: getInsecureDispatcher() })
       : fetch(url, init)
 
-/** Azure DevOps' AAD application id — the audience `az account get-access-token` mints Bearer tokens for. */
-export const ADO_AAD_RESOURCE = "499b84ac-1321-427f-aa17-267ca6975798"
-
-/** Run `az account get-access-token` and return the raw token text. Rejects when az is missing or not logged in. */
-const runAzToken = (): Promise<string> =>
-  new Promise((resolve, reject) => {
-    execFile(
-      "az",
-      ["account", "get-access-token", "--resource", ADO_AAD_RESOURCE, "--query", "accessToken", "-o", "tsv"],
-      { timeout: 30_000 },
-      (err, stdout, stderr) => (err ? reject(new Error(stderr.trim() || err.message)) : resolve(stdout)),
-    )
-  })
-
 export interface AdoAuthDeps {
-  /** The resolved PAT ("" / undefined when none) — always wins when present. */
+  /** The resolved PAT ("" / undefined when none). */
   readonly pat?: string
-  /** Config `ado.access`; the az Bearer fallback engages only for `"az"`. */
-  readonly access?: AdoAccessMethod
-  /** Injectable az invocation (tests); defaults to running the real CLI. */
-  readonly runAz?: () => Promise<string>
-  /** Clock injection for the token cache; defaults to `Date.now`. */
-  readonly now?: () => number
 }
 
-/** az tokens live ~1 h; refresh with headroom. */
-const AZ_TOKEN_TTL_MS = 50 * 60_000
-
 /**
- * Build the async `Authorization` header producer the driver's own ADO REST
- * calls (poll sources, ship gate) authenticate with. Precedence: a PAT (HTTP
- * Basic) always wins; without one, `ado.access: "az"` mints an AAD Bearer
- * token via `az account get-access-token` (cached ~50 min — az tokens live
- * ~1 h); anything else fails loud naming both remedies — the engine can never
- * reach ADO through an MCP server (it runs in the host process, outside the
- * agent session), so `mcp` mode still needs one of these two credentials for
- * polling.
+ * Build the async `Authorization` header producer the driver's REST-transport
+ * ADO calls (poll sources, ship gate — `ado.access` other than `"az"`)
+ * authenticate with. REST always needs a PAT; without one it fails loud
+ * naming both remedies. Under `ado.access: "az"` the driver's data calls go
+ * through the az CLI instead (see `ado-az.ts`) and never reach this — and an
+ * MCP server can never cover these calls at all (the driver runs in the host
+ * process, outside the agent session), so `mcp` mode polls REST+PAT.
  */
 export const makeAdoAuthHeader = (deps: AdoAuthDeps): (() => Promise<string>) => {
-  const { pat, access } = deps
+  const { pat } = deps
   if (pat) return () => Promise.resolve(`Basic ${Buffer.from(`:${pat}`).toString("base64")}`)
-  if (access !== "az") {
-    return () =>
-      Promise.reject(
-        new Error(
-          "no Azure DevOps credential for polling: set AZURE_DEVOPS_EXT_PAT (or ado.pat), or set ado.access to \"az\" with a logged-in az CLI",
-        ),
-      )
-  }
-  const runAz = deps.runAz ?? runAzToken
-  const now = deps.now ?? Date.now
-  let cached: { token: string; at: number } | undefined
-  return async () => {
-    const t = now()
-    if (cached && t - cached.at < AZ_TOKEN_TTL_MS) return `Bearer ${cached.token}`
-    const token = (await runAz()).trim()
-    if (!token) {
-      throw new Error(
-        "az account get-access-token returned no token — run `az login` (and `az extension add --name azure-devops`), or set AZURE_DEVOPS_EXT_PAT",
-      )
-    }
-    cached = { token, at: t }
-    return `Bearer ${token}`
-  }
+  return () =>
+    Promise.reject(
+      new Error(
+        "no Azure DevOps credential: set AZURE_DEVOPS_EXT_PAT (or ado.pat) — REST polling always needs a PAT; ado.access \"az\" polls through the az CLI instead",
+      ),
+    )
 }
 
 /** `refs/heads/x` → `x`. */

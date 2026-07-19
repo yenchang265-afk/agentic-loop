@@ -13,10 +13,11 @@ English | [繁體中文](migration.zh-TW.md)
 - **In-flight loops are unaffected**: a state snapshot claimed before this
   change carries no access stamp and keeps rendering the curl/REST branch it
   was claimed under.
-- **Polling still speaks REST either way** — with your PAT when set; under
-  `"az"` with no PAT, the driver mints a Bearer token via
-  `az account get-access-token`. An `"mcp"` setup still needs a PAT or a
-  logged-in az CLI for polling. See
+- **Polling and the ship gate follow the same choice** — under `"az"` the
+  driver shells the az CLI for its own calls too (auth: `az login`, or
+  `AZURE_DEVOPS_EXT_PAT` which the extension honors), so no PAT is needed
+  anywhere with a logged-in CLI. `"rest"` keeps fetch+PAT. `"mcp"` covers
+  stage agents only — the driver's polling still needs a PAT. See
   [configuration.md](configuration.md#code-platform-codeplatform--ado).
 
 ## To layered configuration (user scope + repo scope)

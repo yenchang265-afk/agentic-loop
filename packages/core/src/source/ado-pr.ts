@@ -4,6 +4,7 @@ import type { LoadedManifest } from "../manifest/schema.js"
 import type { AdoConfig } from "../loop/state.js"
 import { attentionTriggers, loadLedger, saveLedger, type PrSnapshot, type PrTrigger } from "./ledger.js"
 import { fetchHead, makeClaimMarkers, prWorkItem, terminalLedgerUpdate } from "./pr-shared.js"
+import { azInvokeArgs, azToHttp, execAz, type AzExec } from "./ado-az.js"
 import {
   ADO_HEADERS_ENV,
   adoFetch,
@@ -69,6 +70,8 @@ interface AdoPrDeps {
   readonly ado: AdoConfig
   /** HTTP transport for ADO REST calls; defaults to `adoFetch(ado.insecureSkipTlsVerify)`. */
   readonly http?: AdoHttp
+  /** az CLI runner for the `ado.access: "az"` data transport; defaults to the real CLI. */
+  readonly azExec?: AzExec
   /** The Personal Access Token; defaults to `process.env.AZURE_DEVOPS_EXT_PAT`. */
   readonly pat?: string
   /** Clock injection for ledger stamps; defaults to the real time. */
@@ -95,8 +98,13 @@ export const makeAdoPrSource = (deps: AdoPrDeps): WorkSource => {
 
   const markers = makeClaimMarkers($, directory, tasksDir, kind)
 
-  // PAT wins; in `az` mode without one, a Bearer token is minted via the az CLI.
-  const authHeader = makeAdoAuthHeader({ pat, access: ado.access })
+  // Data transport per config `ado.access`: "az" shells the az CLI (its own
+  // auth — az login or a set AZURE_DEVOPS_EXT_PAT); anything else is REST
+  // fetch with a PAT. `az devops invoke` is a REST passthrough, so both
+  // transports return the same JSON envelopes and share the schema parsing.
+  const useAz = ado.access === "az"
+  const az = deps.azExec ?? execAz
+  const authHeader = makeAdoAuthHeader({ pat })
 
   /** One authenticated GET. Never throws — a network error (or missing credential) reads as a non-ok response, like the CLI's `nothrow()`. */
   const get = async (url: string): Promise<{ ok: boolean; status: number; statusText: string; body: string }> => {
@@ -111,12 +119,44 @@ export const makeAdoPrSource = (deps: AdoPrDeps): WorkSource => {
     }
   }
 
+  /** The active-PR list, over whichever transport the access method selects. */
+  const listPrs = (): Promise<{ ok: boolean; status: number; statusText: string; body: string }> =>
+    useAz
+      ? az(
+          azInvokeArgs({
+            area: "git",
+            resource: "pullrequests",
+            organization: org,
+            routeParameters: {
+              project: ado.project,
+              ...(ado.repository ? { repositoryId: ado.repository } : {}),
+            },
+            queryParameters: { "searchCriteria.status": "active", $top: "100" },
+          }),
+        ).then(azToHttp)
+      : get(
+          ado.repository
+            ? `${org}/${project}/_apis/git/repositories/${encodeURIComponent(ado.repository)}/pullrequests?searchCriteria.status=active&$top=100&${API_VERSION}`
+            : `${org}/${project}/_apis/git/pullrequests?searchCriteria.status=active&$top=100&${API_VERSION}`,
+        )
+
   /** Names of blocking policies currently failing on the PR (ADO's nearest equivalent of failing checks). */
   const failingPolicies = async (projectId: string, pr: number): Promise<string[]> => {
     if (!projectId) return []
     const artifactId = `vstfs:///CodeReview/CodeReviewId/${projectId}/${pr}`
-    const url = `${org}/${project}/_apis/policy/evaluations?artifactId=${encodeURIComponent(artifactId)}&${API_VERSION}`
-    const out = await get(url)
+    const out = useAz
+      ? azToHttp(
+          await az(
+            azInvokeArgs({
+              area: "policy",
+              resource: "evaluations",
+              organization: org,
+              routeParameters: { project: ado.project },
+              queryParameters: { artifactId },
+            }),
+          ),
+        )
+      : await get(`${org}/${project}/_apis/policy/evaluations?artifactId=${encodeURIComponent(artifactId)}&${API_VERSION}`)
     if (!out.ok) return []
     try {
       const json = JSON.parse(out.body || "{}") as { value?: unknown }
@@ -129,8 +169,20 @@ export const makeAdoPrSource = (deps: AdoPrDeps): WorkSource => {
   /** Non-system PR thread comments, flattened to `{ author, at }`, from the `pullRequestThreads` resource. */
   const threadComments = async (repositoryId: string, pr: number): Promise<{ author: string; at: string }[]> => {
     if (!repositoryId) return []
-    const url = `${org}/${project}/_apis/git/repositories/${encodeURIComponent(repositoryId)}/pullRequests/${pr}/threads?${API_VERSION}`
-    const out = await get(url)
+    const out = useAz
+      ? azToHttp(
+          await az(
+            azInvokeArgs({
+              area: "git",
+              resource: "pullRequestThreads",
+              organization: org,
+              routeParameters: { project: ado.project, repositoryId, pullRequestId: String(pr) },
+            }),
+          ),
+        )
+      : await get(
+          `${org}/${project}/_apis/git/repositories/${encodeURIComponent(repositoryId)}/pullRequests/${pr}/threads?${API_VERSION}`,
+        )
     if (!out.ok) return []
     try {
       const threads = AdoThreadsSchema.parse(JSON.parse(out.body || "{}"))
@@ -144,13 +196,15 @@ export const makeAdoPrSource = (deps: AdoPrDeps): WorkSource => {
     loopKind: kind,
 
     async claimNext() {
-      if (!pat) {
+      // az mode needs no PAT here — the CLI brings its own auth (az login or
+      // AZURE_DEVOPS_EXT_PAT); a broken login surfaces as a failed list below.
+      if (!pat && !useAz) {
         return {
           item: null,
           skip: {
             message:
               `${kind}: Azure DevOps PAT not set — export ${PAT_ENV} with a token that has Code (read) scope so the ` +
-              `sitter can call the ADO REST API.`,
+              `sitter can call the ADO REST API (or set ado.access "az" to poll through the az CLI).`,
             actionable: true,
           } satisfies ClaimSkipReason,
         }
@@ -168,17 +222,16 @@ export const makeAdoPrSource = (deps: AdoPrDeps): WorkSource => {
           } satisfies ClaimSkipReason,
         }
       }
-      const listUrl = ado.repository
-        ? `${org}/${project}/_apis/git/repositories/${encodeURIComponent(ado.repository)}/pullrequests?searchCriteria.status=active&$top=100&${API_VERSION}`
-        : `${org}/${project}/_apis/git/pullrequests?searchCriteria.status=active&$top=100&${API_VERSION}`
-      const out = await get(listUrl)
+      const out = await listPrs()
       if (!out.ok) {
         return {
           item: null,
           skip: {
-            message:
-              `${kind}: Azure DevOps pull-request list failed — HTTP ${out.status} ${out.statusText}. ` +
-              `Is ${PAT_ENV} a valid token with Code (read) scope, and are ado.organization/project correct?`,
+            message: useAz
+              ? `${kind}: Azure DevOps pull-request list failed (az CLI) — ${out.statusText}. ` +
+                `Is az logged in (az login, or ${PAT_ENV}) with the azure-devops extension, and are ado.organization/project correct?`
+              : `${kind}: Azure DevOps pull-request list failed — HTTP ${out.status} ${out.statusText}. ` +
+                `Is ${PAT_ENV} a valid token with Code (read) scope, and are ado.organization/project correct?`,
             actionable: true,
           } satisfies ClaimSkipReason,
         }

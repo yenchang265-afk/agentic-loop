@@ -14,6 +14,7 @@ import {
   resolveAdoHeaders,
 } from "./ado-shared.js"
 import type { AdoHttp } from "./ado-pr.js"
+import { azInvokeArgs, azToHttp, execAz, type AzExec } from "./ado-az.js"
 import type { ClaimSkipReason, TerminalOutcome, WorkSource } from "./types.js"
 
 /**
@@ -27,9 +28,11 @@ import type { ClaimSkipReason, TerminalOutcome, WorkSource } from "./types.js"
  * both platforms identically, and the ledger/claim/WorkItem mechanics are
  * shared verbatim via `ci-runs-shared.ts`.
  *
- * Auth is the same Personal Access Token (HTTP Basic) as `ado-pr.ts`, read
- * from `AZURE_DEVOPS_EXT_PAT`, falling back to config `ado.pat`. Unlike the PR
- * sources, no `ado.selfLogin` is needed — CI status isn't scoped to an
+ * Transport and auth follow config `ado.access` (same rules as `ado-pr.ts`):
+ * `"az"` (the default) shells the az CLI, which brings its own auth (az login,
+ * or `AZURE_DEVOPS_EXT_PAT` which the extension honors); otherwise raw REST
+ * with the PAT (env, falling back to config `ado.pat`) as HTTP Basic. Unlike
+ * the PR sources, no `ado.selfLogin` is needed — CI status isn't scoped to an
  * identity, only to the watched branch.
  */
 
@@ -47,6 +50,8 @@ interface AdoCiRunsDeps {
   readonly ado: AdoConfig
   /** HTTP transport for ADO REST calls; defaults to `adoFetch(ado.insecureSkipTlsVerify)`. */
   readonly http?: AdoHttp
+  /** az CLI runner for the `ado.access: "az"` data transport; defaults to the real CLI. */
+  readonly azExec?: AzExec
   /** The Personal Access Token; defaults to `process.env.AZURE_DEVOPS_EXT_PAT`. */
   readonly pat?: string
   /** Config override of the manifest's watched branch (`loops.<kind>.branch`). */
@@ -72,8 +77,11 @@ export const makeAdoCiRunsSource = (deps: AdoCiRunsDeps): WorkSource => {
   const claimsDir = `${directory}/${tasksDir}/runs/${kind}/.claims`
   let resolvedBranch: string | null = null
 
-  // PAT wins; in `az` mode without one, a Bearer token is minted via the az CLI.
-  const authHeader = makeAdoAuthHeader({ pat, access: ado.access })
+  // Data transport per config `ado.access`: "az" shells the az CLI (its own
+  // auth); anything else is REST fetch with a PAT (see ado-az.ts).
+  const useAz = ado.access === "az"
+  const az = deps.azExec ?? execAz
+  const authHeader = makeAdoAuthHeader({ pat })
 
   /** One authenticated GET. Never throws — a network error (or missing credential) reads as a non-ok response, like the CLI's `nothrow()`. */
   const get = async (url: string): Promise<{ ok: boolean; status: number; statusText: string; body: string }> => {
@@ -106,28 +114,44 @@ export const makeAdoCiRunsSource = (deps: AdoCiRunsDeps): WorkSource => {
     loopKind: kind,
 
     async claimNext() {
-      if (!pat) {
+      // az mode needs no PAT here — the CLI brings its own auth (az login or
+      // AZURE_DEVOPS_EXT_PAT); a broken login surfaces as a failed list below.
+      if (!pat && !useAz) {
         return {
           item: null,
           skip: {
             message:
               `${kind}: Azure DevOps PAT not set — export ${PAT_ENV} with a token that has Build (read) scope so the ` +
-              `sitter can call the ADO REST API.`,
+              `sitter can call the ADO REST API (or set ado.access "az" to poll through the az CLI).`,
             actionable: true,
           } satisfies ClaimSkipReason,
         }
       }
       const b = await branch()
-      const branchName = encodeURIComponent(`refs/heads/${b}`)
-      const listUrl = `${org}/${project}/_apis/build/builds?branchName=${branchName}&$top=30&queryOrder=queueTimeDescending&${API_VERSION}`
-      const out = await get(listUrl)
+      const out = useAz
+        ? azToHttp(
+            await az(
+              azInvokeArgs({
+                area: "build",
+                resource: "builds",
+                organization: org,
+                routeParameters: { project: ado.project },
+                queryParameters: { branchName: `refs/heads/${b}`, $top: "30", queryOrder: "queueTimeDescending" },
+              }),
+            ),
+          )
+        : await get(
+            `${org}/${project}/_apis/build/builds?branchName=${encodeURIComponent(`refs/heads/${b}`)}&$top=30&queryOrder=queueTimeDescending&${API_VERSION}`,
+          )
       if (!out.ok) {
         return {
           item: null,
           skip: {
-            message:
-              `${kind}: Azure DevOps build list failed — HTTP ${out.status} ${out.statusText}. ` +
-              `Is ${PAT_ENV} a valid token with Build (read) scope, and are ado.organization/project correct?`,
+            message: useAz
+              ? `${kind}: Azure DevOps build list failed (az CLI) — ${out.statusText}. ` +
+                `Is az logged in (az login, or ${PAT_ENV}) with the azure-devops extension, and are ado.organization/project correct?`
+              : `${kind}: Azure DevOps build list failed — HTTP ${out.status} ${out.statusText}. ` +
+                `Is ${PAT_ENV} a valid token with Build (read) scope, and are ado.organization/project correct?`,
             actionable: true,
           } satisfies ClaimSkipReason,
         }

@@ -334,31 +334,37 @@ kind or stage; mutating-looking ADO MCP tool names are blocked best-effort.
 }
 ```
 
-- **`ado.access`** — optional, `"az"` by default; **how the stage agents talk
-  to Azure DevOps**, selecting both the command examples rendered into the
-  stage prompts and the stage's bash allowlist:
-  - `"az"` (default) — the `az` CLI with the `azure-devops` extension
-    (`az repos pr …`, `az pipelines runs …`, and the generic `az devops
-    invoke` for what the CLI lacks a verb for, e.g. thread-comment replies).
-    Auth follows `az login`; a set `AZURE_DEVOPS_EXT_PAT` still wins.
-  - `"rest"` — raw `curl` against the REST API, authenticated with
-    `AZURE_DEVOPS_EXT_PAT` (the pre-`access` behavior; pin this to keep it).
+- **`ado.access`** — optional, `"az"` by default; **how Azure DevOps is
+  reached** — it selects the command examples rendered into the stage
+  prompts, the stage's bash allowlist, and the driver's own data transport
+  (poll sources + the ship gate):
+  - `"az"` (default) — the `az` CLI with the `azure-devops` extension,
+    end to end: stage agents run `az repos pr …` / `az pipelines runs …`
+    (and the generic `az devops invoke` for what the CLI lacks a verb for,
+    e.g. thread-comment replies), and the driver's polling and ship-gate
+    calls shell the same CLI (`az devops invoke` is a REST passthrough, so
+    responses parse identically). Auth is the CLI's own: `az login`, or a
+    set `AZURE_DEVOPS_EXT_PAT` (which the extension honors) — no PAT
+    required when az is logged in.
+  - `"rest"` — raw REST, authenticated with `AZURE_DEVOPS_EXT_PAT`: `curl`
+    in the stage prompts, fetch in the driver (the pre-`access` behavior;
+    pin this to keep it). This is the only mode where `ado.customHeaders`
+    and `ado.insecureSkipTlsVerify` apply to the driver's calls — the az
+    CLI manages its own transport (proxy/TLS via its own configuration).
   - `"mcp"` — an Azure DevOps MCP server (e.g. `microsoft/azure-devops-mcp`)
-    configured in your agent host. Prompts are capability-phrased since tool
-    names vary by server; a stage that finds no ADO tools records an ERROR
-    verdict naming the missing capability. The write backstop for MCP is a
-    **best-effort name-pattern blocklist** (third-party tool names aren't
-    ours to enumerate) — the prompts' NEVER clauses stay the primary control.
+    configured in your agent host — **stage agents only**: an MCP server is
+    unreachable from the driver's host process, so its polling and ship gate
+    run the `rest` transport and need a PAT. Prompts are capability-phrased
+    since tool names vary by server; a stage that finds no ADO tools records
+    an ERROR verdict naming the missing capability. The write backstop for
+    MCP is a **best-effort name-pattern blocklist** (third-party tool names
+    aren't ours to enumerate) — the prompts' NEVER clauses stay the primary
+    control.
 
   The access method is **stamped into the loop state at claim time** (like
   `platform` itself), so a mid-loop config flip can't contradict a running
   loop's prompt or allowlist; pre-existing snapshots without the stamp keep
-  the `rest` behavior they were claimed under. **Boundary:** `ado.access`
-  governs the *stage agents* only. The engine's own poll sources and ship
-  gate always speak REST from the host process (an MCP server is out of their
-  reach) — they authenticate with a PAT, or, under `"az"` with no PAT set, a
-  Bearer token minted via `az account get-access-token` (cached ~50 min). So
-  `"mcp"` still needs a PAT or a logged-in az CLI for polling.
+  the `rest` behavior they were claimed under.
 - **`ado.organization` / `ado.project`** — required ADO coordinates.
 - **`ado.repository`** — optional for the `pr-sitter`/`review-sitter`/
   `main-sitter` kinds (omitted → `pr-sitter`/`review-sitter` see all active

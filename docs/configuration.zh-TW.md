@@ -312,30 +312,33 @@ id 片段的 POST（這正是 ADO 如何草擬一個 PR 的方式，`isDraft: tr
 }
 ```
 
-- **`ado.access`**——選填，預設 `"az"`；**階段代理人（stage agents）用
-  哪種方式對 Azure DevOps 說話**，同時決定渲染進階段提示的指令範例
-  與該階段的 bash 允許清單：
-  - `"az"`（預設）——帶 `azure-devops` 擴充的 `az` CLI（`az repos pr …`、
-    `az pipelines runs …`，CLI 沒有動詞的操作——例如討論串留言回覆——
-    則用通用的 `az devops invoke`）。認證跟隨 `az login`；已設定的
-    `AZURE_DEVOPS_EXT_PAT` 仍然優先。
-  - `"rest"`——直接以 `curl` 呼叫 REST API，用 `AZURE_DEVOPS_EXT_PAT`
-    認證（`access` 出現之前的行為；想保留就固定住這個值）。
+- **`ado.access`**——選填，預設 `"az"`；**用哪種方式觸達 Azure
+  DevOps**——它同時決定渲染進階段提示的指令範例、該階段的 bash
+  允許清單，以及 driver 自己的資料傳輸（輪詢來源 + ship 把關點）：
+  - `"az"`（預設）——帶 `azure-devops` 擴充的 `az` CLI，端到端：
+    階段代理人執行 `az repos pr …` / `az pipelines runs …`（CLI 沒有
+    動詞的操作——例如討論串留言回覆——則用通用的 `az devops
+    invoke`），而 driver 的輪詢與 ship 把關點呼叫也走同一個 CLI
+    （`az devops invoke` 是 REST 直通，回應解析完全相同）。認證是
+    CLI 自己的：`az login`，或已設定的 `AZURE_DEVOPS_EXT_PAT`
+    （擴充會採用它）——az 已登入時不需要 PAT。
+  - `"rest"`——原生 REST，用 `AZURE_DEVOPS_EXT_PAT` 認證：階段提示
+    用 `curl`，driver 用 fetch（`access` 出現之前的行為；想保留就
+    固定住這個值）。只有這個模式下 `ado.customHeaders` 與
+    `ado.insecureSkipTlsVerify` 才作用於 driver 的呼叫——az CLI
+    自己管理傳輸（proxy/TLS 走它自身的設定）。
   - `"mcp"`——在你的代理主機中設定的 Azure DevOps MCP 伺服器（例如
-    `microsoft/azure-devops-mcp`）。提示以能力描述而非工具名稱撰寫
-    （各伺服器工具名不同）；找不到 ADO 工具的階段會記錄一個 ERROR
-    判定並指名缺少的能力。MCP 的寫入防線是**盡力而為的名稱樣式
-    黑名單**（第三方工具名不由我們列舉）——提示中的 NEVER 條款
-    仍是主要控制。
+    `microsoft/azure-devops-mcp`）——**只涵蓋階段代理人**：MCP
+    伺服器不在 driver host 行程可及之處，所以它的輪詢與 ship 把關
+    點走 `rest` 傳輸、需要一個 PAT。提示以能力描述而非工具名稱
+    撰寫（各伺服器工具名不同）；找不到 ADO 工具的階段會記錄一個
+    ERROR 判定並指名缺少的能力。MCP 的寫入防線是**盡力而為的名稱
+    樣式黑名單**（第三方工具名不由我們列舉）——提示中的 NEVER
+    條款仍是主要控制。
 
   存取方式會在**認領時蓋章進迴圈狀態**（就像 `platform` 一樣），
   所以迴圈進行中翻動設定不會讓提示與允許清單互相矛盾；沒有這個
-  戳記的既有快照維持它們被認領時的 `rest` 行為。**邊界：**
-  `ado.access` 只管*階段代理人*。引擎自己的輪詢來源與 ship 把關點
-  永遠從 host 行程說 REST（MCP 伺服器不在它們可及之處）——用 PAT
-  認證，或在 `"az"` 且沒有 PAT 時，透過 `az account get-access-token`
-  鑄造 Bearer token（快取約 50 分鐘）。因此 `"mcp"` 的輪詢仍需要
-  一個 PAT 或已登入的 az CLI。
+  戳記的既有快照維持它們被認領時的 `rest` 行為。
 - **`ado.organization` / `ado.project`**——必填的 ADO 座標。
 - **`ado.repository`**——對 `pr-sitter`/`review-sitter`/
   `main-sitter` 類型而言是選填的（省略時 → `pr-sitter`/

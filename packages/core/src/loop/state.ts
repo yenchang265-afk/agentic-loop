@@ -124,12 +124,13 @@ export const CODE_PLATFORMS = ["github", "ado"] as const
 export type CodePlatform = (typeof CODE_PLATFORMS)[number]
 
 /**
- * How stage agents talk to Azure DevOps: the `az` CLI (the default), raw REST
- * over `curl` with a PAT, or an Azure DevOps MCP server connected to the agent
- * session. Selects the command examples rendered into stage prompts and the
- * stage bash allowlist — the engine's own poll sources always speak REST (they
- * run in the host process, out of MCP's reach; in `az` mode they mint a Bearer
- * token via `az account get-access-token` when no PAT is set).
+ * How Azure DevOps is reached: the `az` CLI (the default), raw REST over
+ * `curl`/fetch with a PAT, or an Azure DevOps MCP server. Selects the command
+ * examples rendered into stage prompts, the stage bash allowlist, AND the
+ * driver's own data transport — under `az` the poll sources and ship gate
+ * shell the az CLI too (`source/ado-az.ts`); under `rest` they fetch REST with
+ * the PAT. `mcp` covers only the stage agents (an MCP server is unreachable
+ * from the host process), so its driver side polls REST+PAT.
  */
 export const ADO_ACCESS_METHODS = ["az", "rest", "mcp"] as const
 export type AdoAccessMethod = (typeof ADO_ACCESS_METHODS)[number]

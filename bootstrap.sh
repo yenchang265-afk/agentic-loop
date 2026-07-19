@@ -195,12 +195,12 @@ ensure_gh() {
 # Azure DevOps prerequisites (ADO mode only)
 # ---------------------------------------------------------------------------
 # codePlatform "ado" reaches Azure DevOps per config `ado.access`:
-#   az   (default) — the az CLI with the azure-devops extension; the engine's
-#                    own polling also mints Bearer tokens from it when no PAT
-#                    is set (`az account get-access-token`)
-#   rest           — raw curl + AZURE_DEVOPS_EXT_PAT (nothing to install)
+#   az   (default) — the az CLI with the azure-devops extension; stage agents
+#                    AND the engine's own polling/ship calls go through it
+#                    (auth: az login, or AZURE_DEVOPS_EXT_PAT which it honors)
+#   rest           — raw curl/fetch + AZURE_DEVOPS_EXT_PAT (nothing to install)
 #   mcp            — an Azure DevOps MCP server configured in the agent host;
-#                    polling still needs a PAT or a logged-in az CLI
+#                    covers stage agents only — polling still needs a PAT
 ado_access() {
   # Best-effort read of ado.access from .agentic-loop.json; defaults to "az".
   local cfg=".agentic-loop.json"
@@ -228,7 +228,7 @@ ensure_ado() {
       ;;
     mcp)
       ok "Azure DevOps (mcp): configure an Azure DevOps MCP server in your agent host"
-      note_manual "ado.access \"mcp\": the engine's polling still needs AZURE_DEVOPS_EXT_PAT or a logged-in az CLI"
+      note_manual "ado.access \"mcp\": covers stage agents only — the engine's polling still needs AZURE_DEVOPS_EXT_PAT"
       ;;
     *)
       if ! command -v az >/dev/null 2>&1; then
