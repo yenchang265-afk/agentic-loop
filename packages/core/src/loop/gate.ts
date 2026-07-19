@@ -249,6 +249,10 @@ export const shipTask = async (ctx: GateCtx, id: string, kind = "engineering"): 
     const elsewhere = await findAnyStatus(ctx, id)
     const where = elsewhere ? statusFolder(elsewhere) : null
     if (where === "completed") {
+      // A crash between the completed/ move and the cleanup below (shipPr is a
+      // slow network call) leaves the worktree orphaned with this retry as the
+      // only path back — release it here too. Idempotent no-op when already gone.
+      await releaseWorktree($, log, directory, config, id)
       return { ok: true, message: `"${elsewhere!.title}" is already completed. Nothing to do.`, path: elsewhere!.path, data: { completed: elsewhere!.path, alreadyDone: true } }
     }
     return { ok: false, message: elsewhere ? `Can't ship "${id}": it's in ${where}, not in-review/.` : ((await unparseableAt(ctx, id)) ?? `No in-review task "${id}".`) }

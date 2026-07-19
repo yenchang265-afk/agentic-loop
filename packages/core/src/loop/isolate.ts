@@ -47,7 +47,7 @@ const runWorktreeSetup = async ($: Shell, log: Log, config: Config, wtPath: stri
  *   outlives the run: it is created on a task's first BUILD and removed only
  *   when the task ships (`releaseWorktree`), so every later run — a retry after
  *   the iteration cap, a `recover` after ESC, a `replan` bounce out of
- *   `in-review/` — resumes in the same directory on top of the previous
+ *   `in-progress/` — resumes in the same directory on top of the previous
  *   iteration's work and its `worktreeSetup` output.
  * - **Shared-tree mode** (default): checks out `feature/<id>` in the main tree.
  *   Degrades to no isolation (with a warning) outside a git repo, on a
@@ -224,16 +224,38 @@ export const releaseWorktree = async (
       registered && path.resolve(registered) !== path.resolve(directory)
         ? registered
         : worktreePathFor(directory, config.worktreesDir, id)
+    await releaseWorktreeAt($, log, directory, wtPath, branch)
+  } catch (err) {
+    await log("info", `loop: worktree cleanup for ${id} skipped — ${(err as Error).message}`)
+  }
+}
+
+/**
+ * Remove one specific worktree directory — the path-addressed sibling of
+ * `releaseWorktree`, for loops whose branch is not `feature/<id>` (a sitter
+ * kind isolating onto a PR's own head branch, a free-text goal). Same
+ * guarantees: never the main tree, never `--force`, best-effort and never
+ * throws.
+ */
+export const releaseWorktreeAt = async (
+  $: Shell,
+  log: Log,
+  directory: string,
+  wtPath: string,
+  branch: string,
+): Promise<void> => {
+  try {
+    if (path.resolve(wtPath) === path.resolve(directory)) return
     if (!(await isGitRepo($, wtPath))) {
       await pruneWorktrees($, directory)
       return
     }
     if (!(await removeWorktree($, directory, wtPath))) {
-      await log("info", `loop: worktree ${wtPath} left in place (dirty or locked) — branch ${branch} holds the shipped work`)
+      await log("info", `loop: worktree ${wtPath} left in place (dirty or locked) — branch ${branch} holds the work`)
       return
     }
     await pruneWorktrees($, directory)
   } catch (err) {
-    await log("info", `loop: worktree cleanup for ${id} skipped — ${(err as Error).message}`)
+    await log("info", `loop: worktree cleanup at ${wtPath} skipped — ${(err as Error).message}`)
   }
 }
