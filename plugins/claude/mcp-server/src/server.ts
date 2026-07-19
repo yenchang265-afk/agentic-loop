@@ -617,6 +617,17 @@ server.registerTool(
     if (stage === "build" && active.task) {
       const actor = await gitActor(sh, directory)
       await appendNote(sh, active.task, auditNote(`BUILD started (iteration ${active.iteration + 1})`, new Date(), actor), log)
+      // A degraded isolation (detached HEAD, checkout failure) must be visible
+      // in the task's audit trail, not just a console warn — the run otherwise
+      // looks identical to an isolated one while writing into the main tree.
+      if (active.isolationWarning) {
+        await appendNote(
+          sh,
+          active.task,
+          auditNote(`WARNING: BUILD running WITHOUT isolation — ${active.isolationWarning}`, new Date(), actor),
+          log,
+        )
+      }
     }
     const def = stageDef(activeManifest().manifest, stage)
     const model = stageModel(activeManifest().manifest.kind, def)
@@ -625,6 +636,7 @@ server.registerTool(
       agent: agentRef(def.agent),
       ...(model ? { model } : {}),
       worktree: active.git?.worktree ?? null,
+      ...(active.isolationWarning ? { isolationWarning: active.isolationWarning } : {}),
       deadlineMinutes: config.stageTimeoutMinutes,
       ...(def.kind === "check"
         ? {

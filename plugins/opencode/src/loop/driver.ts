@@ -832,6 +832,17 @@ export const drive = async (
     const { task, iteration } = step.state
     const trackBuild = stage === "build" && task
     if (trackBuild) await appendNote(deps.$, task, auditNote(`BUILD started (iteration ${iteration + 1})`, new Date(), actor), deps.log)
+    // A degraded isolation (detached HEAD, checkout failure) must be visible in
+    // the task's audit trail, not just a console warn — the run otherwise looks
+    // identical to an isolated one while writing into the main tree.
+    if (trackBuild && isolated && step.state.isolationWarning) {
+      await appendNote(
+        deps.$,
+        task,
+        auditNote(`WARNING: ${stage.toUpperCase()} running WITHOUT isolation — ${step.state.isolationWarning}`, new Date(), actor),
+        deps.log,
+      )
+    }
     const { output, verdict, record } = await runStageWithLenses(
       deps,
       sessionID,
