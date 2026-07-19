@@ -480,6 +480,56 @@ test("access az: claims over the az CLI with no PAT at all — REST transport ne
   assert.match(list ?? "", /--query-parameters searchCriteria\.status=active \$top=100/)
 })
 
+test("access az: onTerminal(done) re-reads the PR over the CLI too — REST transport never touched", async () => {
+  const azLog: string[] = []
+  const httpLog: string[] = []
+  const shellLog: string[] = []
+  const src = makeAdoPrSource({
+    $: scriptedShell([], shellLog),
+    http: scriptedHttp([], httpLog),
+    azExec: scriptedAz(
+      [
+        // Order matters: the threads call also carries pullRequestId=7 in its
+        // route parameters, so it must match before the by-id PR re-read; the
+        // by-id re-read in turn must match before the generic list route.
+        {
+          match: "--resource pullRequestThreads",
+          body: threads([
+            { commentType: "text", publishedDate: "2026-07-05T01:00:00Z", author: { uniqueName: "alice@acme.com" } },
+          ]),
+        },
+        {
+          match: "pullRequestId=7",
+          body: JSON.stringify({ lastMergeSourceCommit: { commitId: "sha-own-push" }, repository: { id: "repo-guid" } }),
+        },
+        { match: "--resource pullrequests", body: listBody([pr({ mergeStatus: "conflicts" })]) },
+        { match: "--resource evaluations", body: JSON.stringify({ value: [] }) },
+      ],
+      azLog,
+    ),
+    client: ledgerClient({}),
+    directory: "/r",
+    tasksDir: "docs/tasks",
+    log: () => {},
+    loaded: sitter,
+    ado: { organization: "https://dev.azure.com/acme", project: "widgets", selfLogin: "sitter@acme.com", access: "az" },
+    pat: "",
+    now: () => "2026-07-05T00:00:00Z",
+  })
+  const { item } = await src.claimNext()
+  assert.ok(item)
+  await src.onTerminal?.(item, { kind: "done", message: "pushed" })
+  assert.equal(httpLog.length, 0) // the post-publish re-read must not fall back to REST+PAT
+  assert.ok(
+    azLog.some((c) => c.includes("pullRequestId=7")),
+    "the PR head re-read went through the CLI",
+  )
+  const write = shellLog.find((c) => c.startsWith("printf") && c.includes("pr-7.json"))
+  assert.ok(write, "ledger written")
+  assert.match(write ?? "", /sha-own-push/) // the sitter's own push recorded as handled
+  assert.match(write ?? "", /2026-07-05T01:00:00Z/) // comment watermark advanced over the CLI transport
+})
+
 test("access az: a failed az call surfaces as an actionable skip carrying the CLI's stderr", async () => {
   const src = makeAdoPrSource({
     $: scriptedShell([]),
