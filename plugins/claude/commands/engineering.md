@@ -145,7 +145,8 @@ never claim the approval happened.
   auto-planned (use `plan <id>`). An `in-progress/`
   task starts at BUILD on `feature/<id>`; follow the `loop-orchestration`
   protocol: `loop_stage` before spawning each stage subagent (`loop-build` /
-  `loop-verify` / `loop-review` via the Task tool) and `loop_advance` after
+  `loop-verify` / `loop-review` via the Task tool, passing the response's
+  `model` as the Task tool's `model` when present) and `loop_advance` after
   each returns, until a terminal action. This is the pull equivalent of the
   OpenCode plugin's `watch` — there is no standing watch mode on this
   substrate.

@@ -232,6 +232,13 @@ it. The warnings are advisory: they annotate a save, never block it. See
   Precedence per stage: this key → the manifest stage's `model` field →
   unset (the host's default model). Stages not listed keep the host default.
 
+  Keys must be the kind's **stage names**, lowercase, as the manifest spells
+  them (engineering: `plan`, `build`, `verify`, `review`; run
+  `/agentic-loop:<kind> kinds` for the others). A key that names no stage —
+  `BUILD`, or a stage from another kind — cannot be rejected at parse time
+  (the manifest isn't loaded yet), so it is accepted, ignored, and the stage
+  runs the host default. Both hosts warn about such keys when a loop starts.
+
 ## Admin hub (`hub` — user scope only)
 
 The hub reads its settings from the `hub` section of the **user-scope**

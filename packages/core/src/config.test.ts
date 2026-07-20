@@ -13,6 +13,7 @@ import {
   loadConfig,
   mergeConfigLayers,
   modelFor,
+  unknownStageModelKeys,
   parseConfig,
   platformFor,
   trackerUrl,
@@ -143,6 +144,16 @@ test("modelFor: config stageModels wins over the manifest stage's model, which w
 test("loops.<kind>.stageModels validates fail-fast, unlike positional knobs", () => {
   assert.throws(() => parseConfig({ loops: { engineering: { stageModels: { build: 42 } } } }), /stageModels/)
   assert.throws(() => parseConfig({ loops: { engineering: { stageModels: { build: "" } } } }), /stageModels/)
+})
+
+test("unknownStageModelKeys names stageModels entries that match no stage of the kind", () => {
+  const c = parseConfig({
+    loops: { engineering: { stageModels: { build: "anthropic/claude-opus-4-5", BUILD: "x", triage: "y" } } },
+  })
+  assert.deepEqual(unknownStageModelKeys(c, "engineering", ["plan", "build", "verify", "review"]), ["BUILD", "triage"])
+  // Every key matching a stage, an absent section, and an absent stageModels are all clean.
+  assert.deepEqual(unknownStageModelKeys(c, "pr-sitter", ["triage"]), [])
+  assert.deepEqual(unknownStageModelKeys(DEFAULT_CONFIG, "engineering", ["build"]), [])
 })
 
 test("bareModel strips a provider prefix and passes bare ids through", () => {

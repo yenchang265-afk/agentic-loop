@@ -1,10 +1,33 @@
 import assert from "node:assert/strict"
 import { spawn } from "node:child_process"
+import fs from "node:fs"
 import path from "node:path"
 import { test } from "node:test"
 import { fileURLToPath } from "node:url"
 
 const pkgDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
+
+// Every fire payload has always carried the configured stage model, but the
+// notes that tell the orchestrator what to spawn once named only `agent` — so
+// loops.<kind>.stageModels was dropped at each hop and every stage ran the
+// host default. Source-level because the notes are inline literals in a module
+// that only boots as an MCP transport: assert no spawn instruction can lose
+// the model again.
+test("every spawn instruction in the server's notes names the `model` field, not just `agent`", () => {
+  const src = fs.readFileSync(path.join(pkgDir, "src", "server.ts"), "utf8")
+  const spawnNotes = src
+    .split("\n")
+    .filter((line) => /note:|"spawn|spawn the/.test(line) && /spawn/.test(line))
+    .filter((line) => !line.trimStart().startsWith("*") && !line.trimStart().startsWith("//"))
+  assert.ok(spawnNotes.length >= 4, `expected the spawn notes to be found; got ${spawnNotes.length}`)
+  for (const line of spawnNotes) {
+    assert.match(
+      line,
+      /SPAWN_MODEL_NOTE|`model`/,
+      `a spawn instruction omits the model — the configured stageModels model would be dropped:\n  ${line.trim()}`,
+    )
+  }
+})
 
 // Boot the server from source over stdio with an immediately-closed stdin: it
 // must announce readiness on stderr (stdout stays clean for the MCP protocol)

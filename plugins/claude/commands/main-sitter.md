@@ -18,7 +18,8 @@ Dispatch:
   unhandled, drive it per the main-sitter manifest: `loop_stage` before
   spawning each stage subagent (`loop-main-diagnose` / `loop-main-remedy` /
   `loop-verify` / `loop-main-publish` — diagnose → remedy → verify → publish
-  — via the Task tool) and `loop_advance` after each returns, until a
+  — via the Task tool, passing the response's `model` as the Task tool's
+  `model` when present) and `loop_advance` after each returns, until a
   terminal action. A green or in-flight head claims nothing; a handled head
   waits for the next push.
 - **`status`** (or bare) — call `mcp__agentic-loop__loop_status` and report

@@ -113,19 +113,20 @@ config `loops.<kind>.stageModels`). When present, pass it as the Task tool's
    the stage deadline, reconciles isolation, and appends the audited
    `BUILD started` note — then spawn the response's `agent` (**`loop-build`**)
    via the Task tool with the prompt (it carries the `Worktree:` line when
-   isolated). When it returns,
+   isolated) and the response's `model` when present. When it returns,
    call `mcp__agentic-loop__loop_advance({stageOutput: <build summary>})` —
    the server appends `BUILD finished`, commits a checkpoint, and returns
    `{kind:"fire", stage:"verify", prompt}`.
 4. **Verify.** `loop_stage({stage:"verify"})` (arms the read-only bash
    allowlist + deadline), spawn the response's `agent` (**`loop-verify`**) with
-   the prompt. The verify
+   the prompt and the response's `model` when present. The verify
    subagent records its verdict by calling `loop_verdict` itself — you do not.
    Then `loop_advance({stageOutput: <verify summary>})`: PASS →
    `{fire, review}`; FAIL → `{fire, build}` (re-build, threading the failure)
    if the iteration budget remains, else `{stop}`; ERROR → `{stop}`.
 5. **Review.** `loop_stage({stage:"review"})`, spawn the response's `agent`
-   (**`loop-review`**, which calls `loop_verdict`), then `loop_advance`. PASS → `{done}`. FAIL →
+   (**`loop-review`**, which calls `loop_verdict`) with the response's `model`
+   when present, then `loop_advance`. PASS → `{done}`. FAIL →
    `{fire, build}` if budget remains, else `{stop}`.
    - **Multi-lens review** (`reviewLenses` configured): spawn `loop-review`
      once per lens, each focused on that lens; each pass calls `loop_verdict`.
