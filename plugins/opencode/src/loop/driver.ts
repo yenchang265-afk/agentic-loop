@@ -303,7 +303,10 @@ const releaseWatchLease = async (deps: Deps): Promise<void> => {
   if (entry.count > 0) return
   watchLeases.delete(deps.directory)
   clearInterval(entry.heartbeat)
-  await releaseLease(deps.$, deps.directory, entry.tasksDir)
+  // `leaseOwner()` is this process's identity — the same one that acquired and
+  // heartbeats the lease. Passing it lets releaseLease refuse when we were taken
+  // over while stalled, instead of deleting the new owner's lease (T3).
+  await releaseLease(deps.$, deps.directory, entry.tasksDir, leaseOwner())
 }
 /**
  * Last no-claim reason toasted per watch session. Every tick logs its reason,
@@ -1267,7 +1270,7 @@ export const disposeWatch = (): void => {
   for (const [dir, entry] of watchLeases) {
     watchLeases.delete(dir)
     clearInterval(entry.heartbeat)
-    void releaseLease(entry.deps.$, dir, entry.tasksDir)
+    void releaseLease(entry.deps.$, dir, entry.tasksDir, leaseOwner())
   }
 }
 

@@ -16,6 +16,52 @@ var STATUSES = [
   "abandoned"
 ];
 
+// packages/core/dist/task/write-backstop.js
+var splitSegments = (cmd) => {
+  const segments = [];
+  let cur = "";
+  let quote = null;
+  for (let i = 0; i < cmd.length; i++) {
+    const c = cmd[i];
+    if (quote) {
+      cur += c;
+      if (c === quote)
+        quote = null;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      quote = c;
+      cur += c;
+      continue;
+    }
+    if (c === "\n" || c === "\r" || c === ";") {
+      segments.push(cur);
+      cur = "";
+      continue;
+    }
+    if (c === "&" && cmd[i + 1] === "&") {
+      segments.push(cur);
+      cur = "";
+      i++;
+      continue;
+    }
+    if (c === "|" && cmd[i + 1] === "|") {
+      segments.push(cur);
+      cur = "";
+      i++;
+      continue;
+    }
+    if (c === "|" || c === "&") {
+      segments.push(cur);
+      cur = "";
+      continue;
+    }
+    cur += c;
+  }
+  segments.push(cur);
+  return segments.map((s) => s.trim()).filter(Boolean);
+};
+
 // packages/core/dist/task/guard.js
 var ALLOW = { allow: true };
 var block = (reason) => ({ allow: false, reason });
@@ -93,7 +139,7 @@ var classifyBash = (command, ctx) => {
   if (MUTATING_TOKENS.some((t) => command.includes(t))) {
     return block(`agentic-loop: this command can mutate ${ctx.tasksDir}/ \u2014 ${HOW_TO_MUTATE}`);
   }
-  const segments = command.split(/&&|\|\||;|\||\n|\r/).map((s) => s.trim()).filter(Boolean);
+  const segments = splitSegments(command);
   if (segments.every((s) => matchesAny(s, READ_ONLY) || isCanonicalMkdir(s, ctx.tasksDir)))
     return ALLOW;
   return block(`agentic-loop: only read-only commands (ls/cat/head/tail/grep/rg/find/wc/diff/stat/tree, git reads) and canonical-status mkdir may reference ${ctx.tasksDir}/ \u2014 ${HOW_TO_MUTATE}`);
@@ -117,7 +163,7 @@ var REVIEW_ALLOW = [...GIT_READ, "git blame*", "git -C * blame*", ...READ];
 var toRe2 = (glob) => new RegExp("^" + glob.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$", "s");
 var matchesAny2 = (cmd, globs) => globs.some((g) => toRe2(g).test(cmd.trim()));
 var isBareCd = (seg) => /^cd\s+[^;&|<>()`$]+$/.test(seg);
-var splitSegments = (cmd) => {
+var splitSegments2 = (cmd) => {
   const segments = [];
   let cur = "";
   let quote = null;
@@ -161,7 +207,7 @@ var splitSegments = (cmd) => {
   return segments.map((s) => s.trim()).filter(Boolean);
 };
 var commandAllowed = (cmd, globs) => {
-  const segments = splitSegments(cmd);
+  const segments = splitSegments2(cmd);
   return segments.length > 0 && segments.every((s) => isBareCd(s) || matchesAny2(s, globs));
 };
 var isGithubPrMutation = (cmd) => {
@@ -244,10 +290,10 @@ var isGitPushViolation = (cmd) => {
   }
   return false;
 };
-var chainedGithubPrMutation = (cmd) => splitSegments(cmd).some(isGithubPrMutation);
-var chainedAdoWriteBackstopViolation = (cmd) => splitSegments(cmd).some(isAdoWriteBackstopViolation);
-var chainedAdoAzWriteViolation = (cmd) => splitSegments(cmd).some(isAdoAzWriteViolation);
-var chainedGitPushViolation = (cmd) => splitSegments(cmd).some(isGitPushViolation);
+var chainedGithubPrMutation = (cmd) => splitSegments2(cmd).some(isGithubPrMutation);
+var chainedAdoWriteBackstopViolation = (cmd) => splitSegments2(cmd).some(isAdoWriteBackstopViolation);
+var chainedAdoAzWriteViolation = (cmd) => splitSegments2(cmd).some(isAdoAzWriteViolation);
+var chainedGitPushViolation = (cmd) => splitSegments2(cmd).some(isGitPushViolation);
 
 // plugins/claude/hooks/src/check-stage-guard.entry.mjs
 var read = () => new Promise((resolve) => {
