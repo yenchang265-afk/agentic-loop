@@ -223,6 +223,16 @@ export const modelFor = (config: Config, kind: string, def: StageDef): string | 
   config.loops[kind]?.stageModels?.[def.name] ?? def.model
 
 /**
+ * The `stageModels` keys that name no stage of `kind` — a typo'd or
+ * wrong-kind stage name resolves to `undefined` in `modelFor` and silently
+ * runs the host default, which reads as "model selection doesn't work". The
+ * record can't be validated at parse time (the manifest isn't loaded yet), so
+ * hosts surface this as a warning once the kind's stages are known. Pure.
+ */
+export const unknownStageModelKeys = (config: Config, kind: string, stageNames: readonly string[]): string[] =>
+  Object.keys(config.loops[kind]?.stageModels ?? {}).filter((name) => !stageNames.includes(name))
+
+/**
  * A model string without its provider prefix ("anthropic/claude-sonnet-4-5" →
  * "claude-sonnet-4-5") — for hosts that take bare model ids (Claude Code's
  * Task tool), so a config written OpenCode-style works on both hosts. Pure.

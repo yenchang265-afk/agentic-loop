@@ -22,7 +22,7 @@ import {
 } from "@agentic-loop/core/loop/orchestrate"
 import type { PolledClaim } from "@agentic-loop/core/scheduler/scheduler"
 import type { WorkSource } from "@agentic-loop/core/source/types"
-import { adoAccessFor, bareModel, enabledLoopKinds, modelFor, platformFor } from "@agentic-loop/core/config"
+import { adoAccessFor, bareModel, enabledLoopKinds, modelFor, platformFor, unknownStageModelKeys } from "@agentic-loop/core/config"
 import {
   failedCriteriaBlock,
   parseVerdict,
@@ -200,6 +200,41 @@ const stageModel = (kind: string, def: StageDef): string | undefined => {
   const m = modelFor(config, kind, def)
   return m ? bareModel(m) : undefined
 }
+
+/**
+ * Every spawn instruction must name the `model` field, not just `agent`.
+ * The fire payloads have always carried the configured stage model, but the
+ * per-transition notes only told the orchestrator to spawn the `agent` — so
+ * `loops.<kind>.stageModels` was silently dropped at each hop and every stage
+ * ran on the host default. Appended to each note rather than stated once in
+ * the skill: the note is what the orchestrator reads at the point of use.
+ */
+/**
+ * A `stageModels` key naming no stage of its kind is accepted by the schema
+ * (the manifest isn't loaded at parse time) and then resolves to nothing —
+ * the stage silently runs the host default. Surface it instead of leaving the
+ * user to conclude model selection is broken. Best-effort: an unreadable
+ * manifest must never block a claim.
+ */
+const stageModelWarnings = (): string[] =>
+  enabledLoopKinds(config).flatMap((kind) => {
+    let stageNames: string[]
+    try {
+      stageNames = manifestFor(kind).manifest.stages.map((s) => s.name)
+    } catch {
+      return []
+    }
+    const unknown = unknownStageModelKeys(config, kind, stageNames)
+    return unknown.length
+      ? [
+          `loops.${kind}.stageModels names ${unknown.map((k) => `"${k}"`).join(", ")}, which ${unknown.length > 1 ? "are" : "is"} not a stage of the ${kind} loop — ` +
+            `${unknown.length > 1 ? "those overrides are" : "that override is"} ignored and the stage runs the host default model. Valid stages: ${stageNames.join(", ")}.`,
+        ]
+      : []
+  })
+
+const SPAWN_MODEL_NOTE =
+  ", passing the response's `model` field as the Task tool's `model` parameter when present (omit `model` when the field is absent)"
 
 /** Flip the stage marker's `verdictRecorded` flag in place once loop_verdict
  *  lands, so the SubagentStop guard (check-verdict-guard.mjs) stops nagging. */
@@ -397,7 +432,7 @@ const startPlan = async (t: Task): Promise<{ error: string } | { state: LoopStat
  * backlog anomalies the reconciliation sweep finds. Best-effort; never blocks.
  */
 const claimWarnings = async (): Promise<string[]> => {
-  const warnings: string[] = []
+  const warnings: string[] = [...stageModelWarnings()]
   const owner = await readLeaseOwner(sh, directory, config.tasksDir)
   if (owner && !isLeaseStale(owner, new Date(), staleThresholdMs(owner.intervalMs))) {
     warnings.push(
@@ -426,7 +461,7 @@ const firePayload = (state: LoopState, id: string) => {
     isolation: state.git ?? null,
     prompt: composePrompt(manifest, state, state.stage),
     ...(state.stage === "plan"
-      ? { note: "PLAN stage: spawn the subagent named in the `agent` field in task mode; on loop_advance the task parks in plan-review/ for the human gate" }
+      ? { note: `PLAN stage: spawn the subagent named in the \`agent\` field in task mode${SPAWN_MODEL_NOTE}; on loop_advance the task parks in plan-review/ for the human gate` }
       : {}),
   }
 }
@@ -740,7 +775,7 @@ server.registerTool(
             composePrompt(activeManifest(), active, stage) +
             "\n\nPREVIOUS ATTEMPT RECORDED NO VERDICT — the loop_verdict tool call is MANDATORY. " +
             "If the tool is not in your tool list, state that explicitly in your final message and finish.",
-          note: "check retry (no iteration consumed): the previous pass never called loop_verdict — call loop_stage, then spawn the stage subagent again",
+          note: `check retry (no iteration consumed): the previous pass never called loop_verdict — call loop_stage, then spawn the stage subagent again${SPAWN_MODEL_NOTE}`,
         })
       }
       pending = {
@@ -784,7 +819,7 @@ server.registerTool(
         ...(nextModel ? { model: nextModel } : {}),
         prompt: composePrompt(activeManifest(), active, action.stage),
         note:
-          "call loop_stage, then spawn the subagent named in the `agent` field" +
+          `call loop_stage, then spawn the subagent named in the \`agent\` field${SPAWN_MODEL_NOTE}` +
           (nextDef.kind === "check"
             ? " — it MUST call the loop_verdict MCP tool before returning; never call loop_verdict yourself on its behalf"
             : ""),
@@ -1176,7 +1211,16 @@ server.registerTool(
       }
       await appendNote(sh, active.task as TaskRef, auditNote(`Recovered from snapshot at ${active.stage}`, new Date(), actor), log)
       const step = firstStep(eng, active)
-      return ok({ resumedFrom: "snapshot", stage: active.stage, action: step.action, note: "call loop_stage before spawning the subagent" })
+      const resumedDef = stageDef(eng.manifest, active.stage)
+      const resumedModel = stageModel(eng.manifest.kind, resumedDef)
+      return ok({
+        resumedFrom: "snapshot",
+        stage: active.stage,
+        action: step.action,
+        agent: agentRef(resumedDef.agent),
+        ...(resumedModel ? { model: resumedModel } : {}),
+        note: `call loop_stage before spawning the subagent${SPAWN_MODEL_NOTE}`,
+      })
     }
     active = buildEntryState(t)
     try {
@@ -1188,7 +1232,16 @@ server.registerTool(
     }
     await appendNote(sh, active.task as TaskRef, auditNote("Recovered from persisted plan — re-entering at BUILD", new Date(), actor), log)
     await snapshot()
-    return ok({ resumedFrom: "plan", stage: "build", prompt: composePrompt(eng, active, "build"), note: "call loop_stage before spawning the subagent" })
+    const buildDef = stageDef(eng.manifest, "build")
+    const buildModel = stageModel(eng.manifest.kind, buildDef)
+    return ok({
+      resumedFrom: "plan",
+      stage: "build",
+      prompt: composePrompt(eng, active, "build"),
+      agent: agentRef(buildDef.agent),
+      ...(buildModel ? { model: buildModel } : {}),
+      note: `call loop_stage before spawning the subagent${SPAWN_MODEL_NOTE}`,
+    })
   },
 )
 

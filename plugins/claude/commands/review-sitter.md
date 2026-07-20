@@ -17,8 +17,9 @@ Dispatch:
   to poll for the next PR whose review is wanted and drive it per the
   review-sitter manifest: `loop_stage` before spawning each stage subagent
   (`loop-review-fetch` / `loop-review-assess` / `loop-review-publish` —
-  fetch → assess → publish — via the Task tool) and `loop_advance` after each
-  returns, until a terminal action. A head already reviewed is skipped until
+  fetch → assess → publish — via the Task tool, passing the response's
+  `model` as the Task tool's `model` when present) and `loop_advance` after
+  each returns, until a terminal action. A head already reviewed is skipped until
   a human pushes a new one. There is no standing watch mode on this substrate
   — `claim` is the pull; the OpenCode plugin's
   `/agentic-loop:review-sitter watch` is the push equivalent.

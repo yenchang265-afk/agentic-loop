@@ -18,7 +18,8 @@ Dispatch:
   poll the configured PR source for the next actionable pull request and
   drive it per the pr-sitter manifest: `loop_stage` before spawning each
   stage subagent (`loop-pr-triage` / `loop-pr-fix` / `loop-verify` /
-  `loop-pr-publish` — triage → fix → verify → publish — via the Task tool)
+  `loop-pr-publish` — triage → fix → verify → publish — via the Task tool,
+  passing the response's `model` as the Task tool's `model` when present)
   and `loop_advance` after each returns, until a terminal action. A PR with nothing actionable is skipped
   (triage FAIL → done). There is no standing watch mode on this substrate —
   `claim` is the pull; the OpenCode plugin's `/agentic-loop:pr-sitter watch`

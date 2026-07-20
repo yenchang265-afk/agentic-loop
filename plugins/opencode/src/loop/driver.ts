@@ -80,7 +80,7 @@ import {
   type VerdictRecord,
   worstOf,
 } from "@agentic-loop/core/loop/verdict"
-import { enabledLoopKinds, modelFor, triggerFor } from "@agentic-loop/core/config"
+import { enabledLoopKinds, modelFor, triggerFor, unknownStageModelKeys } from "@agentic-loop/core/config"
 import type { Config } from "../config.ts"
 import { armCron, armIdle, armPoll, claimsOnIdle, cronError, type TriggerMode, type WatchTimerHandle } from "./trigger.js"
 import type { Action, LoopState, Stage, TaskRef } from "@agentic-loop/core/loop/state"
@@ -855,6 +855,21 @@ export const drive = async (
 ): Promise<TerminalOutcome | null> => {
   const { client } = deps
   const loaded = manifestFor(first.state.kind ?? "engineering")
+  // A stageModels key naming no stage of this kind resolves to nothing and the
+  // stage silently runs the host default — say so rather than let it read as
+  // "model selection doesn't work".
+  const unknownStages = unknownStageModelKeys(
+    config,
+    loaded.manifest.kind,
+    loaded.manifest.stages.map((s) => s.name),
+  )
+  if (unknownStages.length) {
+    await deps.log(
+      "warn",
+      `loops.${loaded.manifest.kind}.stageModels names ${unknownStages.map((k) => `"${k}"`).join(", ")}, which is not a stage of this loop — ` +
+        `ignored; the stage runs the host default model. Valid stages: ${loaded.manifest.stages.map((s) => s.name).join(", ")}.`,
+    )
+  }
   const actor = await gitActor(deps.$, deps.directory)
   let step = first
   while (step.action.kind === "fire") {
