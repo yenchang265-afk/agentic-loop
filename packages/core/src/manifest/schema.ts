@@ -124,13 +124,19 @@ const BacklogSourceSchema = z.object({
 })
 
 /**
- * The hosted-PR work source. The concrete platform (`gh` vs `az`) is resolved
- * from config `codePlatform` at wiring time, not here — the `"github-pr"`
- * literal is kept for manifest compatibility.
+ * The hosted pull-request work source, on **either** GitHub or Azure DevOps —
+ * the binding names the kind of work item, not the forge. Which client backs
+ * it (`gh` vs the ADO REST API) is resolved from config `codePlatform` at
+ * wiring time, not here. The legacy spelling `"github-pr"` is still accepted
+ * in manifests and normalized on load (`manifest/load.ts`).
  */
-const GithubPrSourceSchema = z.object({
-  type: z.literal("github-pr"),
-  /** `gh pr list --search` query selecting the PRs this loop sits on (GitHub only). */
+const PullRequestSourceSchema = z.object({
+  type: z.literal("pull-request"),
+  /**
+   * `gh pr list --search` query selecting the PRs this loop sits on. GitHub
+   * only — ADO has no server-side PR search, so this is ignored there and
+   * `role` drives a client-side identity filter over the active-PR list instead.
+   */
   query: z.string().min(1),
   /** The PR conditions that make an item claimable. */
   triggers: z
@@ -186,7 +192,7 @@ const CiRunsSourceSchema = z.object({
 
 export const WorkSourceBindingSchema = z.discriminatedUnion("type", [
   BacklogSourceSchema,
-  GithubPrSourceSchema,
+  PullRequestSourceSchema,
   DependencyScanSourceSchema,
   CiRunsSourceSchema,
 ])

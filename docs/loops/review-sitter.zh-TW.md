@@ -43,7 +43,7 @@ FETCH → ASSESS → PUBLISH（沒有重試迴圈）
 ## 架構
 
 監看**別人的** PR 中請求你審查的項目——絕不是你自己的 PR。工作來源
-`github-pr` 搭配 `role: reviewer`，查詢字串 `is:open review-requested:@me`
+`pull-request` 搭配 `role: reviewer`，查詢字串 `is:open review-requested:@me`
 （可用 `loops.review-sitter.query` 覆寫，僅限 GitHub）；在 ADO 上它會認領
 `ado.selfLogin` 是審查者且投票仍待處理（vote 0）的活躍 PR。**fetch**
 （唯讀）→ **assess**（worktree；在周圍程式碼的脈絡下閱讀 diff，可能會

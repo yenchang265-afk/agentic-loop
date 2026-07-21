@@ -49,10 +49,10 @@ const depsFor = (directory: string): HubDeps => ({
   directory,
   tasksDir: "docs/tasks",
   config: DEFAULT_CONFIG,
-  // A github-pr kind so getActive scans its runs/<kind>/ ledger dir.
+  // A pull-request kind so getActive scans its runs/<kind>/ ledger dir.
   boards: [
-    { kind: "pr-sitter", description: "pr sitter", sourceType: "github-pr", statuses: [], gateStatuses: [], pools: [] },
-    { kind: "review-sitter", description: "review sitter", sourceType: "github-pr", statuses: [], gateStatuses: [], pools: [] },
+    { kind: "pr-sitter", description: "pr sitter", sourceType: "pull-request", statuses: [], gateStatuses: [], pools: [] },
+    { kind: "review-sitter", description: "review sitter", sourceType: "pull-request", statuses: [], gateStatuses: [], pools: [] },
   ],
   loopsDir: path.join(directory, "loops-unused"),
   projectsDir: "/nonexistent-projects",

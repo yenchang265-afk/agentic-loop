@@ -17,7 +17,7 @@ const board = (kind: string, sourceType: KindBoardInfo["sourceType"]): KindBoard
 
 const BOARDS: readonly KindBoardInfo[] = [
   board("engineering", "backlog"),
-  board("pr-sitter", "github-pr"),
+  board("pr-sitter", "pull-request"),
   board("dep-sitter", "dependency-scan"),
   board("main-sitter", "ci-runs"),
 ]
@@ -40,11 +40,11 @@ test("a wrong type is caught, naming where orchestrate reads it", () => {
 })
 
 test("a knob on the wrong source is named as such, not merely 'unknown'", () => {
-  // `query` is real — for github-pr kinds. On a backlog kind it looks right and
+  // `query` is real — for pull-request kinds. On a backlog kind it looks right and
   // never fires, which is exactly the failure worth explaining.
   const w = lint({ engineering: { query: "is:open" } })
   assert.equal(w.length, 1)
-  assert.match(w[0]?.message ?? "", /only applies to github-pr kinds/)
+  assert.match(w[0]?.message ?? "", /only applies to pull-request kinds/)
 })
 
 test("a section for a kind that isn't installed is reported as inert", () => {

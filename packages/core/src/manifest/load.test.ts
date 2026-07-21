@@ -4,7 +4,7 @@ import os from "node:os"
 import path from "node:path"
 import { test } from "node:test"
 import { defaultLoopsDir } from "./dir.js"
-import { listLoopKinds, loadManifest } from "./load.js"
+import { listLoopKinds, loadManifest, normalizeManifestJson } from "./load.js"
 
 /**
  * loadManifest's fail-loud contract: a broken loop kind must throw with the
@@ -14,11 +14,11 @@ import { listLoopKinds, loadManifest } from "./load.js"
 
 const LOOPS_DIR = defaultLoopsDir()
 
-/** A scratch loops/ dir holding one kind cloned from the shipped engineering manifest. */
-const scratchKind = (mutate: (dir: string, manifest: Record<string, unknown>) => void): string => {
+/** A scratch loops/ dir holding one kind cloned from a shipped manifest. */
+const scratchKind = (mutate: (dir: string, manifest: Record<string, unknown>) => void, kind = "engineering"): string => {
   const loops = fs.mkdtempSync(path.join(os.tmpdir(), "loops-"))
-  const dir = path.join(loops, "engineering")
-  fs.cpSync(path.join(LOOPS_DIR, "engineering"), dir, { recursive: true })
+  const dir = path.join(loops, kind)
+  fs.cpSync(path.join(LOOPS_DIR, kind), dir, { recursive: true })
   const manifestPath = path.join(dir, "loop.json")
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as Record<string, unknown>
   mutate(dir, manifest)
@@ -60,6 +60,37 @@ test("a manifest that fails schema validation throws through the manifest-path e
     delete manifest.transitions
   })
   assert.throws(() => loadManifest(loops, "engineering"), /could not load loop manifest/)
+})
+
+// --- legacy work-source type names (normalizeManifestJson) ---
+
+test('a manifest declaring the legacy "github-pr" type loads as "pull-request"', () => {
+  const loops = scratchKind((_dir, manifest) => {
+    ;(manifest.workSource as Record<string, unknown>).type = "github-pr"
+  }, "pr-sitter")
+  const { manifest } = loadManifest(loops, "pr-sitter")
+  assert.equal(manifest.workSource.type, "pull-request")
+  // The rest of the binding survives the rewrite untouched.
+  assert.equal(manifest.workSource.type === "pull-request" && manifest.workSource.role, "author")
+})
+
+test("the current spelling and every other source type pass through unchanged", () => {
+  for (const kind of listLoopKinds(LOOPS_DIR)) {
+    const before = (JSON.parse(fs.readFileSync(path.join(LOOPS_DIR, kind, "loop.json"), "utf8")) as Record<string, unknown>)
+      .workSource as { type: string }
+    assert.equal(loadManifest(LOOPS_DIR, kind).manifest.workSource.type, before.type)
+  }
+})
+
+test("normalizeManifestJson leaves non-manifest shapes for zod to reject", () => {
+  for (const raw of [null, 42, "str", [], {}, { workSource: null }, { workSource: [] }, { workSource: { type: 7 } }]) {
+    assert.equal(normalizeManifestJson(raw), raw)
+  }
+  // An unknown type is not silently rewritten — it still fails validation.
+  const loops = scratchKind((_dir, manifest) => {
+    ;(manifest.workSource as Record<string, unknown>).type = "gitlab-mr"
+  }, "pr-sitter")
+  assert.throws(() => loadManifest(loops, "pr-sitter"), /could not load loop manifest .*pr-sitter.*loop\.json/)
 })
 
 test("listLoopKinds ignores files, promptless dirs, and a missing loops dir", () => {

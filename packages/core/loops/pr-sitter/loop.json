@@ -3,7 +3,7 @@
   "version": 1,
   "description": "Sits on open pull requests: answers review comments, fixes failing checks, resolves conflicts, and keeps the branch green until a human merges. Never merges.",
   "workSource": {
-    "type": "github-pr",
+    "type": "pull-request",
     "query": "is:open author:@me",
     "triggers": [
       "failing-checks",

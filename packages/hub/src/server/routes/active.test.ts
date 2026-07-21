@@ -17,8 +17,8 @@ import { getActive } from "./active.js"
  */
 
 const BOARDS: readonly KindBoardInfo[] = [
-  { kind: "pr-sitter", description: "", sourceType: "github-pr", statuses: [], gateStatuses: [], pools: [] },
-  { kind: "review-sitter", description: "", sourceType: "github-pr", statuses: [], gateStatuses: [], pools: [] },
+  { kind: "pr-sitter", description: "", sourceType: "pull-request", statuses: [], gateStatuses: [], pools: [] },
+  { kind: "review-sitter", description: "", sourceType: "pull-request", statuses: [], gateStatuses: [], pools: [] },
   { kind: "dep-sitter", description: "", sourceType: "dependency-scan", statuses: [], gateStatuses: [], pools: [] },
   { kind: "main-sitter", description: "", sourceType: "ci-runs", statuses: [], gateStatuses: [], pools: [] },
 ]

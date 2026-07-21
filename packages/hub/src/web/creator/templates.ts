@@ -56,7 +56,7 @@ export const TEMPLATES: readonly LoopTemplate[] = [
       }),
   },
   {
-    id: "github-pr",
+    id: "pull-request",
     label: "PR sitter",
     description: "Sit on your open PRs — triage, fix, verify, reply. Never merges.",
     manifest: () =>
@@ -65,7 +65,7 @@ export const TEMPLATES: readonly LoopTemplate[] = [
         version: 1,
         description: "Sits on open pull requests: triages activity, fixes what's actionable, verifies, and replies. Never merges.",
         workSource: {
-          type: "github-pr",
+          type: "pull-request",
           query: "is:open author:@me",
           triggers: ["failing-checks", "changes-requested", "new-comments", "merge-conflict"],
           role: "author",

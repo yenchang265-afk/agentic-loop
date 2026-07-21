@@ -35,7 +35,7 @@ export interface TaskCard {
 export interface KindBoardInfo {
   readonly kind: string
   readonly description: string
-  readonly sourceType: "backlog" | "github-pr" | "dependency-scan" | "ci-runs"
+  readonly sourceType: "backlog" | "pull-request" | "dependency-scan" | "ci-runs"
   /** Board columns (the manifest's status-folder set); [] for non-backlog kinds. */
   readonly statuses: readonly string[]
   /** Statuses the kind parks/lands work into for a human — highlighted columns. */

@@ -26,7 +26,7 @@ test("kindBoards includes opted-in kinds and excludes disabled ones", () => {
     both.map((b) => [b.kind, b.sourceType]),
     [
       ["engineering", "backlog"],
-      ["pr-sitter", "github-pr"],
+      ["pr-sitter", "pull-request"],
     ],
   )
   const sitter = both[1]!

@@ -8,7 +8,7 @@ import { Chip } from "../ui/Chip.js"
 const failedSuffix = (n: number) => (n > 0 ? ` · ${n} failed attempt${n === 1 ? "" : "s"}` : "")
 
 /**
- * Monitor view for a non-backlog kind (workSource "github-pr", "dependency-scan",
+ * Monitor view for a non-backlog kind (workSource "pull-request", "dependency-scan",
  * or "ci-runs"): there are no status folders to board, so it surfaces the kind's
  * description plus THIS kind's own dedup ledgers from the live-activity data. Each
  * ledger list is filtered to `info.kind` so two enabled kinds of the same source

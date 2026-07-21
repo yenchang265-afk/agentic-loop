@@ -371,7 +371,7 @@ bare `typeof` checks**:
 
 | `workSource.type` | knob | check | site |
 |---|---|---|---|
-| `github-pr` | `query` | string | `orchestrate.ts:112` |
+| `pull-request` | `query` | string | `orchestrate.ts:112` |
 | `dependency-scan` | `severityFloor` | string | `:124` |
 | `dependency-scan` | `includeOutdated` | boolean | `:125` |
 | `dependency-scan` | `ecosystem` | string | `:126` |
@@ -406,7 +406,7 @@ never fail it:
   edit-distance-1 catches essentially every real typo.
 - **wrong type** — `severityFloor: 7` → *"read only when a string
   (`orchestrate.ts:124`); ignored."*
-- **wrong source** — `query` on a backlog kind → *"only applies to `github-pr`
+- **wrong source** — `query` on a backlog kind → *"only applies to `pull-request`
   kinds; ignored."*
 - **unknown kind** — a `loops.<kind>` with no `loops/<kind>/` manifest.
 

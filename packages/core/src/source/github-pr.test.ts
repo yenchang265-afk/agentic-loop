@@ -7,7 +7,7 @@ import { loadManifest } from "../manifest/load.js"
 import { makeGithubPrSource } from "./github-pr.js"
 
 /**
- * The github-pr source over the real pr-sitter manifest, against a scripted
+ * The GitHub PR source over the real pr-sitter manifest, against a scripted
  * `gh`/git shell. The attention/dedup decision itself is covered by
  * ledger.test.ts; this covers the source's polling, filtering (drafts, forks,
  * own comments), claim/fetch mechanics, and terminal ledger writes.

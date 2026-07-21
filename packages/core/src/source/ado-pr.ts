@@ -25,7 +25,7 @@ import type { ClaimSkipReason, TerminalOutcome, WorkSource } from "./types.js"
 /**
  * The Azure DevOps PR work source: the `gh`-backed `github-pr.ts` mirrored onto
  * the Azure DevOps REST API. Selected at wiring time when config `codePlatform`
- * resolves to `"ado"` for a `github-pr`-bound loop kind.
+ * resolves to `"ado"` for a `pull-request`-bound loop kind.
  *
  * Raw ADO output is normalized into the same `PrSnapshot` shape the ledger
  * judges (`conflicts` → `CONFLICTING`, a negative reviewer vote →
@@ -91,8 +91,8 @@ interface AdoPrDeps {
 export const makeAdoPrSource = (deps: AdoPrDeps): WorkSource => {
   const { $, client, directory, tasksDir, log, loaded, ado } = deps
   const binding = loaded.manifest.workSource
-  if (binding.type !== "github-pr") {
-    throw new Error(`loop kind "${loaded.manifest.kind}" does not use a hosted-PR work source`)
+  if (binding.type !== "pull-request") {
+    throw new Error(`loop kind "${loaded.manifest.kind}" does not use a pull-request work source`)
   }
   const kind = loaded.manifest.kind
   const role = binding.role
