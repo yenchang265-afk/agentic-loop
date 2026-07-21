@@ -27,8 +27,9 @@ Authoring, gates, and execution are one command. **`/agentic-loop:engineering`**
 you into a draft task (`new <idea>` — always, so the goal and testable
 acceptance criteria come from you, not a guess; a **heavy idea is split into
 sibling drafts**, one vertical slice each plus a `type: epic` tracker, so no
-one task overruns a single build context), and `retask <id>` reshapes a draft
-you're not happy with. **`approve [id]`** is the single gate verb, driven by
+one task overruns a single build context), and `retask <id>` reshapes a task
+you're not happy with — a draft, or one already approved into `queued/` but not
+yet planned (that one is sent back to `draft/` first, so you re-approve it). **`approve [id]`** is the single gate verb, driven by
 the folder the task sits in: it queues a reviewed draft (the task gate),
 releases a parked plan into the build queue (the plan gate), or ships a
 finished review after you've read the diff — a task lives in exactly one
@@ -146,7 +147,8 @@ local state a running loop leaves behind:
 
 - `/agentic-loop:engineering new <idea>` · `retask <id> [note]` — interview → planless
   draft(s) in `docs/tasks/draft/`; `retask` re-interviews and reshapes a
-  draft in place
+  planless task in place — a `draft/` one, or a `queued/` one sent back to
+  `draft/` first (from `plan-review/` on, use `replan`)
 - `/agentic-loop:engineering approve [id]` — the one folder-driven gate: draft → queued
   (task gate), plan-review → in-progress (plan gate), in-review → completed
   (ship, after you review the branch diff). Id-less `approve` advances the

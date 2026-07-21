@@ -16,7 +16,8 @@ sections below cover each.
    (`plugins/opencode/src/`, agents/commands under `plugins/opencode/`) that
    drives the whole lifecycle from one command: `/agentic-loop:engineering new` interviews you
    into a planless draft task (`new <idea>` — always), `retask <id>` reshapes
-   a draft in place, `approve [id]` is the one folder-driven gate (draft →
+   a planless task in place (a draft, or a `queued/` task sent back to `draft/`
+   first), `approve [id]` is the one folder-driven gate (draft →
    queued, parked plan → in-progress, finished review parked in `in-review/`
    → completed), and
    `replan [id]` sends a parked plan back;

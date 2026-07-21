@@ -164,7 +164,7 @@ scope judgement, not a measured limit.
 | Transition | Who | When |
 |------------|-----|------|
 | into `draft/` | `/agentic-loop:engineering new` or you | an interviewed (or hand-written) planless stub |
-| stays `draft/` (rewritten in place) | **`/agentic-loop:engineering retask <id> [note]`** | reshape a draft before approval — re-interview, overwrite the same file, keep the id; no folder move, drafts only |
+| ends in `draft/` (rewritten in place) | **`/agentic-loop:engineering retask <id> [note]`** | reshape a planless task — re-interview, overwrite the same file, keep the id. A `draft/` task never moves; a `queued/` one is sent back to `draft/` first (approval withdrawn — approve it again). Refused from `plan-review/` on: use `replan` |
 | `draft → queued` | **`/agentic-loop:engineering approve <id>`** | the human task gate — scope + acceptance approved, planless by design; audited note + commit |
 | `queued → plan-review` | driver | the loop's PLAN stage wrote the plan and parked it for review; audited note + commit |
 | `plan-review → in-progress` | **`/agentic-loop:engineering approve <id>`** | the human plan gate; audited note + commit |

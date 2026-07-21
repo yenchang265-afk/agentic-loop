@@ -363,8 +363,9 @@ test("canTransition rejects any forward skip", () => {
   assert.equal(canTransition("in-progress", "completed"), false)
 })
 
-test("canTransition rejects backward moves except the replan escape", () => {
+test("canTransition rejects backward moves except the replan and retask escapes", () => {
   assert.equal(canTransition("in-progress", "draft"), false)
+  assert.equal(canTransition("plan-review", "draft"), false)
   assert.equal(canTransition("in-review", "plan-review"), false)
   assert.equal(canTransition("in-review", "queued"), false)
   assert.equal(canTransition("completed", "in-review"), false)
@@ -373,6 +374,13 @@ test("canTransition rejects backward moves except the replan escape", () => {
 test("canTransition allows the replan escape back to queued", () => {
   assert.equal(canTransition("plan-review", "queued"), true)
   assert.equal(canTransition("in-progress", "queued"), true)
+})
+
+// Only queued/ may go back — it is the one approved status with no plan yet, so
+// reshaping it costs nothing downstream. From plan-review on, replan is the verb.
+test("canTransition allows the retask escape from queued back to draft", () => {
+  assert.equal(canTransition("queued", "draft"), true)
+  assert.equal(canTransition("draft", "queued"), true, "the forward hop still works")
 })
 
 test("canTransition allows abandoning any active stage", () => {

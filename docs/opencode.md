@@ -46,10 +46,12 @@ Authoring + gates (`/agentic-loop:engineering`):
 
 - `/agentic-loop:engineering new <idea>` — interview you (always — at minimum a
   restate-and-confirm) into a **planless draft** in `docs/tasks/draft/`
-- `/agentic-loop:engineering retask <id> [note]` — reshape a `draft/` task before you
-  approve it: re-interview you (seeded by the optional note) and rewrite the
-  same draft in place — same id, no plan. Drafts only (a parked plan uses
-  `replan`)
+- `/agentic-loop:engineering retask <id> [note]` — reshape a **planless** task:
+  re-interview you (seeded by the optional note) and rewrite it in place — same
+  id, no plan. Works on a `draft/` task, and on one already approved into
+  `queued/` — that one is moved back to `draft/` first, withdrawing the
+  approval, so you approve it again once reshaped. From `plan-review/` onward a
+  plan exists, so `replan` is the verb instead
 - `/agentic-loop:engineering approve [id]` — THE gate verb, unified and folder-driven.
   With an explicit `<id>` it advances that task by the gate its folder
   implies: a reviewed `draft/` → `queued/` (the task gate; the loop plans it

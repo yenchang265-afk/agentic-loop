@@ -122,21 +122,59 @@ test("a backlog with neither started nor held tasks falls back to the no-plan hi
 })
 
 /**
- * Verb classification of the `/agentic-loop:engineering` command: `new` and `retask`
- * are agent work (interview + draft write) and must pass through silently —
- * no toast, no move — so the command template's model turn runs.
+ * Verb classification of the `/agentic-loop:engineering` command. `new` is pure
+ * agent work (interview + draft write) and must pass through silently — no
+ * toast, no move — so the command template's model turn runs. `retask` is the
+ * hybrid: its placement half is a plugin move, the reshape after it is not.
  */
 
-test("new and retask pass through without a toast or a move", async () => {
+test("new passes through without a toast or a move", async () => {
   const { client, toasts } = makeClient()
   const log: string[] = []
   const deps: Deps = { client, $: makeShellFS({}, log), directory: "/repo", log: () => {} }
 
   await handleCommand(deps, "sess", "new add rate limiting", testConfig)
-  await handleCommand(deps, "sess", "retask my-task tighten acceptance", testConfig)
 
   assert.equal(toasts.length, 0)
   assert.ok(!log.some((cmd) => cmd.startsWith("mv ")), "authoring verbs never move task files")
+})
+
+test("retask on a draft is a silent no-op — it is already where the interview needs it", async () => {
+  const files = { "docs/tasks/draft/my-task.md": serializeTask({ title: "Do the thing", body: "rough" }) }
+  const { client, toasts } = makeClientFS(files)
+  const log: string[] = []
+  const deps: Deps = { client, $: makeShellFS(files, log), directory: "/repo", log: () => {} }
+
+  await handleCommand(deps, "sess", "retask my-task tighten acceptance", testConfig)
+
+  assert.equal(toasts.length, 0, "no toast — the agent's turn reports the reshape")
+  assert.ok(!log.some((cmd) => cmd.startsWith("mv ")), "nothing to move")
+})
+
+test("retask on an approved queued task sends it back to draft and says so", async () => {
+  const files = { "docs/tasks/queued/my-task.md": serializeTask({ title: "Do the thing", body: "approved, no plan yet" }) }
+  const { client, toasts } = makeClientFS(files)
+  const log: string[] = []
+  const deps: Deps = { client, $: makeShellFS(files, log), directory: "/repo", log: () => {} }
+
+  await handleCommand(deps, "sess", "retask my-task tighten acceptance", testConfig)
+
+  assert.equal(toasts[0]?.variant, "success")
+  assert.match(toasts[0]?.message ?? "", /draft/)
+  assert.ok(log.some((cmd) => cmd.includes("mv") && cmd.includes("draft")), "the task moves back to draft/")
+})
+
+test("retask on a parked plan is refused and points at replan", async () => {
+  const files = { "docs/tasks/plan-review/my-task.md": serializeTask({ title: "Planned", body: `${PLAN_HEADING}\n\n1. Step.` }) }
+  const { client, toasts } = makeClientFS(files)
+  const log: string[] = []
+  const deps: Deps = { client, $: makeShellFS(files, log), directory: "/repo", log: () => {} }
+
+  await handleCommand(deps, "sess", "retask my-task", testConfig)
+
+  assert.equal(toasts[0]?.variant, "warning")
+  assert.match(toasts[0]?.message ?? "", /replan/)
+  assert.ok(!log.some((cmd) => cmd.startsWith("mv ")), "a planned task is never moved by retask")
 })
 
 /**

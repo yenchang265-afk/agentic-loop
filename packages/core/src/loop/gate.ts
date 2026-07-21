@@ -2,7 +2,7 @@ import path from "node:path"
 import type { Client, Log, Shell } from "../host.js"
 import type { Config } from "./state.js"
 import { parseTask, type Task } from "../task/schema.js"
-import { appendNote, auditNote, findByIdIn, hasPlan, listByStatus, moveTask, resolveTaskIdAnywhere, resolveTaskIdIn, STATUSES } from "../task/store.js"
+import { appendNote, auditNote, findByIdIn, hasPlan, listByStatus, listClaimIds, moveTask, resolveTaskIdAnywhere, resolveTaskIdIn, STATUSES } from "../task/store.js"
 import type { TaskStatus } from "../task/statuses.js"
 import { commitPaths, gitActor } from "./git.js"
 import { releaseWorktree } from "./isolate.js"
@@ -144,6 +144,67 @@ export const approveTask = async (ctx: GateCtx, id: string): Promise<GateResult>
     message: `Task approved — "${draft.title}" queued in ${config.tasksDir}/queued/ for planning.`,
     path: newPath,
     data: { approved: true, path: newPath, next: `loop_start with id "${id}" (or loop_claim) runs its PLAN stage` },
+  }
+}
+
+/**
+ * retask: prepare a task for re-shaping by the authoring interview.
+ *
+ * A `draft/` task is already in the right place, so this is a no-op that reports
+ * success. An approved `queued/` task is sent BACK to `draft/` first: it is
+ * planless, so nothing downstream breaks, but reshaping the goal invalidates the
+ * task-gate approval, which must be re-taken. Moving it also keeps the authoring
+ * agent honest — it only ever writes `draft/*.md`, so by the time it looks, the
+ * file is where it expects, and it can never author a second copy under a live
+ * task's id (the duplicate this used to risk).
+ *
+ * From `plan-review/` onward a plan exists, so `replan` is the right verb and
+ * this refuses.
+ */
+export const retaskTask = async (ctx: GateCtx, id: string): Promise<GateResult> => {
+  const { $, directory, config, log } = ctx
+  const resolved = await resolveGateId(ctx, id)
+  if (resolved && "error" in resolved) return resolved.error
+  if (resolved) id = resolved.id
+  if (ctx.isDriving?.(id)) {
+    return { ok: false, message: `Task "${id}" is being driven by a live loop — stop it first (/agentic-loop:engineering stop).`, variant: "warning" }
+  }
+  const draft = await findByIdIn($, directory, config.tasksDir, "draft", id)
+  if (draft) {
+    return {
+      ok: true,
+      message: `"${draft.title}" is a draft — reshape it.`,
+      path: draft.path,
+      data: { retask: true, alreadyDone: true, path: draft.path, id },
+    }
+  }
+  const queued = await findByIdIn($, directory, config.tasksDir, "queued", id)
+  if (!queued) {
+    const elsewhere = await findAnyStatus(ctx, id)
+    const where = elsewhere ? statusFolder(elsewhere) : null
+    return {
+      ok: false,
+      message: where
+        ? `Can't retask "${id}": it's in ${where} — a task with a plan goes back via /agentic-loop:engineering replan ${id}.`
+        : ((await unparseableAt(ctx, id)) ?? `Can't retask "${id}": no task found.`),
+      variant: "warning",
+    }
+  }
+  // A queued task is claimed only by an explicit `plan <id>`, but a crashed run
+  // can leave the marker behind — moving the task would orphan it.
+  const held = await listClaimIds($, directory, config.tasksDir, "queued")
+  if (held.includes(id)) {
+    return { ok: false, message: `Task "${id}" holds a claim marker — release it first (/agentic-loop:engineering doctor fix).`, variant: "warning" }
+  }
+  const actor = await gitActor($, directory)
+  await appendNote($, queued, auditNote("Sent back to draft for re-shaping — approval withdrawn", new Date(), actor), log)
+  const newPath = await moveTask($, queued, "draft")
+  await commitPaths($, directory, [config.tasksDir], `loop(${id}): sent back to draft for re-shaping`)
+  return {
+    ok: true,
+    message: `"${queued.title}" sent back to ${config.tasksDir}/draft/ — reshape it, then approve it again.`,
+    path: newPath,
+    data: { retask: true, path: newPath, id, next: `/agentic-loop:engineering approve ${id} re-queues it once reshaped` },
   }
 }
 

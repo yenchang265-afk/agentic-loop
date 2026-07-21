@@ -626,7 +626,7 @@ npm install                    <span class="c"># workspaces + builds core dist/<
           <h4 style="margin-top:0">/agentic-loop:engineering <span style="text-transform:none;color:var(--ink-2)">— the backlog lifecycle</span></h4>
           <div class="tblwrap" style="margin-top:8px"><table style="min-width:0"><tbody>
             <tr><td><code>new &lt;idea&gt;</code></td><td>Interview you into a planless draft (splits heavy ideas into sibling drafts).</td></tr>
-            <tr><td><code>retask &lt;id&gt; [note]</code></td><td>Re-interview &amp; rewrite a draft in place. Draft-only.</td></tr>
+            <tr><td><code>retask &lt;id&gt; [note]</code></td><td>Re-interview &amp; rewrite a planless task in place. Works on <code>draft/</code>, and on <code>queued/</code> — that one is sent back to <code>draft/</code> first, so re-approve it. From <code>plan-review/</code> on, use <code>replan</code>.</td></tr>
             <tr><td><code>approve [id]</code></td><td>THE gate verb, folder-driven: draft → queued · plan-review → in-progress · in-review → completed. Id-less form advances the one task at a loop wait-gate, falling back to a lone draft.</td></tr>
             <tr><td><code>replan [id] [reason]</code></td><td>The sole rejection verb: a parked plan (or a cap-tripped task, by id) → back to queued.</td></tr>
             <tr><td><code>plan &lt;id&gt;</code></td><td>Run PLAN on one queued task now and park it in plan-review — the only PLAN entry. Building stays with <code>claim</code>/<code>watch</code>.</td></tr>

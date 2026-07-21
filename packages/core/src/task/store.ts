@@ -532,16 +532,19 @@ const FORWARD_ORDER: readonly TaskStatus[] = ["draft", "queued", "plan-review", 
 
 /**
  * Whether a task may move from `from` to `to`. Tasks advance exactly one
- * stage at a time — no skipping — with two escapes: any non-terminal stage
- * may be abandoned directly (cancellation isn't a forward skip), and a
+ * stage at a time — no skipping — with three escapes: any non-terminal stage
+ * may be abandoned directly (cancellation isn't a forward skip); a
  * replan sends `plan-review` or `in-progress` back to `queued` (the plan was
- * rejected or the loop capped out — the PLAN stage runs again). `completed`
- * and `abandoned` are terminal: nothing moves out of them. Pure.
+ * rejected or the loop capped out — the PLAN stage runs again); and a retask
+ * sends an approved-but-planless `queued` task back to `draft` for reshaping
+ * (nothing downstream exists yet, and the stale approval must be re-taken).
+ * `completed` and `abandoned` are terminal: nothing moves out of them. Pure.
  */
 export const canTransition = (from: TaskStatus, to: TaskStatus): boolean => {
   if (from === "completed" || from === "abandoned") return false
   if (to === "abandoned") return true
   if (to === "queued" && (from === "plan-review" || from === "in-progress")) return true
+  if (to === "draft" && from === "queued") return true
   const fromIdx = FORWARD_ORDER.indexOf(from)
   const toIdx = FORWARD_ORDER.indexOf(to)
   return fromIdx !== -1 && toIdx === fromIdx + 1

@@ -3,7 +3,7 @@ import { test } from "node:test"
 import { DEFAULT_CONFIG } from "../config.js"
 import { PLAN_HEADING } from "../task/store.js"
 import { serializeTask } from "../task/schema.js"
-import { approveAny, approvePlan, approveTask, rejectAny, replanTask, shipTask, type GateCtx } from "./gate.js"
+import { approveAny, approvePlan, approveTask, rejectAny, replanTask, retaskTask, shipTask, type GateCtx } from "./gate.js"
 
 /**
  * The shared gate moves, driven against a tiny in-memory backlog. A fake shell
@@ -68,6 +68,61 @@ const makeCtx = (
 }
 
 const task = (title: string, body = "context") => serializeTask({ title, body })
+
+// --- retaskTask: place a planless task where the authoring interview can reshape it ---
+
+test("retaskTask on a draft is an idempotent no-op — it is already in place", async () => {
+  const { ctx, fs, log } = makeCtx({ "draft/t.md": task("Do it") })
+  const r = await retaskTask(ctx, "t")
+  assert.equal(r.ok, true)
+  assert.ok(r.ok && r.data.alreadyDone === true)
+  assert.ok("/repo/docs/tasks/draft/t.md" in fs)
+  assert.ok(!log.some((c) => c.startsWith("mv ")), "nothing to move")
+})
+
+test("retaskTask sends an approved queued task back to draft, audited and committed", async () => {
+  const { ctx, fs, log } = makeCtx({ "queued/t.md": task("Do it") })
+  const r = await retaskTask(ctx, "t")
+  assert.equal(r.ok, true)
+  assert.ok(r.ok && r.data.retask === true && r.data.alreadyDone === undefined)
+  assert.match(r.message, /draft/)
+  assert.ok("/repo/docs/tasks/draft/t.md" in fs, "the file lands in draft/")
+  assert.ok(!("/repo/docs/tasks/queued/t.md" in fs), "and leaves queued/")
+  // The audit note records WHY it went back; the commit itself is out of reach
+  // here (the harness's git stub reports no actor), same as approveTask's test.
+  assert.ok(log.some((c) => c.includes("approval withdrawn")), "an audit note is appended")
+})
+
+test("retaskTask refuses a parked plan and names replan", async () => {
+  const { ctx, fs, log } = makeCtx({ "plan-review/t.md": task("Planned", `${PLAN_HEADING}\n\n1. Step.`) })
+  const r = await retaskTask(ctx, "t")
+  assert.equal(r.ok, false)
+  assert.match(r.message, /replan/)
+  assert.ok("/repo/docs/tasks/plan-review/t.md" in fs, "untouched")
+  assert.ok(!log.some((c) => c.startsWith("mv ")))
+})
+
+test("retaskTask refuses an in-progress task — its plan is already being built", async () => {
+  const { ctx, fs } = makeCtx({ "in-progress/t.md": task("Building", `${PLAN_HEADING}\n\n1. Step.`) })
+  const r = await retaskTask(ctx, "t")
+  assert.equal(r.ok, false)
+  assert.match(r.message, /replan/)
+  assert.ok("/repo/docs/tasks/in-progress/t.md" in fs)
+})
+
+test("retaskTask refuses a task a live loop is driving", async () => {
+  const { ctx, fs } = makeCtx({ "queued/t.md": task("Do it") }, { driving: "t" })
+  const r = await retaskTask(ctx, "t")
+  assert.equal(r.ok, false)
+  assert.match(r.message, /live loop/)
+  assert.ok("/repo/docs/tasks/queued/t.md" in fs, "never yanked out from under a running PLAN")
+})
+
+test("retaskTask reports a missing id rather than inventing one", async () => {
+  const { ctx } = makeCtx({})
+  const r = await retaskTask(ctx, "nope")
+  assert.equal(r.ok, false)
+})
 
 test("approveTask moves a draft to queued and returns a structured result", async () => {
   const { ctx, log } = makeCtx({ "draft/t.md": task("Do it") })

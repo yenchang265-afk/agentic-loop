@@ -9,8 +9,9 @@ description: Explains the automatic agentic loop driven by the OpenCode `/agenti
 
 One command carries the whole engineering lifecycle. The **authoring verbs**
 are the authoring-and-gates side: its agent interviews you into a planless
-draft (`new <idea>`), `retask <id>` re-interviews and reshapes a draft in
-place, `approve [id]` is the one folder-driven gate — a reviewed draft to
+draft (`new <idea>`), `retask <id>` re-interviews and reshapes a planless task
+in place (a `draft/` one, or a `queued/` one sent back to `draft/` first),
+`approve [id]` is the one folder-driven gate — a reviewed draft to
 `queued/` (task gate), a parked plan to `in-progress/` (plan gate), a
 finished review to `completed/` (ship) — and `replan [id]` is the sole
 rejection verb. **`/agentic-loop:engineering`** is
@@ -57,7 +58,8 @@ directly — ship the diff yourself.)
 ```
 authoring + gates (interactive /agentic-loop:engineering verbs):
   /agentic-loop:engineering new <idea>      ──▶ interview ──▶ planless draft in draft/
-  /agentic-loop:engineering retask <id> [note] ▶ re-interview ──▶ draft rewritten in place (same id)
+  /agentic-loop:engineering retask <id> [note] ▶ re-interview ──▶ rewritten in place in draft/ (same id)
+                                        queued/ → draft/            ← approval withdrawn, re-approve after
   /agentic-loop:engineering approve [id]    ──▶ the one folder-driven gate:
                                         draft/ → queued/            ← the task gate
                                         plan-review/ → in-progress/ ← the plan gate
