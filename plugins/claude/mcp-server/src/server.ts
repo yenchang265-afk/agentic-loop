@@ -24,10 +24,16 @@ import type { PolledClaim } from "@agentic-loop/core/scheduler/scheduler"
 import type { WorkSource } from "@agentic-loop/core/source/types"
 import { adoAccessFor, bareModel, enabledLoopKinds, modelFor, platformFor, unknownStageModelKeys } from "@agentic-loop/core/config"
 import {
-  failedCriteriaBlock,
+  axisCoverageIssue,
+  axisVerdict,
+  blockingFindingsIssue,
+  effectiveVerdict,
+  mergeAxes,
   parseVerdict,
   stageDriftNote,
+  verdictFeedbackBlock,
   worstOf,
+  type AxisResult,
   type CriterionResult,
   type Verdict,
   type VerdictRecord,
@@ -129,6 +135,7 @@ let active: LoopState | null = null
 let activeClaim: PolledClaim | null = null // the scheduler claim behind `active`, when loop_claim made it
 let pending: VerdictRecord | null = null // verdict(s) recorded for the current check stage
 let verdictRetried = false // whether the current check stage already got its one no-verdict re-fire
+let verdictRejected = false // whether the current check stage had a verdict REJECTED (incomplete axis coverage) — changes the re-fire wording
 let driftNoted = false // whether this stage attempt already audited an out-of-stage verdict (a drifting agent may call repeatedly)
 let samples: StageSample[] = [] // per-run metrics
 let lastFireAt = Date.now()
@@ -385,6 +392,7 @@ const startTask = async (t: Task): Promise<{ error: string } | { state: LoopStat
   samples = []
   pending = null
   verdictRetried = false
+  verdictRejected = false
   // Durable claim evidence BEFORE isolation cuts feature/<id>: everything after
   // this commits onto the loop branch, so without it the human branch's task
   // file looks untouched after teardown and the watcher re-claims a task whose
@@ -416,6 +424,7 @@ const startPlan = async (t: Task): Promise<{ error: string } | { state: LoopStat
   samples = []
   pending = null
   verdictRetried = false
+  verdictRejected = false
   const state = planEntryState(t)
   active = state
   // Arm the PreToolUse carve-out for the whole PLAN window: {stage:"plan", taskId}
@@ -545,6 +554,7 @@ server.registerTool(
     samples = []
     pending = null
     verdictRetried = false
+    verdictRejected = false
     const loaded = manifestFor(claim.item.loopKind)
     if (stageDef(loaded.manifest, state.stage).isolation !== "none") {
       // Task-backed claims get the durable CLAIMED note on the human branch
@@ -604,9 +614,31 @@ server.registerTool(
       verdict: z.enum(["PASS", "FAIL", "ERROR"]),
       reason: z.string().max(500).optional(),
       criteria: z.array(z.object({ criterion: z.string(), pass: z.boolean() })).optional(),
+      axes: z
+        .array(
+          z.object({
+            axis: z.string().min(1).describe("The review axis this result covers (e.g. correctness, security)."),
+            verdict: z
+              .enum(["PASS", "FAIL", "ERROR"])
+              .describe("ERROR only when this axis genuinely could not be assessed; an axis with no findings is a clean PASS."),
+            findings: z
+              .array(
+                z.object({
+                  severity: z.enum(["critical", "important", "suggestion"]),
+                  detail: z.string().min(1),
+                  location: z.string().optional().describe('"file:line" the finding is anchored to.'),
+                }),
+              )
+              .optional(),
+          }),
+        )
+        .optional()
+        .describe(
+          "Per-axis results. REQUIRED on a stage that declares requiredAxes (engineering review: all five axes) — a call missing an axis is REJECTED, and partial submissions are not accumulated across calls.",
+        ),
     },
   },
-  async ({ stage, verdict, reason, criteria }) => {
+  async ({ stage, verdict, reason, criteria, axes }) => {
     if (!active) return fail("No active loop — verdict ignored.")
     if (active.stage !== stage) {
       // The rejection alone reaches only the calling agent. Audit it on the task
@@ -618,19 +650,42 @@ server.registerTool(
       }
       return fail(`The loop is at ${active.stage}, not ${stage} — verdict ignored.`)
     }
-    if (activeManifest().manifest.stages.find((d) => d.name === stage)?.kind !== "check") {
+    const def = activeManifest().manifest.stages.find((d) => d.name === stage)
+    if (def?.kind !== "check") {
       return fail(`Stage ${stage} is not a check stage — verdict ignored.`)
     }
-    const rec: VerdictRecord = { verdict, ...(reason ? { reason } : {}), ...(criteria ? { criteria: criteria as CriterionResult[] } : {}) }
+    const rec: VerdictRecord = {
+      verdict,
+      ...(reason ? { reason } : {}),
+      ...(criteria ? { criteria: criteria as CriterionResult[] } : {}),
+      ...(axes ? { axes: axes as AxisResult[] } : {}),
+    }
+    // A rejection must return BEFORE any mutation. `stampVerdictRecorded` marks
+    // the stage satisfied for the SubagentStop guard AND burns its one-shot nag
+    // sentinel — a rejected verdict that reached it would let the subagent stop
+    // having recorded nothing valid.
+    const issue = axisCoverageIssue(rec, def.requiredAxes) ?? blockingFindingsIssue(rec, def.requiredAxes)
+    if (issue) {
+      verdictRejected = true
+      return fail(issue)
+    }
     if (!pending) pending = rec
     else {
       const combined = worstOf([pending.verdict, rec.verdict])
       const reasons = [pending.reason, rec.reason].filter(Boolean)
       const crit = [...(pending.criteria ?? []), ...(rec.criteria ?? [])]
-      pending = { verdict: combined, ...(reasons.length ? { reason: reasons.join(" · ") } : {}), ...(crit.length ? { criteria: crit } : {}) }
+      const mergedAxes = mergeAxes(pending.axes, rec.axes)
+      pending = {
+        verdict: combined,
+        ...(reasons.length ? { reason: reasons.join(" · ") } : {}),
+        ...(crit.length ? { criteria: crit } : {}),
+        ...(mergedAxes.length ? { axes: mergedAxes } : {}),
+      }
     }
     stampVerdictRecorded()
-    return ok({ recorded: pending.verdict })
+    // Report the DERIVED verdict: a declared PASS carrying a Critical finding on
+    // any axis is a FAIL (verdict.ts `effectiveVerdict`).
+    return ok({ recorded: effectiveVerdict(pending) })
   },
 )
 
@@ -678,6 +733,7 @@ server.registerTool(
     writeStageMarker(stage)
     lastFireAt = Date.now()
     pending = null // no stale verdict may leak into this stage
+    verdictRejected = false // ...nor a stale rejection into this stage's re-fire wording
     if (stage === "build" && active.task) {
       const actor = await gitActor(sh, directory)
       await appendNote(sh, active.task, auditNote(`BUILD started (iteration ${active.iteration + 1})`, new Date(), actor), log)
@@ -739,7 +795,9 @@ server.registerTool(
       iteration: active.iteration,
       ms: Date.now() - lastFireAt,
       startedAt: new Date(lastFireAt).toISOString(),
-      ...(stageDef(activeManifest().manifest, stage).kind === "check" ? { verdict: (pending?.verdict ?? "none") as Verdict | "none" } : {}),
+      ...(stageDef(activeManifest().manifest, stage).kind === "check"
+        ? { verdict: (pending ? effectiveVerdict(pending) : "none") as Verdict | "none" }
+        : {}),
     })
     flushRunMetrics(loopId(active)) // publish samples-so-far live to the hub
     // A check stage that ended with NO loop_verdict call is a broken verdict
@@ -774,8 +832,12 @@ server.registerTool(
           ...(retryModel ? { model: retryModel } : {}),
           prompt:
             composePrompt(activeManifest(), active, stage) +
-            "\n\nPREVIOUS ATTEMPT RECORDED NO VERDICT — the loop_verdict tool call is MANDATORY. " +
-            "If the tool is not in your tool list, state that explicitly in your final message and finish.",
+            (verdictRejected
+              ? "\n\nPREVIOUS ATTEMPT'S VERDICT WAS REJECTED and never recorded — it did not cover every required axis, " +
+                "or it declared FAIL without naming a critical/important finding. Call loop_verdict ONCE with the " +
+                "COMPLETE axes array; partial submissions are not accumulated."
+              : "\n\nPREVIOUS ATTEMPT RECORDED NO VERDICT — the loop_verdict tool call is MANDATORY. " +
+                "If the tool is not in your tool list, state that explicitly in your final message and finish."),
           note: `check retry (no iteration consumed): the previous pass never called loop_verdict — call loop_stage, then spawn the stage subagent again${SPAWN_MODEL_NOTE}`,
         })
       }
@@ -787,8 +849,9 @@ server.registerTool(
           (prose ? ` (prose claimed ${prose}, ignored — free text is untrusted)` : ""),
       }
     }
-    // thread failed criteria ahead of the prose for the next iteration
-    const block = failedCriteriaBlock(pending)
+    // thread the structured feedback (reason, failed criteria, failing axes)
+    // ahead of the prose for the next iteration
+    const block = verdictFeedbackBlock(pending)
     const threaded = block ? `${block}\n\n${stageOutput}` : stageOutput
     const actor = await gitActor(sh, directory)
     if (stage === "build" && active.task) {
@@ -802,13 +865,18 @@ server.registerTool(
     }
     if (stageDef(activeManifest().manifest, stage).kind === "check" && active.task) {
       const failed = pending?.criteria?.filter((c) => !c.pass).length ?? 0
-      await appendNote(sh, active.task, auditNote(`${stage.toUpperCase()} verdict: ${pending?.verdict ?? "none → FAIL"}${failed ? ` (${failed} criteria unmet)` : ""} (iteration ${active.iteration + 1})`, new Date(), actor), log)
+      const failedAxes = (pending?.axes ?? []).filter((a) => axisVerdict(a) !== "PASS").map((a) => a.axis)
+      const detail = [failed ? `${failed} criteria unmet` : "", failedAxes.length ? `axes: ${failedAxes.join(", ")}` : ""].filter(Boolean).join("; ")
+      await appendNote(sh, active.task, auditNote(`${stage.toUpperCase()} verdict: ${pending ? effectiveVerdict(pending) : "none → FAIL"}${detail ? ` (${detail})` : ""} (iteration ${active.iteration + 1})`, new Date(), actor), log)
     }
-    const verdict = stageDef(activeManifest().manifest, stage).kind === "check" ? (pending?.verdict ?? null) : null
+    // The derived verdict, not the declared one — an agent must not be able to
+    // report PASS while flagging a Critical finding on an axis.
+    const verdict = stageDef(activeManifest().manifest, stage).kind === "check" ? (pending ? effectiveVerdict(pending) : null) : null
     const { state, action } = advance(activeManifest(), active, config, threaded, verdict)
     active = state
     pending = null
     verdictRetried = false // the transition happened — the next check stage gets its own retry budget
+    verdictRejected = false
 
     if (action.kind === "fire") {
       await snapshot()
@@ -1216,6 +1284,7 @@ server.registerTool(
     samples = []
     pending = null
     verdictRetried = false
+    verdictRejected = false
     const actor = await gitActor(sh, directory)
     if (snap && snap.task?.id === id) {
       active = { ...snap, task: { ...snap.task, path: t.path } }

@@ -1203,9 +1203,9 @@ test("recordVerdict accepts the verdict once the child session is resolved to th
   setLoop("drv-sess", { goal: "g", stage: "verify", iteration: 0, artifacts: {} })
   try {
     // Unresolved child id: ignored (the pre-fix behavior the resolver exists to prevent).
-    assert.match(recordVerdict("some-child", "verify", { verdict: "PASS" }), /No active loop/)
+    assert.match(recordVerdict("some-child", "verify", { verdict: "PASS" }).message, /No active loop/)
     // Resolved driving id: recorded.
-    assert.match(recordVerdict("drv-sess", "verify", { verdict: "PASS" }), /Recorded verify verdict: PASS/)
+    assert.match(recordVerdict("drv-sess", "verify", { verdict: "PASS" }).message, /Recorded verify verdict: PASS/)
   } finally {
     clearLoop("drv-sess")
   }
@@ -1221,7 +1221,7 @@ test("recordVerdict audits an out-of-stage verdict on the task file, once per st
   setLoop("drv-drift", { goal: "g", stage: "build", iteration: 0, artifacts: {}, task })
   try {
     // A build stage that verified its own work: rejected, as before.
-    assert.match(recordVerdict("drv-drift", "verify", { verdict: "PASS" }, deps), /loop is at build, not verify/)
+    assert.match(recordVerdict("drv-drift", "verify", { verdict: "PASS" }, deps).message, /loop is at build, not verify/)
     // ...and now audited, so the drift is visible in the trail rather than
     // surfacing one stage later as a re-run check or a fabricated PASS.
     await new Promise((r) => setTimeout(r, 20)) // the note is appended fire-and-forget
@@ -1246,7 +1246,7 @@ test("recordVerdict still records a verdict from the stage the loop is actually 
   const task = { id: "ok-task", path: "/repo/docs/tasks/in-progress/ok-task.md", acceptance: [] }
   setLoop("drv-ok", { goal: "g", stage: "verify", iteration: 0, artifacts: {}, task })
   try {
-    assert.match(recordVerdict("drv-ok", "verify", { verdict: "PASS" }, deps), /Recorded verify verdict: PASS/)
+    assert.match(recordVerdict("drv-ok", "verify", { verdict: "PASS" }, deps).message, /Recorded verify verdict: PASS/)
     await new Promise((r) => setTimeout(r, 20))
     assert.equal(shellLog.filter((cmd) => cmd.includes("Stage drift")).length, 0, "no drift note on the happy path")
   } finally {
@@ -1301,6 +1301,127 @@ const runLensReview = async (sessionID: string, onCall: (call: number, deps: Dep
     clearLoop(sessionID)
   }
 }
+
+// --- required axes: the review stage's verdict must cover all five ---
+
+const FIVE = ["correctness", "readability", "architecture", "security", "performance"]
+const cleanAxes = FIVE.map((axis) => ({ axis, verdict: "PASS" as const }))
+
+/** Run the review stage as ONE pass (no lenses), so axis coverage is enforced. */
+const runSinglePassReview = async (sessionID: string, onCall: (deps: Deps) => void) => {
+  const { setLoop, clearLoop } = await import("@agentic-loop/core/loop/state")
+  setLoop(sessionID, { kind: "engineering", goal: "g", stage: "review", iteration: 0, artifacts: {} })
+  const client = {
+    tui: { showToast: async () => ({ data: undefined }) },
+    session: {
+      command: async () => {
+        onCall(deps)
+        return { data: { parts: [{ type: "text", text: "review pass" }] } }
+      },
+    },
+  } as unknown as Deps["client"]
+  const deps: Deps = { client, $: makeShellFS({}, []), directory: "/repo", log: () => {} }
+  try {
+    return await runStageWithLenses(
+      deps,
+      sessionID,
+      testConfig,
+      manifestFor("engineering"),
+      { kind: "engineering", goal: "g", stage: "review", iteration: 0, artifacts: {}, task: { id: "t", path: "/repo/docs/tasks/in-progress/t.md", acceptance: [] } },
+      "review",
+      "goal args",
+      0,
+    )
+  } finally {
+    clearLoop(sessionID)
+  }
+}
+
+test("review: a verdict missing axes is rejected and records nothing", async () => {
+  const sessionID = "sess-axes-missing"
+  const rejections: string[] = []
+  const result = await runSinglePassReview(sessionID, () => {
+    const r = recordVerdict(sessionID, "review", {
+      verdict: "PASS",
+      axes: [{ axis: "correctness", verdict: "PASS" }],
+    })
+    if (!r.accepted) rejections.push(r.message)
+  })
+  assert.ok(rejections.length, "the incomplete call was rejected")
+  assert.match(rejections[0]!, /Missing: readability, architecture, security, performance/)
+  // Nothing was recorded, so the stage takes the broken-channel ERROR path
+  // rather than shipping a one-axis review as a PASS.
+  assert.equal(result.verdict, "ERROR")
+})
+
+test("review: a rejected call cannot clobber a complete verdict recorded earlier in the pass", async () => {
+  const sessionID = "sess-axes-clobber"
+  const result = await runSinglePassReview(sessionID, () => {
+    recordVerdict(sessionID, "review", { verdict: "PASS", axes: cleanAxes })
+    recordVerdict(sessionID, "review", { verdict: "FAIL", axes: [{ axis: "security", verdict: "FAIL" }] })
+  })
+  assert.equal(result.verdict, "PASS", "the good record survived the rejected one")
+})
+
+test("review: a complete five-axis verdict is accepted", async () => {
+  const sessionID = "sess-axes-complete"
+  const result = await runSinglePassReview(sessionID, () => {
+    recordVerdict(sessionID, "review", { verdict: "PASS", axes: cleanAxes })
+  })
+  assert.equal(result.verdict, "PASS")
+})
+
+test("review: a declared PASS carrying a Critical finding lands as FAIL", async () => {
+  const sessionID = "sess-axes-lying"
+  const result = await runSinglePassReview(sessionID, () => {
+    recordVerdict(sessionID, "review", {
+      verdict: "PASS",
+      axes: cleanAxes.map((a) =>
+        a.axis === "security" ? { ...a, findings: [{ severity: "critical" as const, detail: "secret logged" }] } : a,
+      ),
+    })
+  })
+  assert.equal(result.verdict, "FAIL")
+})
+
+test("review: a FAIL naming no blocking finding is rejected", async () => {
+  const sessionID = "sess-axes-empty-fail"
+  const rejections: string[] = []
+  await runSinglePassReview(sessionID, () => {
+    const r = recordVerdict(sessionID, "review", { verdict: "FAIL", reason: "vibes", axes: cleanAxes })
+    if (!r.accepted) rejections.push(r.message)
+  })
+  assert.ok(rejections.length)
+  assert.match(rejections[0]!, /critical.*important/s)
+})
+
+test("lens mode suppresses axis enforcement — a lens pass records its own focus only", async () => {
+  // Each lens is told to focus exclusively on its own lens; demanding all five
+  // axes from it would reject every pass and wedge the loop.
+  const sessionID = "sess-axes-lens"
+  const { result } = await runLensReview(sessionID, () => {
+    const r = recordVerdict(sessionID, "review", { verdict: "PASS" })
+    assert.ok(r.accepted, "an axis-less lens verdict is accepted")
+  })
+  assert.equal(result.verdict, "PASS")
+})
+
+test("lenses: axes merge across passes worst-wins, including a PASSing lens's evidence", async () => {
+  const sessionID = "sess-axes-lens-merge"
+  const { result } = await runLensReview(sessionID, (call) => {
+    recordVerdict(
+      sessionID,
+      "review",
+      call === 1
+        ? { verdict: "PASS", axes: [{ axis: "security", verdict: "PASS", findings: [{ severity: "suggestion", detail: "lens A context" }] }] }
+        : { verdict: "FAIL", axes: [{ axis: "security", verdict: "FAIL", findings: [{ severity: "critical", detail: "lens B hole" }] }] },
+    )
+  })
+  assert.equal(result.verdict, "FAIL")
+  const security = result.record?.axes?.find((a) => a.axis === "security")
+  assert.equal(security?.verdict, "FAIL")
+  assert.equal(security?.findings?.length, 2, "the PASSing lens's finding survived alongside the failing one")
+})
 
 test("lenses: both PASS combines to PASS", async () => {
   const sessionID = "sess-lens-pass"

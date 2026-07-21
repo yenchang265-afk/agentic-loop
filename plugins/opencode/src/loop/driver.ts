@@ -71,11 +71,17 @@ import { runTerminal, type TerminalCtx } from "@agentic-loop/core/loop/terminal"
 import { type Outcome, renderRunSummary, type StageSample, type StageTokens } from "@agentic-loop/core/loop/metrics"
 import { metricsPath, upsertRunMetrics } from "@agentic-loop/core/loop/metrics-file"
 import {
-  failedCriteriaBlock,
+  axisCoverageIssue,
+  axisVerdict,
+  blockingFindingsIssue,
+  effectiveVerdict,
+  mergeAxes,
+  verdictFeedbackBlock,
   LOOP_REVIEW_TAG,
   LOOP_VERIFY_TAG,
   parseVerdict,
   stageDriftNote,
+  type AxisResult,
   type Verdict,
   type VerdictRecord,
   worstOf,
@@ -344,6 +350,17 @@ type CheckStage = string
 const recordedVerdicts = new Map<string, { readonly stage: CheckStage; readonly record: VerdictRecord }>()
 
 /**
+ * Axes the running check stage's verdict must cover, per driving session.
+ *
+ * Published by `runStageWithLenses` rather than read from the manifest inside
+ * `recordVerdict`, because a lens pass is told to "focus exclusively on
+ * <lens>" — enforcing all five axes on it would reject every pass and deadlock
+ * the loop. Lens mode therefore clears the requirement; it already enforces its
+ * own coverage by turning a lens that recorded nothing into a synthetic ERROR.
+ */
+const axisRequirement = new Map<string, readonly string[]>()
+
+/**
  * The stage a session has already audited an out-of-stage verdict for. A
  * drifting work stage typically calls `loop_verdict` more than once (verify,
  * then review, inside the same build turn); the task file gets one note per
@@ -380,9 +397,15 @@ const addSample = (sessionID: string, sample: StageSample): void => {
  * assert it need no host. A caller that omits it still rejects correctly —
  * it just leaves the drift out of the audit trail.
  */
-export const recordVerdict = (sessionID: string, stage: CheckStage, record: VerdictRecord, deps?: Deps): string => {
+export const recordVerdict = (
+  sessionID: string,
+  stage: CheckStage,
+  record: VerdictRecord,
+  deps?: Deps,
+): { readonly accepted: boolean; readonly message: string } => {
+  const reject = (message: string) => ({ accepted: false, message })
   const state = getLoop(sessionID)
-  if (!state) return "No active loop in this session — verdict ignored."
+  if (!state) return reject("No active loop in this session — verdict ignored.")
   if (state.stage !== stage) {
     // The rejection alone reaches only the calling agent. Audit it on the task
     // so a work stage that ran a later stage's work inside its own turn is
@@ -403,14 +426,19 @@ export const recordVerdict = (sessionID: string, stage: CheckStage, record: Verd
         /* best-effort audit — never break the tool call */
       })
     }
-    return `The loop is at ${state.stage}, not ${stage} — verdict ignored. Only the running check stage may record its own verdict.`
+    return reject(`The loop is at ${state.stage}, not ${stage} — verdict ignored. Only the running check stage may record its own verdict.`)
   }
   const def = manifestFor(state.kind ?? "engineering").manifest.stages.find((d) => d.name === stage)
   if (def?.kind !== "check") {
-    return `Stage ${stage} is not a check stage — verdict ignored.`
+    return reject(`Stage ${stage} is not a check stage — verdict ignored.`)
   }
+  // Reject BEFORE the write: a rejected call must not clobber a good record
+  // recorded earlier in the same pass.
+  const required = axisRequirement.get(sessionID)
+  const issue = axisCoverageIssue(record, required) ?? blockingFindingsIssue(record, required)
+  if (issue) return reject(issue)
   recordedVerdicts.set(sessionID, { stage, record })
-  return `Recorded ${stage} verdict: ${record.verdict}.`
+  return { accepted: true, message: `Recorded ${stage} verdict: ${effectiveVerdict(record)}.` }
 }
 
 /** Consume (read-and-clear) the verdict record for a session's check stage, if any. */
@@ -629,11 +657,17 @@ const runStage = async (
  * merged so the re-build prompt sees all objections. Pure.
  */
 const combineRecords = (records: readonly (VerdictRecord | null)[], lenses: readonly string[]): VerdictRecord => {
-  const verdict = worstOf(records.map((r) => r?.verdict ?? null))
+  const verdict = worstOf(records.map((r) => (r ? effectiveVerdict(r) : null)))
   const reasons: string[] = []
   const criteria: { criterion: string; pass: boolean }[] = []
+  let axes: AxisResult[] = []
   records.forEach((r, i) => {
-    if (!r || r.verdict === "PASS") return
+    if (!r) return
+    // Axes merge across EVERY pass, not just the failing ones: a lens that
+    // passed an axis still holds evidence about it, and dropping that leaves a
+    // later lens's FAIL rendering with no context. Per-axis worst-wins.
+    axes = mergeAxes(axes, r.axes)
+    if (r.verdict === "PASS") return
     const lens = lenses[i]
     if (r.reason) reasons.push(lens ? `[${lens}] ${r.reason}` : r.reason)
     for (const c of r.criteria ?? []) criteria.push(c)
@@ -642,6 +676,7 @@ const combineRecords = (records: readonly (VerdictRecord | null)[], lenses: read
     verdict,
     ...(reasons.length ? { reason: reasons.join(" · ") } : {}),
     ...(criteria.length ? { criteria } : {}),
+    ...(axes.length ? { axes } : {}),
   }
 }
 
@@ -667,6 +702,13 @@ export const runStageWithLenses = async (
   const model = modelFor(config, loaded.manifest.kind, stageDef(loaded.manifest, stage))
   const lenses = stage === "review" ? config.reviewLenses : []
   const passes: (string | null)[] = lenses.length ? [...lenses] : [null]
+  // Axis coverage is enforced only when this stage runs as ONE pass. A lens
+  // pass is told to focus exclusively on its own lens, so demanding every axis
+  // from it would reject every pass and wedge the loop; lens mode gets its
+  // coverage from the per-lens ERROR fallback below instead.
+  const required = stageDef(loaded.manifest, stage).requiredAxes
+  if (required?.length && !lenses.length) axisRequirement.set(sessionID, required)
+  else axisRequirement.delete(sessionID)
   const outputs: string[] = []
   const records: (VerdictRecord | null)[] = []
   const { client } = deps
@@ -749,7 +791,10 @@ export const runStageWithLenses = async (
       ? null
       : combineRecords(records, lenses)
     : (records[0] ?? null)
-  const verdict = record?.verdict ?? null
+  // The DERIVED verdict — a pass that declared PASS while flagging a Critical
+  // finding on an axis fails the stage (verdict.ts `effectiveVerdict`).
+  const verdict = record ? effectiveVerdict(record) : null
+  axisRequirement.delete(sessionID) // the stage is over; nothing may inherit its requirement
   if (verdict === null) {
     // Still nothing after the retry: the verdict channel is unreachable —
     // surface it as a retryable ERROR (manifest onError → recoverable stop),
@@ -960,7 +1005,7 @@ export const drive = async (
     }
     // Thread the machine-recorded failure reasons ahead of the stage's prose so
     // the next PLAN/BUILD iteration leads with what actually failed.
-    const block = failedCriteriaBlock(record)
+    const block = verdictFeedbackBlock(record)
     const threaded = block ? `${block}\n\n${output}` : output
     // Interpret transitions against the CLAIMED kind's manifest — `loaded`, not
     // the hardcoded engineering `eng`. A pr-sitter loop (stages triage/fix/

@@ -60,15 +60,41 @@ paths under it, not the repo root.
 6. **Decide** — PASS only if there are no Critical or Important findings on any
    axis; otherwise FAIL.
 
+Every one of the five axes must appear in your verdict's `axes` array — the
+loop **rejects** a verdict that skips one, and you will have to call again.
+
 ## Output
 
 **Record your verdict by calling the `loop_verdict` tool** — the loop's only
 trusted verdict channel.
 Call it exactly once, at the end of your turn, with `stage: "review"`,
-`verdict: "PASS" | "FAIL" | "ERROR"`, and a one-line `reason` on FAIL or
-ERROR. A verdict written in plain text is ignored and counts as FAIL. Use
-`ERROR` **only** when the review itself could not run (e.g. the diff is
-unreadable) — findings are always `FAIL`, never `ERROR`.
+`verdict: "PASS" | "FAIL" | "ERROR"`, a one-line `reason` on FAIL or ERROR,
+and an `axes` array covering **all five axes in that one call**:
+
+```
+axes: [
+  { axis: "correctness",  verdict: "PASS" },
+  { axis: "readability",  verdict: "PASS" },
+  { axis: "architecture", verdict: "PASS" },
+  { axis: "security",     verdict: "FAIL",
+    findings: [{ severity: "critical", detail: "user id interpolated into the SQL template",
+                 location: "src/db/query.ts:41" }] },
+  { axis: "performance",  verdict: "PASS" },
+]
+```
+
+- An axis with no findings is a clean `PASS` — say so, don't omit it.
+- Use `ERROR` on an **axis** you genuinely could not assess (e.g. no hot path
+  in this diff to judge performance against). Don't invent a finding to fill it.
+- A call that misses an axis is **rejected and not recorded**, and partial
+  submissions are **not** accumulated across calls — every call must carry all
+  five. The rejection message names what is missing.
+- Your overall verdict is worsened to match your axes: a Critical or Important
+  finding anywhere makes the stage FAIL no matter what you declare.
+
+A verdict written in plain text is ignored and counts as FAIL. Use
+`ERROR` for the overall verdict **only** when the review itself could not run
+(e.g. the diff is unreadable) — findings are always `FAIL`, never `ERROR`.
 Also end your response with the matching human-readable line for the
 transcript:
 
@@ -78,9 +104,9 @@ LOOP_REVIEW: FAIL
 LOOP_REVIEW: ERROR
 ```
 
-Above the verdict, give a structured review: findings grouped by axis, each
-categorized Critical / Important / Suggestion with `file:line` and a fix
-recommendation. On FAIL, make the Critical/Important findings concrete enough
+Above the verdict, give a structured review in prose: findings grouped by axis,
+each categorized Critical / Important / Suggestion with `file:line` and a fix
+recommendation — the same findings you put in the `axes` payload. On FAIL, make the Critical/Important findings concrete enough
 for the next BUILD iteration to act on directly without re-reading the whole
 diff from scratch.
 
@@ -100,4 +126,7 @@ patterns worth a permanent rule — one-off bugs get no candidate rule.
 - Call `loop_verdict` exactly once, with the same verdict as your text line.
   No tool call means the loop records a FAIL.
 - FAIL on any Critical or Important finding — Suggestions alone don't block PASS.
+- A FAIL must name at least one Critical or Important finding on some axis;
+  a FAIL that names nothing to fix is rejected (the next BUILD would have
+  nothing to act on).
 - Do not report PASS without actually reading the diff and the files it touches.

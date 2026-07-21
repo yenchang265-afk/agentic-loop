@@ -3,7 +3,7 @@ import assert from "node:assert/strict"
 import { test } from "node:test"
 import path from "node:path"
 import { loadManifest } from "../manifest/load.js"
-import { effectiveAllowlist } from "../manifest/schema.js"
+import { effectiveAllowlist, stageDef } from "../manifest/schema.js"
 import { advance, composePrompt, firstStep } from "./engine.js"
 import type { Action, Config, LoopState, TaskRef } from "./state.js"
 import { resumeAtBuild, startAtPlan } from "./state.js"
@@ -96,8 +96,9 @@ const withoutArtifact = (state: LoopState, stage: string): LoopState => {
 // "fixed" inside the frozen composeArgs.
 const oracleCompose = (state: LoopState, stage: string): string => {
   const base = oracleComposeArgs(state, stage)
-  return stage === "verify" || stage === "review"
-    ? `${base}\n\n${verdictContractBlock(stage)}`
+  const def = stageDef(eng.manifest, stage)
+  return def.kind === "check"
+    ? `${base}\n\n${verdictContractBlock(stage, def.requiredAxes)}`
     : `${base}\n\n${workScopeBlock(stage)}`
 }
 
@@ -217,12 +218,23 @@ test("composePrompt appends the verdict contract to check stages only", () => {
   const state = resumeAtBuild("add foo", task, "PLAN BODY")
   for (const stage of ["verify", "review"]) {
     const prompt = composePrompt(eng, { ...state, stage }, stage)
-    assert.ok(prompt.endsWith(verdictContractBlock(stage)), `${stage} carries the contract`)
+    assert.ok(prompt.endsWith(verdictContractBlock(stage, stageDef(eng.manifest, stage).requiredAxes)), `${stage} carries the contract`)
     assert.match(prompt, /loop_verdict/)
   }
   for (const stage of ["plan", "build"]) {
     assert.doesNotMatch(composePrompt(eng, { ...state, stage }, stage), /MANDATORY VERDICT/, `${stage} has no contract`)
   }
+})
+
+test("composePrompt carries the five-axis payload contract on review, and none on verify", () => {
+  const state = resumeAtBuild("add foo", task, "PLAN BODY")
+  const review = composePrompt(eng, { ...state, stage: "review" }, "review")
+  for (const axis of ["correctness", "readability", "architecture", "security", "performance"]) {
+    assert.match(review, new RegExp(axis), `review names the ${axis} axis`)
+  }
+  assert.match(review, /REJECTED/)
+  // VERIFY declares no requiredAxes — its contract must stay exactly as it was.
+  assert.doesNotMatch(composePrompt(eng, { ...state, stage: "verify" }, "verify"), /axes/)
 })
 
 test("composePrompt fences work stages to their own stage", () => {

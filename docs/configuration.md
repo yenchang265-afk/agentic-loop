@@ -522,7 +522,11 @@ Impact on the commands:
 - **`reviewLenses`** — run REVIEW once per lens (e.g.
   `["correctness", "security", "test-adequacy"]`) and take the worst verdict,
   so a single prompt-injected reviewer can't wave a change through. Costs ~N×
-  review time; off by default.
+  review time; off by default. Turning it on **suppresses the review stage's
+  axis-coverage enforcement** (`requiredAxes`): each pass is told to focus on
+  its own lens, so demanding all five axes from it would reject every pass.
+  Lens mode enforces coverage its own way — a lens that records no verdict
+  becomes an ERROR, not a silently missing opinion.
 - Secrets echoed into audit notes, plans, or run logs are **shape-redacted**
   (`AKIA…`, `sk-…`, tokens, PEM blocks, `key/secret/token: …` assignments)
   before they are written and committed.

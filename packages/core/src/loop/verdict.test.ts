@@ -1,15 +1,26 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import {
-  failedCriteriaBlock,
+  axisCoverageIssue,
+  axisVerdict,
+  blockingFindingsIssue,
+  effectiveVerdict,
   LOOP_REVIEW_TAG,
   LOOP_VERIFY_TAG,
+  mergeAxes,
   parseVerdict,
   stageDriftNote,
   verdictContractBlock,
+  verdictFeedbackBlock,
   workScopeBlock,
   worstOf,
 } from "./verdict.js"
+
+const AXES = ["correctness", "readability", "architecture", "security", "performance"]
+
+/** A complete, clean five-axis payload — the shape the review stage must record. */
+const fiveAxes = (overrides: Record<string, Partial<{ verdict: "PASS" | "FAIL" | "ERROR" }>> = {}) =>
+  AXES.map((axis) => ({ axis, verdict: "PASS" as const, ...overrides[axis] }))
 
 test("parses a PASS verdict", () => {
   assert.equal(parseVerdict("checks ran\nLOOP_VERIFY: PASS", LOOP_VERIFY_TAG), "PASS")
@@ -54,6 +65,22 @@ test("verdictContractBlock names the stage, the tool, and both registered tool n
 
 test("verdictContractBlock warns that prose verdicts are ignored", () => {
   assert.match(verdictContractBlock("review"), /prose is IGNORED/i)
+})
+
+test("verdictContractBlock is byte-identical with no axes and with an empty axis list", () => {
+  // Every check stage across every kind but engineering's review renders this
+  // form; the hub's kind preview asserts on it too.
+  assert.equal(verdictContractBlock("verify", []), verdictContractBlock("verify"))
+  assert.equal(verdictContractBlock("verify", undefined), verdictContractBlock("verify"))
+  assert.doesNotMatch(verdictContractBlock("verify"), /axes/)
+})
+
+test("verdictContractBlock names every required axis and the rejection rule", () => {
+  const block = verdictContractBlock("review", AXES)
+  for (const axis of AXES) assert.match(block, new RegExp(axis))
+  assert.match(block, /REJECTED/)
+  assert.match(block, /severity/)
+  assert.match(block, /not accumulated across calls/)
 })
 
 // --- workScopeBlock (the prompt-carried scope fence for work stages) ---
@@ -113,15 +140,15 @@ test("worstOf: an empty list is PASS (no passes recorded a failure)", () => {
   assert.equal(worstOf([]), "PASS")
 })
 
-// --- failedCriteriaBlock (threading structured reasons into the next iteration) ---
+// --- verdictFeedbackBlock (threading structured reasons into the next iteration) ---
 
-test("failedCriteriaBlock is empty for a null record or a clean PASS", () => {
-  assert.equal(failedCriteriaBlock(null), "")
-  assert.equal(failedCriteriaBlock({ verdict: "PASS" }), "")
+test("verdictFeedbackBlock is empty for a null record or a clean PASS", () => {
+  assert.equal(verdictFeedbackBlock(null), "")
+  assert.equal(verdictFeedbackBlock({ verdict: "PASS" }), "")
 })
 
-test("failedCriteriaBlock lists only the failed criteria and the reason", () => {
-  const block = failedCriteriaBlock({
+test("verdictFeedbackBlock lists only the failed criteria and the reason", () => {
+  const block = verdictFeedbackBlock({
     verdict: "FAIL",
     reason: "rate limit not enforced",
     criteria: [
@@ -134,4 +161,183 @@ test("failedCriteriaBlock lists only the failed criteria and the reason", () => 
   assert.match(block, /- Returns 429 over the limit/)
   assert.match(block, /- Documented/)
   assert.doesNotMatch(block, /configurable/)
+})
+
+test("verdictFeedbackBlock output is unchanged for an axis-less record (rename regression guard)", () => {
+  // The two host call sites render VERIFY records too; adding axes must not
+  // have disturbed the criteria-only output by so much as a newline.
+  const record = { verdict: "FAIL" as const, reason: "boom", criteria: [{ criterion: "c1", pass: false }] }
+  assert.equal(verdictFeedbackBlock(record), "Verdict reason: boom\nFailed criteria (from loop_verdict):\n- c1")
+})
+
+test("verdictFeedbackBlock renders failing axes with their blocking findings only", () => {
+  const block = verdictFeedbackBlock({
+    verdict: "FAIL",
+    axes: [
+      { axis: "correctness", verdict: "PASS" },
+      {
+        axis: "security",
+        verdict: "FAIL",
+        findings: [
+          { severity: "critical", detail: "unvalidated id in SQL template", location: "src/db/query.ts:41" },
+          { severity: "suggestion", detail: "rename the helper" },
+        ],
+      },
+      { axis: "performance", verdict: "ERROR", findings: [] },
+    ],
+  })
+  assert.match(block, /Failing review axes \(from loop_verdict\):/)
+  assert.match(block, /- security \(FAIL\)/)
+  assert.match(block, /\[critical\] unvalidated id in SQL template — src\/db\/query\.ts:41/)
+  assert.match(block, /- performance \(ERROR\)/)
+  assert.doesNotMatch(block, /correctness/) // a passing axis is not next-BUILD's problem
+  assert.doesNotMatch(block, /rename the helper/) // suggestions never block
+})
+
+test("verdictFeedbackBlock surfaces an axis whose PASS is contradicted by a Critical finding", () => {
+  const block = verdictFeedbackBlock({
+    verdict: "PASS",
+    axes: [{ axis: "security", verdict: "PASS", findings: [{ severity: "critical", detail: "secret logged" }] }],
+  })
+  assert.match(block, /- security \(FAIL\)/)
+  assert.match(block, /secret logged/)
+})
+
+// --- axisVerdict / effectiveVerdict (the declared verdict is derived, never trusted) ---
+
+test("axisVerdict: a Critical or Important finding overrides a declared PASS", () => {
+  assert.equal(axisVerdict({ axis: "security", verdict: "PASS", findings: [{ severity: "critical", detail: "x" }] }), "FAIL")
+  assert.equal(axisVerdict({ axis: "security", verdict: "PASS", findings: [{ severity: "important", detail: "x" }] }), "FAIL")
+})
+
+test("axisVerdict: suggestions alone leave a PASS standing", () => {
+  assert.equal(axisVerdict({ axis: "readability", verdict: "PASS", findings: [{ severity: "suggestion", detail: "x" }] }), "PASS")
+  assert.equal(axisVerdict({ axis: "readability", verdict: "PASS" }), "PASS")
+})
+
+test("axisVerdict: a declared ERROR survives (the axis could not be assessed)", () => {
+  assert.equal(axisVerdict({ axis: "performance", verdict: "ERROR" }), "ERROR")
+  assert.equal(axisVerdict({ axis: "performance", verdict: "FAIL" }), "FAIL")
+})
+
+test("effectiveVerdict: a declared PASS cannot outrank a failing axis", () => {
+  assert.equal(effectiveVerdict({ verdict: "PASS", axes: fiveAxes({ security: { verdict: "FAIL" } }) }), "FAIL")
+})
+
+test("effectiveVerdict: any ERROR axis makes the stage ERROR", () => {
+  assert.equal(effectiveVerdict({ verdict: "PASS", axes: fiveAxes({ performance: { verdict: "ERROR" } }) }), "ERROR")
+})
+
+test("effectiveVerdict: a record with no axes keeps its declared verdict", () => {
+  assert.equal(effectiveVerdict({ verdict: "PASS" }), "PASS")
+  assert.equal(effectiveVerdict({ verdict: "FAIL" }), "FAIL")
+  assert.equal(effectiveVerdict({ verdict: "ERROR" }), "ERROR")
+})
+
+// --- axisCoverageIssue (the enforcement itself) ---
+
+test("axisCoverageIssue: no requirement means no enforcement (VERIFY and the sitters are untouched)", () => {
+  assert.equal(axisCoverageIssue({ verdict: "PASS" }, undefined), null)
+  assert.equal(axisCoverageIssue({ verdict: "PASS" }, []), null)
+})
+
+test("axisCoverageIssue: a complete payload is accepted", () => {
+  assert.equal(axisCoverageIssue({ verdict: "PASS", axes: fiveAxes() }, AXES), null)
+})
+
+test("axisCoverageIssue: names exactly the missing axes", () => {
+  const issue = axisCoverageIssue(
+    { verdict: "PASS", axes: [{ axis: "correctness", verdict: "PASS" }, { axis: "readability", verdict: "PASS" }] },
+    AXES,
+  )
+  assert.ok(issue)
+  // Assert on the extracted list, not the whole message — the payload-shape
+  // example downstream names an axis too.
+  assert.equal(issue.match(/Missing: ([^.]+)\./)?.[1], "architecture, security, performance")
+})
+
+test("axisCoverageIssue: the message tells the agent how to retry successfully in one call", () => {
+  const issue = axisCoverageIssue({ verdict: "PASS" }, AXES)
+  assert.ok(issue)
+  assert.match(issue, /NOT recorded/)
+  assert.match(issue, /ONE call/)
+  assert.match(issue, /not\s+accumulated/)
+  assert.match(issue, /ERROR.*could not assess/s) // the escape hatch, or the model invents findings
+  assert.match(issue, /no findings is a clean PASS/)
+})
+
+test("axisCoverageIssue: axis matching tolerates case and whitespace", () => {
+  const axes = AXES.map((a) => ({ axis: ` ${a.toUpperCase()} `, verdict: "PASS" as const }))
+  assert.equal(axisCoverageIssue({ verdict: "PASS", axes }, AXES), null)
+})
+
+test("axisCoverageIssue: extra axes beyond the requirement are accepted, not rejected", () => {
+  const axes = [...fiveAxes(), { axis: "test-adequacy", verdict: "PASS" as const }]
+  assert.equal(axisCoverageIssue({ verdict: "PASS", axes }, AXES), null)
+})
+
+// --- blockingFindingsIssue (a FAIL must name what to fix) ---
+
+test("blockingFindingsIssue: a FAIL with only suggestions is rejected", () => {
+  const record = {
+    verdict: "FAIL" as const,
+    axes: fiveAxes().map((a) =>
+      a.axis === "readability" ? { ...a, findings: [{ severity: "suggestion" as const, detail: "nit" }] } : a,
+    ),
+  }
+  const issue = blockingFindingsIssue(record, AXES)
+  assert.ok(issue)
+  assert.match(issue, /critical.*important/s)
+})
+
+test("blockingFindingsIssue: a FAIL naming one Important finding is accepted", () => {
+  const record = {
+    verdict: "FAIL" as const,
+    axes: fiveAxes().map((a) =>
+      a.axis === "security" ? { ...a, findings: [{ severity: "important" as const, detail: "token logged" }] } : a,
+    ),
+  }
+  assert.equal(blockingFindingsIssue(record, AXES), null)
+})
+
+test("blockingFindingsIssue: a clean PASS and an ERROR are both accepted", () => {
+  assert.equal(blockingFindingsIssue({ verdict: "PASS", axes: fiveAxes() }, AXES), null)
+  assert.equal(blockingFindingsIssue({ verdict: "ERROR", axes: fiveAxes() }, AXES), null)
+})
+
+test("blockingFindingsIssue: unenforced where no axes are required (a bare VERIFY FAIL stays legal)", () => {
+  assert.equal(blockingFindingsIssue({ verdict: "FAIL", reason: "tests red" }, undefined), null)
+})
+
+// --- mergeAxes (repeat calls in one stage, and multi-lens review) ---
+
+test("mergeAxes: per-axis worst-wins across lenses", () => {
+  const merged = mergeAxes([{ axis: "security", verdict: "PASS" }], [{ axis: "security", verdict: "FAIL" }])
+  assert.equal(merged.length, 1)
+  assert.equal(merged[0]?.verdict, "FAIL")
+  assert.equal(mergeAxes([{ axis: "a", verdict: "FAIL" }], [{ axis: "a", verdict: "ERROR" }])[0]?.verdict, "ERROR")
+})
+
+test("mergeAxes: findings from a PASSing lens survive alongside a failing one", () => {
+  const merged = mergeAxes(
+    [{ axis: "security", verdict: "PASS", findings: [{ severity: "suggestion", detail: "context from lens A" }] }],
+    [{ axis: "security", verdict: "FAIL", findings: [{ severity: "critical", detail: "hole from lens B" }] }],
+  )
+  assert.equal(merged[0]?.findings?.length, 2)
+})
+
+test("mergeAxes: identical findings are de-duped", () => {
+  const finding = { severity: "critical" as const, detail: "same", location: "a.ts:1" }
+  const merged = mergeAxes([{ axis: "x", verdict: "FAIL", findings: [finding] }], [{ axis: "x", verdict: "FAIL", findings: [finding] }])
+  assert.equal(merged[0]?.findings?.length, 1)
+})
+
+test("mergeAxes: an axis present on only one side survives", () => {
+  const merged = mergeAxes([{ axis: "a", verdict: "PASS" }], [{ axis: "b", verdict: "FAIL" }])
+  assert.deepEqual(merged.map((m) => m.axis).sort(), ["a", "b"])
+})
+
+test("mergeAxes: undefined sides are treated as empty", () => {
+  assert.deepEqual(mergeAxes(undefined, undefined), [])
+  assert.equal(mergeAxes(undefined, [{ axis: "a", verdict: "PASS" }]).length, 1)
 })

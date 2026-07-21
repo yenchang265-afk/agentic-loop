@@ -139,7 +139,10 @@ export const previewKind = async (_deps: HubDeps, req: ParsedRequest): Promise<J
   const rendered = renderPrompt(tpl, promptContext(sampleState(manifest, def.name, sample)))
   // Every stage carries its contract in the prompt itself (see verdict.ts):
   // the verdict contract for check stages, the scope fence for work stages.
-  const full = def.kind === "check" ? `${rendered}\n\n${verdictContractBlock(def.name)}` : `${rendered}\n\n${workScopeBlock(def.name)}`
+  const full =
+    def.kind === "check"
+      ? `${rendered}\n\n${verdictContractBlock(def.name, def.requiredAxes)}`
+      : `${rendered}\n\n${workScopeBlock(def.name)}`
 
   const hookRef = manifest.hooks.compose?.[def.name]
   const response: PreviewResponse = {

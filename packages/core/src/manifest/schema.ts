@@ -61,6 +61,14 @@ export const StageDefSchema = z.object({
    * `loops.<kind>.stageModels.<name>` wins over this.
    */
   model: z.string().min(1).optional(),
+  /**
+   * Axes a `check` stage's verdict must cover, or none. When set, `loop_verdict`
+   * rejects a call whose `axes` array misses any of them, and the stage prompt
+   * carries the payload contract — so a multi-axis review can't silently skip an
+   * axis. Declared per stage rather than baked into the tool because one
+   * `loop_verdict` serves every check stage of every kind.
+   */
+  requiredAxes: z.array(z.string().min(1)).optional(),
   /** Bash-command globs this stage may run (enforced by the Claude Code stage guard). */
   bashAllowlist: z.array(z.string().min(1)).default([]),
   /** Extra bash globs merged into `bashAllowlist` for the resolved code platform (config `codePlatform`). */
@@ -248,6 +256,10 @@ export const LoopManifestSchema = z
       }
       if (stage.kind === "check" && (!t.onPass || !t.onFail || !t.onError)) {
         ctx.addIssue({ code: "custom", message: `check stage "${stage.name}" needs onPass, onFail, and onError` })
+      }
+      if (stage.kind === "work" && stage.requiredAxes?.length) {
+        // Only a verdict can carry axes, and only check stages record one.
+        ctx.addIssue({ code: "custom", message: `work stage "${stage.name}" cannot set requiredAxes (no verdict to carry them)` })
       }
       for (const effect of [t.onDone, t.onPass, t.onFail, t.onError]) {
         if (effect?.kind === "fire" && !names.has(effect.stage)) {
