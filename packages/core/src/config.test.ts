@@ -14,6 +14,7 @@ import {
   mergeConfigLayers,
   modelFor,
   unknownStageModelKeys,
+  unreviewedAxes,
   parseConfig,
   platformFor,
   trackerUrl,
@@ -144,6 +145,38 @@ test("modelFor: config stageModels wins over the manifest stage's model, which w
 test("loops.<kind>.stageModels validates fail-fast, unlike positional knobs", () => {
   assert.throws(() => parseConfig({ loops: { engineering: { stageModels: { build: 42 } } } }), /stageModels/)
   assert.throws(() => parseConfig({ loops: { engineering: { stageModels: { build: "" } } } }), /stageModels/)
+})
+
+const reviewStage = (requiredAxes?: string[]) =>
+  ({
+    name: "review",
+    kind: "check",
+    command: "review",
+    agent: "loop-review",
+    prompt: "stages/review.md",
+    isolation: "worktree",
+    bashAllowlist: [],
+    platformAllowlist: {},
+    ...(requiredAxes ? { requiredAxes } : {}),
+  }) as Parameters<typeof unreviewedAxes>[1]
+
+test("unreviewedAxes is empty when lenses are off — enforcement is live, nothing is downgraded", () => {
+  assert.deepEqual(unreviewedAxes(DEFAULT_CONFIG, reviewStage(["correctness", "security"])), [])
+})
+
+test("unreviewedAxes names the required axes no configured lens covers", () => {
+  const c = { ...DEFAULT_CONFIG, reviewLenses: ["correctness", "test-adequacy"] }
+  assert.deepEqual(unreviewedAxes(c, reviewStage(["correctness", "security", "performance"])), ["security", "performance"])
+})
+
+test("unreviewedAxes is empty when the lens list already names every required axis", () => {
+  const c = { ...DEFAULT_CONFIG, reviewLenses: ["Correctness", " security "] }
+  assert.deepEqual(unreviewedAxes(c, reviewStage(["correctness", "security"])), [])
+})
+
+test("unreviewedAxes is empty for a stage that requires no axes (verify, the sitters)", () => {
+  const c = { ...DEFAULT_CONFIG, reviewLenses: ["correctness"] }
+  assert.deepEqual(unreviewedAxes(c, reviewStage()), [])
 })
 
 test("unknownStageModelKeys names stageModels entries that match no stage of the kind", () => {

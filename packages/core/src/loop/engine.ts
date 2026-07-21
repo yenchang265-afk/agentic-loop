@@ -85,7 +85,9 @@ export const composePrompt = (loaded: LoadedManifest, state: LoopState, target: 
   // mis-bound subagent or a stripped tool allowlist (see verdict.ts): check
   // stages the mandatory verdict contract, work stages the scope fence that
   // keeps them from running later stages inside their own turn.
-  return def.kind === "check" ? `${rendered}\n\n${verdictContractBlock(def.name)}` : `${rendered}\n\n${workScopeBlock(def.name)}`
+  return def.kind === "check"
+    ? `${rendered}\n\n${verdictContractBlock(def.name, def.requiredAxes)}`
+    : `${rendered}\n\n${workScopeBlock(def.name)}`
 }
 
 const fireAt = (loaded: LoadedManifest, state: LoopState, target: string): { state: LoopState; action: Action } => {

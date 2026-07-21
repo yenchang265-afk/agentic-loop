@@ -149,6 +149,7 @@
       "agent": "loop-review",
       "prompt": "stages/review.md",
       "isolation": "worktree",
+      "requiredAxes": ["correctness", "readability", "architecture", "security", "performance"],
       "bashAllowlist": [
         "git status*",
         "git diff*",

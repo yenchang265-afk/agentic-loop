@@ -102,6 +102,37 @@ test("a stage's optional model round-trips, defaults to undefined, and rejects a
   assert.throws(() => parseManifest({ ...base, stages: [{ ...base.stages[0], model: "" }, base.stages[1]] }), /model/)
 })
 
+test("a check stage's requiredAxes round-trips and defaults to undefined", () => {
+  const axes = ["correctness", "security"]
+  const raw = {
+    ...base,
+    stages: [base.stages[0], { ...base.stages[1], requiredAxes: axes }],
+  }
+  assert.deepEqual(parseManifest(raw).stages[1]?.requiredAxes, axes)
+  assert.equal(parseManifest(base).stages[1]?.requiredAxes, undefined)
+})
+
+test("rejects requiredAxes on a work stage — only a verdict can carry axes", () => {
+  const raw = {
+    ...base,
+    stages: [{ ...base.stages[0], requiredAxes: ["correctness"] }, base.stages[1]],
+  }
+  assert.throws(() => parseManifest(raw), /work stage "work" cannot set requiredAxes/)
+})
+
+test("the shipped engineering manifest requires all five review axes and none on verify", () => {
+  const loopsDir = path.join(import.meta.dirname, "..", "..", "loops")
+  const m = parseManifest(JSON.parse(fs.readFileSync(path.join(loopsDir, "engineering", "loop.json"), "utf8")))
+  assert.deepEqual(m.stages.find((s) => s.name === "review")?.requiredAxes, [
+    "correctness",
+    "readability",
+    "architecture",
+    "security",
+    "performance",
+  ])
+  assert.equal(m.stages.find((s) => s.name === "verify")?.requiredAxes, undefined)
+})
+
 test("rejects duplicate stage names", () => {
   assert.throws(() => parseManifest({ ...base, stages: [...base.stages, base.stages[0]] }), /duplicate stage names/)
 })

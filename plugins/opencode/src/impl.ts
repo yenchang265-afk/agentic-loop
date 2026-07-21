@@ -380,23 +380,56 @@ export const makeAgenticLoop: Plugin = async ({ client, directory, $ }) => {
             )
             .optional()
             .describe("Per-acceptance-criterion results, mirroring the criteria threaded into your stage prompt."),
+          axes: tool.schema
+            .array(
+              tool.schema.object({
+                axis: tool.schema.string().describe("The review axis this result covers (e.g. correctness, security)."),
+                verdict: tool.schema
+                  .enum(["PASS", "FAIL", "ERROR"])
+                  .describe(
+                    "This axis's own verdict. ERROR only when the axis genuinely could not be assessed; " +
+                      "an axis with no findings is a clean PASS.",
+                  ),
+                findings: tool.schema
+                  .array(
+                    tool.schema.object({
+                      severity: tool.schema
+                        .enum(["critical", "important", "suggestion"])
+                        .describe("critical/important block the stage; suggestion never does."),
+                      detail: tool.schema.string().describe("What is wrong and what should change."),
+                      location: tool.schema.string().optional().describe('"file:line" this finding is anchored to.'),
+                    }),
+                  )
+                  .optional(),
+              }),
+            )
+            .optional()
+            .describe(
+              "Per-axis results. REQUIRED on a stage whose prompt lists required axes (engineering review: all five) — " +
+                "a call missing an axis is REJECTED, and partial submissions are not accumulated across calls.",
+            ),
         },
         execute: async (args, ctx) => {
           // Check stages run as subtasks: the call carries the CHILD session's
           // id, so resolve the driving session up the parent chain first — a
           // verdict recorded under the child id would be invisible to the drive.
           const drivingID = await driver.resolveDrivingSession(client, ctx.sessionID)
-          return driver.recordVerdict(
+          const result = driver.recordVerdict(
             drivingID,
             args.stage,
             {
               verdict: args.verdict,
               ...(args.reason !== undefined ? { reason: args.reason } : {}),
               ...(args.criteria !== undefined ? { criteria: args.criteria } : {}),
+              ...(args.axes !== undefined ? { axes: args.axes } : {}),
             },
             // deps only so an out-of-stage verdict can be audited on the task file
             deps,
           )
+          // Throw, don't return: a plain string result reads as success to the
+          // model, and a rejected verdict must visibly fail so it calls again.
+          if (!result.accepted) throw new Error(result.message)
+          return result.message
         },
       }),
     },

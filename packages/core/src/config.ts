@@ -233,6 +233,26 @@ export const unknownStageModelKeys = (config: Config, kind: string, stageNames: 
   Object.keys(config.loops[kind]?.stageModels ?? {}).filter((name) => !stageNames.includes(name))
 
 /**
+ * The stage's `requiredAxes` that no configured review lens names — the axes
+ * that go unreviewed once `reviewLenses` is on.
+ *
+ * Lens mode suppresses per-pass axis-coverage enforcement (a lens is told to
+ * focus exclusively on its own lens, so demanding every axis from it would
+ * reject every pass), which means turning lenses on silently downgrades the
+ * review's guarantees. Like `unknownStageModelKeys`, this can't be checked at
+ * parse time — the manifest isn't loaded yet — so hosts surface it as a warning
+ * once the kind's stages are known, turning a silent downgrade into a message.
+ * Empty when lenses are off, when the stage requires no axes, or when the lens
+ * list already names every required axis. Pure.
+ */
+export const unreviewedAxes = (config: Config, def: StageDef): string[] => {
+  const lenses = config.reviewLenses
+  if (!lenses.length || !def.requiredAxes?.length) return []
+  const named = new Set(lenses.map((l) => l.trim().toLowerCase()))
+  return def.requiredAxes.filter((axis) => !named.has(axis.trim().toLowerCase()))
+}
+
+/**
  * A model string without its provider prefix ("anthropic/claude-sonnet-4-5" →
  * "claude-sonnet-4-5") — for hosts that take bare model ids (Claude Code's
  * Task tool), so a config written OpenCode-style works on both hosts. Pure.
