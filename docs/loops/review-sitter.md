@@ -39,7 +39,7 @@ The default query (`is:open review-requested:@me`) is overridable via `loops.rev
 ## Architecture
 
 Sits on **other people's** PRs where your review is requested — never your
-own. Work source `github-pr` with `role: reviewer`, query
+own. Work source `pull-request` with `role: reviewer`, query
 `is:open review-requested:@me` (overridable with `loops.review-sitter.query`,
 GitHub only); on ADO it claims active PRs where `ado.selfLogin` is a reviewer
 with a pending vote (vote 0). **fetch** (read-only) → **assess** (worktree;

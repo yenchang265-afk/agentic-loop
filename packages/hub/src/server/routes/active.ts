@@ -94,7 +94,7 @@ const readLease = async (deps: HubDeps, now: Date): Promise<LeaseView | null> =>
 // each source type (not just the literal pr-sitter/dep-sitter/main-sitter), stamped with
 // its kind so the monitor can show each kind ONLY its own dedup state (C4/C8).
 const readPrLedgers = async (deps: HubDeps): Promise<PrLedgerView[]> => {
-  const ledgers = await scanLedgers<PrLedgerView>(deps, "github-pr", "pr-", (content, kind) => {
+  const ledgers = await scanLedgers<PrLedgerView>(deps, "pull-request", "pr-", (content, kind) => {
     const parsed = LedgerSchema.safeParse(JSON.parse(content))
     if (!parsed.success) return null
     const l = parsed.data

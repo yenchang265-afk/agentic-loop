@@ -18,7 +18,7 @@ Every entry is written against the real manifest contract
 zod schema in `packages/core/src/manifest/schema.ts`) so any of them can be
 promoted to an implementation plan without re-translation:
 
-- **Work source** — whether the kind reuses `backlog` / `github-pr` or needs
+- **Work source** — whether the kind reuses `backlog` / `pull-request` or needs
   a new `WorkSource` under `packages/core/src/source/`. New sources dominate
   the implementation cost.
 - **Stage graph** — stages with their `kind` (`work` completes on its own,
@@ -54,7 +54,7 @@ Authority levels used below, in increasing order of blast radius:
 |------|----------|-------------|-----------|------|
 | [debt-groomer](#debt-groomer) | Code health | `backlog` (reused) | backlog-write | S |
 | [backlog-groomer](#backlog-groomer) | Collaboration | `backlog` (reused) | backlog-write | S |
-| [review-sitter](#review-sitter) **(shipped)** | Collaboration | `github-pr` (+ `review-requested` trigger) | comment | S/M |
+| [review-sitter](#review-sitter) **(shipped)** | Collaboration | `pull-request` (+ `review-requested` trigger) | comment | S/M |
 | [coverage-filler](#coverage-filler) | Code health | `backlog` (reused, own pool) | push | S/M |
 | [issue-triager](#issue-triager) | Collaboration | new `github-issue` | backlog-write, comment | M |
 | [dep-sitter](#dep-sitter) **(shipped)** | Code health | new `dependency-scan` | push, external-read | M |
@@ -164,7 +164,7 @@ Sits on incoming issues/work items: reproduces, dedupes, labels, and converts
 accepted ones into backlog task files parked at the task gate — the bridge
 from "someone filed a bug" to "the engineering loop can claim it."
 
-- **Work source**: new `github-issue` — mirrors `github-pr`: a `query`
+- **Work source**: new `github-issue` — mirrors `pull-request`: a `query`
   (e.g. `is:open is:issue no:label`), triggers (`new-issue`,
   `new-comments`), a per-issue dedup ledger under
   `<tasksDir>/runs/issue-triager/`. ADO flavor polls work items via the
@@ -210,7 +210,7 @@ from "someone filed a bug" to "the engineering loop can claim it."
 > re-fire (dedup rides the head SHA); fork and draft PRs stay skipped
 > (threat model T10/T11).
 
-Original sketch: the mirror of pr-sitter, `github-pr` reused with a
+Original sketch: the mirror of pr-sitter, `pull-request` reused with a
 `review-requested` query/trigger, `fetch → review → publish` (comment-only
 authority, no iteration budget). **Cost**: S/M.
 

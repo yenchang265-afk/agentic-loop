@@ -104,7 +104,7 @@ export const buildWorkSources = (
         log: deps.log,
         loaded,
       }
-      if (loaded.manifest.workSource.type === "github-pr") {
+      if (loaded.manifest.workSource.type === "pull-request") {
         if (platformFor(config, kind) === "ado") {
           // Config parse fails fast when platform "ado" lacks the ado section.
           return [makeAdoPrSource({ ...base, ado: config.ado! })]

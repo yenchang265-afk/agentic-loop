@@ -135,7 +135,7 @@ tracker、審查視角和疊代上限），並寫出一份有效的 `.agentic-lo
 
 | 適用於工作來源是……的類型 | 旋鈕 | 讀取為 |
 |---|---|---|
-| `github-pr` | `query` | string |
+| `pull-request` | `query` | string |
 | `dependency-scan` | `severityFloor` | string |
 | `dependency-scan` | `includeOutdated` | boolean |
 | `dependency-scan` | `ecosystem` | string |
@@ -266,7 +266,7 @@ sitter 類型實際做了什麼記在
 [`docs/sitters.md`](sitters.md)。
 
 PR sitter 和 review sitter 綁定到一個代管 PR 形狀的工作來源
-（它們清單中的 `workSource.type: "github-pr"`）；這個來源實際上
+（它們清單中的 `workSource.type: "pull-request"`）；這個來源實際上
 會對哪個平台說話，是在接線時從設定中解析出來的——清單本身從不會
 被分岔（fork）。清單的 `role` 決定 ADO 身分過濾器：`author` 類型
 （pr-sitter）認領由 `ado.selfLogin` 建立的 PR，`reviewer` 類型

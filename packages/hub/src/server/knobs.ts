@@ -42,7 +42,7 @@ const UNIVERSAL: Readonly<Record<string, KnobDef>> = {
 /** Knobs orchestrate.ts reads per work-source type. Mirrors `buildWorkSources`. */
 export const BY_SOURCE: Readonly<Record<KindBoardInfo["sourceType"], Readonly<Record<string, KnobDef>>>> = {
   backlog: {},
-  "github-pr": { query: { type: "string", site: "orchestrate.ts:112" } },
+  "pull-request": { query: { type: "string", site: "orchestrate.ts:112" } },
   "dependency-scan": {
     severityFloor: { type: "string", site: "orchestrate.ts:124" },
     includeOutdated: { type: "boolean", site: "orchestrate.ts:125" },

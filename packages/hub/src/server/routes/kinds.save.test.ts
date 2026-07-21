@@ -13,7 +13,7 @@ const MANIFEST = {
   kind: "triage-bot",
   version: 1,
   description: "test kind",
-  workSource: { type: "github-pr", query: "is:open", triggers: ["failing-checks"] },
+  workSource: { type: "pull-request", query: "is:open", triggers: ["failing-checks"] },
   stages: [
     { name: "scan", kind: "work", command: "scan", agent: "loop-scan", prompt: "stages/scan.md" },
     { name: "check", kind: "check", command: "check", agent: "loop-check", prompt: "stages/check.md" },

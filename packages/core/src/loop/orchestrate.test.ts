@@ -1,4 +1,7 @@
 import assert from "node:assert/strict"
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
 import { test } from "node:test"
 import { DEFAULT_CONFIG, parseConfigWith, ConfigSchema } from "../config.js"
 import { defaultLoopsDir } from "../manifest/dir.js"
@@ -86,7 +89,7 @@ test("a kind filter restricts the sources to that kind", () => {
   assert.equal(buildWorkSources(deps, DEFAULT_CONFIG, manifestFor, "engineering").length, 1)
 })
 
-test("buildWorkSources wires review-sitter as a second github-pr source alongside pr-sitter", () => {
+test("buildWorkSources wires review-sitter as a second pull-request source alongside pr-sitter", () => {
   const config = parseConfigWith(ConfigSchema, {
     loops: { "pr-sitter": { enabled: true }, "review-sitter": { enabled: true } },
   })
@@ -100,6 +103,29 @@ test("buildWorkSources wires review-sitter as a second github-pr source alongsid
   )
   // The claim/watch kind filter reaches the reviewer kind on its own too.
   assert.equal(buildWorkSources(deps, config, manifestFor, "review-sitter")[0]?.loopKind, "review-sitter")
+})
+
+test('a manifest using the legacy "github-pr" type still wires on both platforms', () => {
+  const loops = fs.mkdtempSync(path.join(os.tmpdir(), "loops-"))
+  for (const kind of ["engineering", "pr-sitter"]) {
+    fs.cpSync(path.join(defaultLoopsDir(), kind), path.join(loops, kind), { recursive: true })
+  }
+  const manifestPath = path.join(loops, "pr-sitter", "loop.json")
+  const legacy = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as { workSource: { type: string } }
+  legacy.workSource.type = "github-pr"
+  fs.writeFileSync(manifestPath, JSON.stringify(legacy))
+
+  const manifestFor = makeManifestCache(loops)
+  const deps = { $: noopShell, client: noopClient, directory: "/repo", log: () => {}, isDriving: () => false }
+  const github = parseConfigWith(ConfigSchema, { loops: { "pr-sitter": { enabled: true } } })
+  assert.equal(buildWorkSources(deps, github, manifestFor, "pr-sitter").length, 1)
+
+  const ado = parseConfigWith(ConfigSchema, {
+    codePlatform: "ado",
+    ado: { organization: "https://dev.azure.com/acme", project: "widgets", selfLogin: "sitter@acme.com" },
+    loops: { "pr-sitter": { enabled: true } },
+  })
+  assert.equal(buildWorkSources(deps, ado, manifestFor, "pr-sitter").length, 1)
 })
 
 test("buildWorkSources wires dep-sitter and main-sitter on both github and ado — no more skip-with-warning", () => {

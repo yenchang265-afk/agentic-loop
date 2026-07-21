@@ -359,7 +359,7 @@ gitignore 的檔案。
 
 | `workSource.type` | 旋鈕 | 檢查方式 | 位置 |
 |---|---|---|---|
-| `github-pr` | `query` | string | `orchestrate.ts:112` |
+| `pull-request` | `query` | string | `orchestrate.ts:112` |
 | `dependency-scan` | `severityFloor` | string | `:124` |
 | `dependency-scan` | `includeOutdated` | boolean | `:125` |
 | `dependency-scan` | `ecosystem` | string | `:126` |
@@ -395,7 +395,7 @@ gitignore 的檔案。
 - **錯誤的型別**——`severityFloor: 7` → *「read only when a string
   (`orchestrate.ts:124`); ignored.」*
 - **錯誤的來源**——在一個 backlog 類型上出現 `query` → *「only applies to
-  `github-pr` kinds; ignored.」*
+  `pull-request` kinds; ignored.」*
 - **未知的類型**——有一個 `loops.<kind>`，卻沒有對應的 `loops/<kind>/`
   清單。
 

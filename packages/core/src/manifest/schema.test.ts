@@ -215,22 +215,22 @@ test("humanGates must name a declared status", () => {
   )
 })
 
-test("github-pr source accepts the review-requested trigger and a reviewer role; role defaults to author", () => {
+test("pull-request source accepts the review-requested trigger and a reviewer role; role defaults to author", () => {
   const pr = {
     ...base,
-    workSource: { type: "github-pr", query: "is:open review-requested:@me", triggers: ["review-requested"], role: "reviewer" },
+    workSource: { type: "pull-request", query: "is:open review-requested:@me", triggers: ["review-requested"], role: "reviewer" },
   }
   const m = parseManifest(pr)
-  assert.equal(m.workSource.type === "github-pr" && m.workSource.role, "reviewer")
+  assert.equal(m.workSource.type === "pull-request" && m.workSource.role, "reviewer")
   const defaulted = parseManifest({
     ...base,
-    workSource: { type: "github-pr", query: "is:open author:@me", triggers: ["failing-checks"] },
+    workSource: { type: "pull-request", query: "is:open author:@me", triggers: ["failing-checks"] },
   })
-  assert.equal(defaulted.workSource.type === "github-pr" && defaulted.workSource.role, "author")
+  assert.equal(defaulted.workSource.type === "pull-request" && defaulted.workSource.role, "author")
   assert.throws(() =>
     parseManifest({
       ...base,
-      workSource: { type: "github-pr", query: "q", triggers: ["failing-checks"], role: "owner" },
+      workSource: { type: "pull-request", query: "q", triggers: ["failing-checks"], role: "owner" },
     }),
   )
 })

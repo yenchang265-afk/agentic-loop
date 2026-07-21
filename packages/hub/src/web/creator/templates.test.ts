@@ -16,7 +16,7 @@ test("every template parses, matches its work-source id, and round-trips exactly
 
 test("the four templates cover all work-source types with no duplicates", () => {
   const ids = TEMPLATES.map((t) => t.id)
-  const all: WorkSourceBinding["type"][] = ["backlog", "github-pr", "dependency-scan", "ci-runs"]
+  const all: WorkSourceBinding["type"][] = ["backlog", "pull-request", "dependency-scan", "ci-runs"]
   assert.deepEqual([...ids].sort(), [...all].sort())
 })
 

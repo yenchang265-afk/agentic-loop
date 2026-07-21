@@ -326,12 +326,12 @@ export const MetaForm = ({ meta, onChange }: { meta: GraphMeta; onChange: (next:
                     ? { type: "dependency-scan", autoFix: ["patch", "minor"], severityFloor: "high", includeOutdated: false, ecosystem: "auto" }
                     : e.target.value === "ci-runs"
                       ? { type: "ci-runs", workflows: [] }
-                      : { type: "github-pr", query: "is:open author:@me", triggers: ["failing-checks"], role: "author" },
+                      : { type: "pull-request", query: "is:open author:@me", triggers: ["failing-checks"], role: "author" },
             })
           }
         >
           <option value="backlog">backlog — docs/tasks folders</option>
-          <option value="github-pr">github-pr — open pull requests</option>
+          <option value="pull-request">pull-request — open PRs (GitHub or Azure DevOps)</option>
           <option value="dependency-scan">dependency-scan — npm audit / OSV-Scanner</option>
           <option value="ci-runs">ci-runs — the watched branch's CI</option>
         </select>
@@ -374,7 +374,7 @@ export const MetaForm = ({ meta, onChange }: { meta: GraphMeta; onChange: (next:
           </Field>
         </>
       )}
-      {ws.type === "github-pr" && (
+      {ws.type === "pull-request" && (
         <>
           <Field label="query (gh pr list --search)">
             <input value={ws.query} onChange={(e) => onChange({ ...meta, workSource: { ...ws, query: e.target.value } })} />

@@ -134,7 +134,7 @@ default and says nothing:
 
 | Applies to kinds whose work source is | Knob | Read as |
 |---|---|---|
-| `github-pr` | `query` | string |
+| `pull-request` | `query` | string |
 | `dependency-scan` | `severityFloor` | string |
 | `dependency-scan` | `includeOutdated` | boolean |
 | `dependency-scan` | `ecosystem` | string |
@@ -295,9 +295,11 @@ what each sitter kind actually does is in
 [`docs/sitters.md`](sitters.md).
 
 The PR sitter and review sitter bind to a hosted-PR work source
-(`workSource.type: "github-pr"` in their manifests); which platform that
-source actually talks to is resolved from config at wiring time — the
-manifest is never forked. The manifest's `role` picks the ADO identity
+(`workSource.type: "pull-request"` in their manifests — the type names the kind
+of work item, not the forge); which platform that source actually talks to is
+resolved from config at wiring time — the manifest is never forked. (The type
+was spelled `github-pr` before it grew ADO support; manifests using the old name
+still load.) The manifest's `role` picks the ADO identity
 filter: `author` kinds (pr-sitter) claim PRs created by `ado.selfLogin`,
 `reviewer` kinds (review-sitter) claim other people's PRs where that login's
 reviewer vote is still pending.

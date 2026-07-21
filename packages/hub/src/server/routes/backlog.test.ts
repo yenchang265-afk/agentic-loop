@@ -177,12 +177,12 @@ test("getBacklog serves a non-engineering backlog kind from its manifest shape, 
   fs.rmSync(dir, { recursive: true, force: true })
 })
 
-test("getBacklog 404s on an unknown kind and 400s on a boardless (github-pr) kind", async () => {
+test("getBacklog 404s on an unknown kind and 400s on a boardless (pull-request) kind", async () => {
   const dir = makeFixture()
   const pr: KindBoardInfo = {
     kind: "pr-sitter",
     description: "pr sitter",
-    sourceType: "github-pr",
+    sourceType: "pull-request",
     statuses: [],
     gateStatuses: [],
     pools: [],

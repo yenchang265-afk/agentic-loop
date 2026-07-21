@@ -13,13 +13,38 @@ import { parseManifest, type LoadedManifest, type LoopManifest } from "./schema.
  * path so a broken loop kind fails loud instead of driving garbage.
  */
 
+/**
+ * Work-source type names that were renamed after release, mapped old → new.
+ * User-authored manifests in the wild still carry the old spelling, so it stays
+ * a supported alias rather than a schema error — silently, not with a warning,
+ * because the hub's Config tab round-trips manifests through this loader.
+ */
+const LEGACY_SOURCE_TYPES: Readonly<Record<string, string>> = { "github-pr": "pull-request" }
+
+/**
+ * Rewrite legacy `workSource.type` spellings to their current names, before the
+ * schema sees them. Input is unvalidated JSON, so every shape assumption is
+ * checked — anything that isn't the exact shape we rewrite is passed through
+ * untouched for zod to reject with its own message.
+ */
+export const normalizeManifestJson = (raw: unknown): unknown => {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return raw
+  const { workSource } = raw as { workSource?: unknown }
+  if (typeof workSource !== "object" || workSource === null || Array.isArray(workSource)) return raw
+  const { type } = workSource as { type?: unknown }
+  if (typeof type !== "string") return raw
+  const renamed = LEGACY_SOURCE_TYPES[type]
+  if (!renamed) return raw
+  return { ...raw, workSource: { ...workSource, type: renamed } }
+}
+
 /** Load one loop kind's manifest + stage prompts. Throws on missing/invalid files. */
 export const loadManifest = (loopsDir: string, kind: string): LoadedManifest => {
   const dir = path.join(loopsDir, kind)
   const manifestPath = path.join(dir, "loop.json")
   let manifest: LoopManifest
   try {
-    manifest = parseManifest(JSON.parse(fs.readFileSync(manifestPath, "utf8")))
+    manifest = parseManifest(normalizeManifestJson(JSON.parse(fs.readFileSync(manifestPath, "utf8"))))
   } catch (err) {
     throw new Error(`could not load loop manifest ${manifestPath}: ${(err as Error).message}`)
   }

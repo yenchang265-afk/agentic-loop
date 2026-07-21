@@ -105,7 +105,7 @@ export const prWorkItem = (
   access?: AdoAccessMethod,
 ): WorkItem => {
   const binding = loaded.manifest.workSource
-  const role = binding.type === "github-pr" ? binding.role : "author"
+  const role = binding.type === "pull-request" ? binding.role : "author"
   // The goal follows the kind's role on the PR: an author-role kind (pr-sitter)
   // fixes its own PR; a reviewer-role kind (review-sitter) reads someone
   // else's and only ever comments.

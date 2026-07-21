@@ -71,8 +71,8 @@ interface GithubPrDeps {
 export const makeGithubPrSource = (deps: GithubPrDeps): WorkSource => {
   const { $, client, directory, tasksDir, log, loaded } = deps
   const binding = loaded.manifest.workSource
-  if (binding.type !== "github-pr") {
-    throw new Error(`loop kind "${loaded.manifest.kind}" does not use a github-pr work source`)
+  if (binding.type !== "pull-request") {
+    throw new Error(`loop kind "${loaded.manifest.kind}" does not use a pull-request work source`)
   }
   const kind = loaded.manifest.kind
   const query = deps.query ?? binding.query

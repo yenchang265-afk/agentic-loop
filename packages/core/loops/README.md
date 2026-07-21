@@ -41,7 +41,7 @@ fails loud at host startup). A minimal two-stage kind:
   "version": 1,
   "description": "What this loop sits on and does.",
   "workSource": {                       // where claimable work comes from
-    "type": "backlog",                  // or "github-pr" | "dependency-scan" | "ci-runs"
+    "type": "backlog",                  // or "pull-request" | "dependency-scan" | "ci-runs"
     "statuses": ["queued", "done"],     // the folder set (backlog only)
     "pools": [                          // claim pools, priority order
       { "status": "queued", "entryStage": "work" }
@@ -129,7 +129,11 @@ examples; a stamp-less legacy state renders the `rest` branch).
   `tasksDir` (engineering). Pools are walked in priority order; claims are
   atomic `.claims/` mkdir markers; `claimPredicate` names a registered
   predicate (e.g. `engineering.isClaimable`).
-- **`github-pr`** — open hosted PRs needing attention per the `triggers` list
+- **`pull-request`** — open hosted PRs needing attention per the `triggers` list.
+  Works on **GitHub or Azure DevOps**; the binding names the kind of work item,
+  not the forge, and `codePlatform` picks which client backs it. (This type was
+  spelled `github-pr` before it grew ADO support; manifests using the old name
+  still load — it is normalized on read.) Triggers are
   (`failing-checks`, `changes-requested`, `new-comments`, `merge-conflict`,
   `review-requested`), deduped by the per-PR ledger under
   `<tasksDir>/runs/<kind>/` (namespaced per kind, so pr-sitter and
@@ -232,7 +236,7 @@ polls enabled kinds in claim-priority order — engineering's backlog first.
 3. OpenCode **commands** for each stage `command` that doesn't already exist
    (`plugins/opencode/commands/<command>.md`, thin `agent:`-frontmatter
    wrappers).
-4. A **work source** if neither `backlog` nor `github-pr` fits
+4. A **work source** if neither `backlog` nor `pull-request` fits
    (`packages/core/src/source/`, implement `WorkSource`), wired into both
    hosts' `sourcesFor`.
 5. Registry hooks, registered at host startup.
