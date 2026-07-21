@@ -317,7 +317,14 @@ const writeStageMarker = (stage: string | null) => {
           // The backlog guard's PLAN carve-out: only this task's queued/ file
           // may be written directly while PLAN is live.
           taskId: active?.task?.id ?? null,
-          worktree: active?.git?.worktree ?? null,
+          // The worktree THIS stage is pinned to — null for a stage declaring
+          // `isolation: "none"` (engineering plan), which runs in the main tree.
+          worktree: def.isolation === "none" ? null : (active?.git?.worktree ?? null),
+          // The worktree the LOOP owns, regardless of this stage's isolation.
+          // An unisolated stage still must not write code into the human's
+          // checkout — without this the guard saw no worktree at all and waved
+          // every PLAN-stage write through onto the current branch.
+          loopWorktree: active?.git?.worktree ?? null,
           deadline: stageDeadline,
           // 1-indexed to match the "BUILD started (iteration N)" audit notes.
           iteration: active ? active.iteration + 1 : null,

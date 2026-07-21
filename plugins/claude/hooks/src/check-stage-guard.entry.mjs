@@ -44,7 +44,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import { classifyMutation } from "@agentic-loop/core/task/guard"
-import { classifyWorktreeBash, isUnderTasksDir } from "@agentic-loop/core/loop/worktree-guard"
+import { pinBash, pinEditPath } from "@agentic-loop/core/loop/worktree-guard"
 import { VERIFY_ALLOW, REVIEW_ALLOW, commandAllowed, chainedAdoWriteBackstopViolation, chainedAdoAzWriteViolation, chainedGithubPrMutation, chainedGitPushViolation, isAdoMcpMutationTool } from "./allowlist.mjs"
 
 const read = () =>
@@ -59,9 +59,33 @@ const block = (reason) => {
   process.exit(2)
 }
 
+/**
+ * Let the call proceed with CORRECTED input. `updatedInput` replaces
+ * `tool_input` before the tool executes, so the worktree pin can fix a missing
+ * `cd <wt> && ` prefix or a main-tree file path instead of refusing and making
+ * the agent guess again — the retry loop was the isolation's worst failure mode.
+ *
+ * Deliberately NO `permissionDecision`: this hook's job is to correct the input,
+ * not to grant permission. Emitting `"allow"` would auto-approve every rewritten
+ * command, so a command the user would normally be prompted about would run
+ * unprompted purely because the pin touched it — strictly more privilege than
+ * the block-only guard it replaces. Omitting the field leaves the normal
+ * permission flow to rule on the corrected input.
+ */
+const rewriteInput = (updatedInput) => {
+  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", updatedInput } }) + "\n")
+  process.exit(0)
+}
+
 // Check-stage allowlist matching (built-in fallback lists + the segment-splitting
 // `commandAllowed`) lives in ./allowlist.mjs so it is unit-testable and the
 // chain-split rule has a single home.
+
+// Every built-in file-writing tool, in one place so the pin and the stage
+// deadline agree on what counts as a write. `MultiEdit` is deliberately absent:
+// no such tool exists, so matching it only obscured that `NotebookEdit` is the
+// third real one.
+const WRITE_TOOLS = ["Edit", "Write", "NotebookEdit"]
 
 // tasksDir defaults to docs/tasks; honor .agentic-loop.json if present.
 const readTasksDir = (cwd) => {
@@ -180,11 +204,49 @@ const main = async () => {
   // (0) stage deadline — a stage past stageTimeoutMinutes is starved of guarded
   // tools so it returns control; loop_advance then stops the loop.
   if (typeof marker.deadline === "number" && Date.now() > marker.deadline) {
-    if (["Bash", "Edit", "Write", "MultiEdit", "NotebookEdit"].includes(tool)) {
+    if (tool === "Bash" || WRITE_TOOLS.includes(tool)) {
       return block(
         `agentic-loop: the ${String(marker.stage).toUpperCase()} stage exceeded its stageTimeoutMinutes deadline — ` +
           `stop working, summarize what you have, and return control so the loop can stop cleanly.`,
       )
+    }
+  }
+
+  // (2b) worktree bash pin — the agent session's real cwd is the MAIN tree (the
+  // engine only conveys the worktree as prompt text), so a command without the
+  // `cd <wt> && ` prefix would silently run outside the isolation. The pin
+  // CORRECTS that by prefixing rather than refusing; only a command that
+  // explicitly leaves the worktree blocks.
+  //
+  // Runs BEFORE the check-stage allowlist so the allowlist sees the command that
+  // will actually execute — the manifest lists the compound `cd * && <runner>`
+  // form, so a bare `npm test` in VERIFY passes only once it has been pinned.
+  const stageWorktree = typeof marker.worktree === "string" && marker.worktree ? marker.worktree : null
+  // The worktree the LOOP owns, regardless of whether THIS stage is isolated
+  // (engineering plan is `isolation: "none"`). Without it every write during an
+  // unisolated stage — bash included — was unguarded and landed on the human's
+  // branch.
+  const loopWorktree = stageWorktree ?? (typeof marker.loopWorktree === "string" && marker.loopWorktree ? marker.loopWorktree : null)
+
+  const rawCommand = String(ti.command ?? "")
+  let effectiveCommand = rawCommand
+  let commandRewritten = false
+  if (tool === "Bash" && loopWorktree) {
+    const pinVerdict = pinBash(rawCommand, loopWorktree)
+    if (pinVerdict.action === "block") return block(pinVerdict.reason)
+    if (pinVerdict.action === "rewrite") {
+      // An unisolated stage has no worktree to correct INTO: prefixing would
+      // move its command into a checkout it is not working in. It only needed
+      // the pin to prove it was harmless, so a rewrite here means "this would
+      // have mutated the main tree" — refuse it, matching the edit path below.
+      if (!stageWorktree) {
+        return block(
+          `agentic-loop: the ${String(marker.stage).toUpperCase()} stage does not build — "${rawCommand}" would mutate the main tree. ` +
+            `Only read-only commands are available here; code changes belong to the BUILD stage, inside ${loopWorktree}.`,
+        )
+      }
+      effectiveCommand = pinVerdict.value
+      commandRewritten = true
     }
   }
 
@@ -196,54 +258,42 @@ const main = async () => {
       ? marker.bashAllowlist
       : null
   if (tool === "Bash" && (markerList || marker.stage === "verify" || marker.stage === "review")) {
-    const cmd = String(ti.command ?? "")
     const list = markerList ?? (marker.stage === "verify" ? VERIFY_ALLOW : REVIEW_ALLOW)
-    if (!commandAllowed(cmd, list)) {
+    if (!commandAllowed(effectiveCommand, list)) {
       return block(
-        `agentic-loop: the ${marker.stage.toUpperCase()} stage is read-only — the command "${cmd}" is not on its allowlist. ` +
-          `Only inspection/test commands are permitted; if a test runner is genuinely needed, record an ERROR verdict naming it. ` +
-          (marker.worktree ? `Test commands must use the \`cd ${marker.worktree} && <runner>\` form.` : ""),
+        `agentic-loop: the ${marker.stage.toUpperCase()} stage is read-only — the command "${rawCommand}" is not on its allowlist. ` +
+          `Only inspection/test commands are permitted; if a test runner is genuinely needed, record an ERROR verdict naming it.`,
       )
     }
   }
+  if (commandRewritten) return rewriteInput({ ...ti, command: effectiveCommand })
 
-  // (2b) worktree bash pin — the agent session's real cwd is the MAIN tree
-  // (the engine only conveys the worktree as prompt text), so a command
-  // without the `cd <wt> && ` prefix would silently run outside the isolation.
-  // Runs after the check-stage allowlist so its teaching message fires first
-  // for verify/review; this catches allowlisted-but-unpinned runners too
-  // (a bare `npm test` in VERIFY).
-  if (tool === "Bash" && marker.worktree) {
-    const pinVerdict = classifyWorktreeBash(String(ti.command ?? ""), marker.worktree)
-    if (!pinVerdict.allow) return block(pinVerdict.reason)
-  }
-
-  // (2) worktree pinning for edit/write tools. Fail CLOSED (same contract as
-  // the OpenCode host): a relative path resolves against the session's cwd —
-  // the MAIN tree — and a path we can't read is unguardable; both are refused.
-  if (marker.worktree && ["Edit", "Write", "MultiEdit", "NotebookEdit"].includes(tool)) {
+  // (2) worktree pinning for file-writing tools. A relative path resolves
+  // against the session's cwd — the MAIN tree — and a main-tree absolute path is
+  // the "agent keeps editing the current branch" symptom; both are mechanical
+  // misses, so both are remapped onto the worktree. A path we cannot read at all
+  // stays fail-closed, and so does one under neither tree.
+  if (loopWorktree && WRITE_TOOLS.includes(tool)) {
     const fp = ti.file_path ?? ti.path ?? ti.notebook_path
     if (typeof fp !== "string") {
       return block(
-        `agentic-loop: this loop is isolated to its worktree ${marker.worktree}, but ${tool}'s target path could not be determined — pass an absolute path under the worktree.`,
+        `agentic-loop: this loop is isolated to its worktree ${loopWorktree}, but ${tool}'s target path could not be determined — pass an absolute path under the worktree.`,
       )
     }
-    if (!path.isAbsolute(fp)) {
-      return block(
-        `agentic-loop: this loop is isolated to its worktree ${marker.worktree} — "${fp}" is a relative path that resolves against the main tree. Use an absolute path under the worktree.`,
-      )
-    }
-    const rel = path.relative(marker.worktree, path.resolve(fp))
-    if (rel === "" || rel.startsWith("..")) {
-      return block(`agentic-loop: this loop is isolated to its worktree ${marker.worktree} — editing ${fp} is outside it. Use a path under the worktree.`)
-    }
-    // The worktree carries a checkout-time frozen copy of the backlog; an edit
-    // there rides the feature branch and resurrects the task file in the wrong
-    // status folder on merge.
-    if (isUnderTasksDir(fp, marker.worktree, tasksDir)) {
-      return block(
-        `agentic-loop: task files are driver-owned and live on the main tree — the loop records notes and moves itself; do not edit the worktree's frozen ${tasksDir} copy.`,
-      )
+    const verdict = pinEditPath(fp, loopWorktree, cwd, tasksDir)
+    if (verdict.action === "block") return block(verdict.reason)
+    if (verdict.action === "rewrite") {
+      // An unisolated stage has no worktree to correct INTO: PLAN does not build,
+      // so a code write is a mistake to refuse, not a path to relocate onto the
+      // build branch. (Its legitimate backlog write returns `allow` above.)
+      if (!stageWorktree) {
+        return block(
+          `agentic-loop: the ${String(marker.stage).toUpperCase()} stage does not build — it must not write ${fp}. ` +
+            `Code changes belong to the BUILD stage, inside the loop's worktree ${loopWorktree}.`,
+        )
+      }
+      const key = ti.file_path !== undefined ? "file_path" : ti.path !== undefined ? "path" : "notebook_path"
+      return rewriteInput({ ...ti, [key]: verdict.value })
     }
   }
 

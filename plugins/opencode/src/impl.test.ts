@@ -45,18 +45,35 @@ test("worktree pinning fires for a stage subagent's child session (the dead-guar
   setLoop("drv", worktreeLoop())
   try {
     const hooks = await makeHooks({ child: "drv" })
-    // Outside the worktree → refused, even though the call carries the CHILD id.
+    // A main-tree path is REMAPPED onto the worktree mirror, even though the
+    // call carries the CHILD id. Refusing it made the agent retry the same edit
+    // on the current branch; correcting it lands the work where it belongs.
+    const mainTree = { args: { filePath: "/repo/src/x.ts" } }
+    await hooks["tool.execute.before"]({ sessionID: "child", tool: "write", callID: "c1" }, mainTree)
+    assert.equal(mainTree.args.filePath, "/repo/.worktrees/t/src/x.ts")
+    // A relative path resolves against the worktree, not the main tree's cwd.
+    const relative = { args: { filePath: "src/x.ts" } }
+    await hooks["tool.execute.before"]({ sessionID: "child", tool: "edit", callID: "c2" }, relative)
+    assert.equal(relative.args.filePath, "/repo/.worktrees/t/src/x.ts")
+    // Already inside the worktree → untouched.
+    const inside = { args: { filePath: "/repo/.worktrees/t/src/x.ts" } }
+    await hooks["tool.execute.before"]({ sessionID: "child", tool: "write", callID: "c3" }, inside)
+    assert.equal(inside.args.filePath, "/repo/.worktrees/t/src/x.ts")
+    // A path under neither tree has no worktree equivalent → still refused.
     await assert.rejects(
-      () => hooks["tool.execute.before"]({ sessionID: "child", tool: "write", callID: "c1" }, { args: { filePath: "/repo/src/x.ts" } }),
-      /outside it/,
+      () => hooks["tool.execute.before"]({ sessionID: "child", tool: "write", callID: "c4" }, { args: { filePath: "/etc/passwd" } }),
+      /outside both it and the repo/,
     )
-    // Relative path → refused (resolves against the main tree's cwd).
+    // The worktree's frozen backlog copy stays off-limits (the always-on backlog
+    // guard reaches it first; the worktree pin is the second line behind it).
     await assert.rejects(
-      () => hooks["tool.execute.before"]({ sessionID: "child", tool: "edit", callID: "c2" }, { args: { filePath: "src/x.ts" } }),
-      /relative path/,
+      () =>
+        hooks["tool.execute.before"](
+          { sessionID: "child", tool: "write", callID: "c5" },
+          { args: { filePath: "/repo/.worktrees/t/docs/tasks/in-progress/t.md" } },
+        ),
+      /docs\/tasks|driver-owned/,
     )
-    // Inside the worktree → allowed.
-    await hooks["tool.execute.before"]({ sessionID: "child", tool: "write", callID: "c3" }, { args: { filePath: "/repo/.worktrees/t/src/x.ts" } })
   } finally {
     clearLoop("drv")
   }
@@ -89,22 +106,31 @@ test("bash is pinned to the worktree while a worktree loop drives (the sometimes
   setLoop("drv", worktreeLoop())
   try {
     const hooks = await makeHooks({ child: "drv" })
-    // Unpinned mutating command → would run in the main tree → refused.
-    await assert.rejects(
-      () => hooks["tool.execute.before"]({ sessionID: "child", tool: "bash", callID: "c1" }, { args: { command: "npm test" } }),
-      /would run in the main tree/,
-    )
-    // cd-pinned chain → allowed.
-    await hooks["tool.execute.before"](
-      { sessionID: "child", tool: "bash", callID: "c2" },
-      { args: { command: "cd /repo/.worktrees/t && npm test" } },
-    )
-    // Read-only inspection stays allowed unpinned.
-    await hooks["tool.execute.before"]({ sessionID: "child", tool: "bash", callID: "c3" }, { args: { command: "git status" } })
-    // Escaping cd → refused.
+    // Unpinned mutating command → would run in the main tree → prefix inserted.
+    const unpinned = { args: { command: "npm test" } }
+    await hooks["tool.execute.before"]({ sessionID: "child", tool: "bash", callID: "c1" }, unpinned)
+    assert.equal(unpinned.args.command, "cd /repo/.worktrees/t && npm test")
+    // Already cd-pinned → untouched.
+    const pinned = { args: { command: "cd /repo/.worktrees/t && npm test" } }
+    await hooks["tool.execute.before"]({ sessionID: "child", tool: "bash", callID: "c2" }, pinned)
+    assert.equal(pinned.args.command, "cd /repo/.worktrees/t && npm test")
+    // Read-only inspection stays allowed unpinned and unchanged.
+    const readOnly = { args: { command: "git status" } }
+    await hooks["tool.execute.before"]({ sessionID: "child", tool: "bash", callID: "c3" }, readOnly)
+    assert.equal(readOnly.args.command, "git status")
+    // Escaping cd → no prefix can fix it → refused.
     await assert.rejects(
       () => hooks["tool.execute.before"]({ sessionID: "child", tool: "bash", callID: "c4" }, { args: { command: "cd /repo/.worktrees/t && cd .. && rm -rf x" } }),
       /leaves it/,
+    )
+    // Writing to an absolute main-tree path from inside a pinned chain → refused.
+    await assert.rejects(
+      () =>
+        hooks["tool.execute.before"](
+          { sessionID: "child", tool: "bash", callID: "c5" },
+          { args: { command: "cd /repo/.worktrees/t && cp dist/a.js /repo/dist/a.js" } },
+        ),
+      /reaches \/repo\/dist\/a\.js/,
     )
   } finally {
     clearLoop("drv")
