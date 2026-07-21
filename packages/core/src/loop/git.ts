@@ -1,3 +1,5 @@
+import fs from "node:fs"
+import path from "node:path"
 import type { Shell } from "../host.js"
 
 /**
@@ -178,6 +180,42 @@ export const listWorktrees = async ($: Shell, cwd: string): Promise<WorktreeEntr
 export const worktreeForBranch = async ($: Shell, cwd: string, branch: string): Promise<string | null> => {
   const found = (await listWorktrees($, cwd)).find((w) => w.branch === branch && !w.prunable)
   return found?.path ?? null
+}
+
+/**
+ * Sparse-checkout `rel` OUT of the worktree at `wtPath`, so the directory never
+ * materializes there at all.
+ *
+ * Used for the backlog: `<tasksDir>/` is tracked, so `git worktree add` checks
+ * out a frozen copy of every task file into the worktree. That copy is inert but
+ * actively misleading — a stage agent reads it as the live backlog and tries to
+ * edit it, when task files are driver-owned and live on the MAIN tree. Removing
+ * it from disk is the honest fix; the edit-time refusal in `worktree-guard` and
+ * the `:(exclude)` checkpoint arg stay as backstops for the fallback path below.
+ *
+ * `--no-cone` because the pattern is a negation, which cone mode cannot express.
+ * Returns false (caller warns and continues) when sparse-checkout is unavailable
+ * or declines — the worktree is then exactly what it is today.
+ *
+ * Two sharp edges this handles:
+ *  - `sparse-checkout set` exits 0 while WARNING "not up to date and were left
+ *    despite sparse patterns" when the excluded path is dirty (an adopted older
+ *    worktree with local edits). Reporting success there would leave the copy on
+ *    disk with nothing logged, so the warning is treated as failure.
+ *  - `sparse-checkout init` sets `extensions.worktreeConfig=true` on the SHARED
+ *    repo config, permanently and for every worktree. That is safe for ordinary
+ *    repos but interacts with `core.worktree`/`core.bare` (separate-gitdir
+ *    setups), so failure here must stay non-fatal.
+ */
+export const excludeFromWorktree = async ($: Shell, wtPath: string, rel: string): Promise<boolean> => {
+  const dir = rel.replace(/^\/+|\/+$/g, "")
+  if (!dir) return false
+  if (!(await run($, wtPath, ["sparse-checkout", "init", "--no-cone"])).ok) return false
+  // `/*` keeps everything else; the negation drops just this subtree.
+  const set = await run($, wtPath, ["sparse-checkout", "set", "/*", `!/${dir}/`])
+  if (!set.ok || /not up to date/i.test(set.stderr)) return false
+  // Trust the outcome, not the exit code: confirm the path is actually gone.
+  return !fs.existsSync(path.join(wtPath, dir))
 }
 
 /**

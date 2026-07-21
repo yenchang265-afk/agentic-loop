@@ -10,7 +10,7 @@ import { listSnapshotIds } from "@agentic-loop/core/loop/persist"
 import { anyLoopActive, anyWorktreeLoopActive, findSessionDriving, getLoop, hasLoop, planStageTaskId } from "@agentic-loop/core/loop/state"
 import { auditBacklog, formatAnomalies } from "@agentic-loop/core/task/audit"
 import { classifyBash, classifyEdit } from "@agentic-loop/core/task/guard"
-import { classifyWorktreeBash, isUnderTasksDir } from "@agentic-loop/core/loop/worktree-guard"
+import { pinBash, pinEditPath } from "@agentic-loop/core/loop/worktree-guard"
 import { chainedAdoAzWriteViolation, chainedAdoWriteBackstopViolation, chainedGithubPrMutation, chainedGitPushViolation } from "@agentic-loop/core/task/write-backstop"
 import { findByIdIn, isOrphanedPlanClaim, listClaimIds, listInProgress, listQueued, releaseOrphanedClaims, wasInterrupted } from "@agentic-loop/core/task/store"
 
@@ -285,10 +285,14 @@ export const makeAgenticLoop: Plugin = async ({ client, directory, $ }) => {
           // engine only conveys the worktree as prompt text), so a command
           // without the `cd <wt> && ` prefix silently runs outside the
           // isolation. Same fail-closed contract as the edit pin below.
+          // The pin CORRECTS the command in place rather than refusing it: an
+          // agent that forgot the prefix would otherwise burn an iteration
+          // rediscovering it. Only an explicit escape still throws.
           const bashWt = loop?.git?.worktree
           if (bashWt) {
-            const pinVerdict = classifyWorktreeBash(cmd, bashWt)
-            if (!pinVerdict.allow) throw new Error(pinVerdict.reason)
+            const pinVerdict = pinBash(cmd, bashWt)
+            if (pinVerdict.action === "block") throw new Error(pinVerdict.reason)
+            if (pinVerdict.action === "rewrite") output.args.command = pinVerdict.value
           }
         }
       } else if (EDIT_TOOLS.has(input.tool)) {
@@ -311,41 +315,33 @@ export const makeAgenticLoop: Plugin = async ({ client, directory, $ }) => {
             "(session lookup failed) — refusing the edit rather than risking a write outside the worktree.",
         )
       }
+      // NOTE: unlike the Claude host this reads only the loop's worktree, with no
+      // per-stage isolation flag — OpenCode's state carries no equivalent of the
+      // marker's `loopWorktree`/`worktree` split. In practice the driver sets
+      // `git.worktree` only once it has isolated, so an unisolated stage sees no
+      // worktree and no pin; the asymmetry is that a stage which runs unisolated
+      // AFTER a worktree exists (a replan bounce back to PLAN) would have its
+      // write relocated here rather than refused.
       const wt = loop?.git?.worktree
       if (!wt || !EDIT_TOOLS.has(input.tool)) return
       const filePath: unknown = output.args?.filePath ?? output.args?.path
-      // Fail CLOSED under isolation. A relative path resolves against the session's
-      // cwd — the MAIN tree, not the worktree — so it would silently dirty the human's
-      // checkout while the loop believes it is isolated; and an edit-shaped tool whose
-      // path we can't read (e.g. a multi-file `patch` payload) is unguardable. Both are
-      // refused rather than passed through.
+      // An edit-shaped tool whose path we can't read (e.g. a multi-file `patch`
+      // payload) is unguardable — still fail CLOSED there. Everything else the
+      // pin CORRECTS: a relative path resolves against the session's cwd (the
+      // MAIN tree, not the worktree) and a main-tree absolute path is the
+      // "agent keeps editing the current branch" symptom; both are mechanical
+      // misses with exactly one sensible worktree equivalent.
       if (typeof filePath !== "string") {
         throw new Error(
           `agentic-loop: this loop is isolated to its worktree ${wt}, but ${input.tool}'s target path could not be ` +
             `determined — pass an absolute path under the worktree.`,
         )
       }
-      if (!path.isAbsolute(filePath)) {
-        throw new Error(
-          `agentic-loop: this loop is isolated to its worktree ${wt} — "${filePath}" is a relative path that resolves ` +
-            `against the main tree. Use an absolute path under the worktree.`,
-        )
-      }
-      const rel = path.relative(wt, path.resolve(filePath))
-      if (rel === "" || rel.startsWith("..")) {
-        throw new Error(
-          `agentic-loop: this loop is isolated to its worktree ${wt} — edit ${filePath} is outside it. ` +
-            `Use an absolute path under the worktree.`,
-        )
-      }
-      // The worktree carries a checkout-time frozen copy of the backlog; an
-      // edit there rides the feature branch and resurrects the task file in
-      // the wrong status folder on merge.
-      if (isUnderTasksDir(filePath, wt, config.tasksDir)) {
-        throw new Error(
-          `agentic-loop: task files are driver-owned and live on the main tree — the loop records notes and ` +
-            `moves itself; do not edit the worktree's frozen ${config.tasksDir} copy.`,
-        )
+      const pinned = pinEditPath(filePath, wt, directory, config.tasksDir)
+      if (pinned.action === "block") throw new Error(pinned.reason)
+      if (pinned.action === "rewrite") {
+        if (output.args.filePath !== undefined) output.args.filePath = pinned.value
+        else output.args.path = pinned.value
       }
     },
 

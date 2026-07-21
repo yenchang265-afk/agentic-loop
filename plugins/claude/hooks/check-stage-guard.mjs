@@ -184,8 +184,6 @@ var classifyMutation = (tool, args, ctx) => {
 
 // packages/core/dist/loop/worktree-guard.js
 import path from "node:path";
-var ALLOW2 = { allow: true };
-var block2 = (reason) => ({ allow: false, reason });
 var READ_ONLY2 = [
   "ls*",
   "pwd*",
@@ -226,19 +224,73 @@ var gitCDir = (segment) => {
   const m = /^git\s+-C\s+(\S+)\s+/.exec(segment.trim());
   return m ? unquote(m[1]) : null;
 };
-var classifyWorktreeBash = (command, worktree) => {
-  let pinnedDir = null;
+var shellQuote = (p) => /[\s"'\\$`]/.test(p) ? `"${p.replace(/(["\\$`])/g, "\\$1")}"` : p;
+var words = (segment) => segment.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
+var REDIRECT_RE = />>?\|?\s*("[^"]*"|'[^']*'|[^\s;|&]+)/g;
+var outsideAbsPath = (segment, worktree) => {
+  const outside = (raw) => {
+    const w = unquote(raw);
+    if (!path.isAbsolute(w))
+      return null;
+    const resolved = path.resolve(w);
+    return underWorktree(worktree, resolved) ? null : resolved;
+  };
+  for (const m of segment.matchAll(REDIRECT_RE)) {
+    const hit = outside(m[1]);
+    if (hit)
+      return hit;
+  }
+  if (isReadOnlySegment(segment))
+    return null;
+  for (const w of words(segment)) {
+    const hit = outside(w.includes("=") ? w.slice(w.indexOf("=") + 1) : w);
+    if (hit)
+      return hit;
+  }
+  return null;
+};
+var escapeReason = (segment, worktree, pinnedDir) => {
+  const gitDir = gitCDir(segment);
+  if (gitDir && !isReadOnlySegment(segment)) {
+    const resolved = path.isAbsolute(gitDir) ? path.resolve(gitDir) : path.resolve(pinnedDir ?? worktree, gitDir);
+    if (!underWorktree(worktree, resolved)) {
+      return `agentic-loop: this loop is isolated to its worktree ${worktree} \u2014 "${segment.trim()}" mutates the tree at ${resolved}, which is outside it. Use \`git -C ${worktree} \u2026\`.`;
+    }
+  }
+  const target = outsideAbsPath(segment, worktree);
+  if (target) {
+    return `agentic-loop: this loop is isolated to its worktree ${worktree} \u2014 "${segment.trim()}" reaches ${target}, which is outside it. Read and write only under the worktree.`;
+  }
+  return null;
+};
+var isUnresolvableCd = (target) => target === "-" || target.startsWith("~") || /[$`]/.test(target);
+var ALLOW_PIN = { action: "allow" };
+var rewrite = (value) => ({ action: "rewrite", value });
+var blockPin = (reason) => ({ action: "block", reason });
+var walk = (command, worktree, initialPin) => {
+  let pinnedDir = initialPin;
   for (const segment of splitSegments(command)) {
-    const cdMatch = /^cd\s+(.+)$/.exec(segment);
+    const cdMatch = /^cd\s+(.+)$/.exec(segment.trim());
     if (cdMatch) {
-      const target = unquote(cdMatch[1]);
+      const target = unquote(cdMatch[1].trim());
+      const escapeMsg = `agentic-loop: this loop is isolated to its worktree ${worktree} \u2014 "${segment.trim()}" leaves it, so the rest of the command would run outside the worktree. Only \`cd\` into a literal directory under ${worktree}.`;
+      if (isUnresolvableCd(target))
+        return { ok: false, reason: escapeMsg };
       const resolved = path.isAbsolute(target) ? path.resolve(target) : pinnedDir ? path.resolve(pinnedDir, target) : null;
       if (resolved && underWorktree(worktree, resolved)) {
         pinnedDir = resolved;
         continue;
       }
-      return block2(`agentic-loop: this loop is isolated to its worktree ${worktree} \u2014 "${segment}" leaves it, so the rest of the command would run outside the worktree. Only \`cd\` into a directory under ${worktree}.`);
+      return {
+        ok: false,
+        // Only a genuine escape when the cwd was already known: an unpinned
+        // RELATIVE cd is just a missing prefix, which the rewrite fixes.
+        reason: pinnedDir || path.isAbsolute(target) ? escapeMsg : null
+      };
     }
+    const escape = escapeReason(segment, worktree, pinnedDir);
+    if (escape)
+      return { ok: false, reason: escape };
     if (pinnedDir)
       continue;
     const gitDir = gitCDir(segment);
@@ -246,14 +298,45 @@ var classifyWorktreeBash = (command, worktree) => {
       continue;
     if (isReadOnlySegment(segment))
       continue;
-    return block2(`agentic-loop: this loop is isolated to its worktree ${worktree} \u2014 "${segment}" would run in the main tree. Prefix the command with \`cd ${worktree} && \` (or use \`git -C ${worktree} \u2026\`).`);
+    return { ok: false, reason: null };
   }
-  return ALLOW2;
+  return { ok: true };
+};
+var pinBash = (command, worktree) => {
+  const prefixed = walk(command, worktree, worktree);
+  if (!prefixed.ok && prefixed.reason)
+    return blockPin(prefixed.reason);
+  if (walk(command, worktree, null).ok)
+    return ALLOW_PIN;
+  return rewrite(`cd ${shellQuote(worktree)} && ${command}`);
 };
 var isUnderTasksDir = (filePath, worktree, tasksDir) => {
   const tasksRoot = path.resolve(worktree, tasksDir);
   const rel = path.relative(tasksRoot, path.resolve(filePath));
   return !rel.startsWith("..") && !path.isAbsolute(rel);
+};
+var pinEditPath = (filePath, worktree, directory, tasksDir) => {
+  if (filePath.startsWith("~")) {
+    return blockPin(`agentic-loop: "${filePath}" starts with \`~\`, which file tools do not expand \u2014 pass a real absolute path under the worktree ${worktree}.`);
+  }
+  const wasAbsolute = path.isAbsolute(filePath);
+  const resolved = wasAbsolute ? path.resolve(filePath) : path.resolve(worktree, filePath);
+  if (path.resolve(resolved).split(path.sep).includes(".git")) {
+    return blockPin(`agentic-loop: ${filePath} is inside a .git directory \u2014 git metadata is never an edit target.`);
+  }
+  const refuseTasks = blockPin(`agentic-loop: task files are driver-owned and live on the main tree \u2014 the loop records notes and moves itself; do not edit the worktree's frozen ${tasksDir} copy.`);
+  if (underWorktree(worktree, resolved)) {
+    if (isUnderTasksDir(resolved, worktree, tasksDir))
+      return refuseTasks;
+    return wasAbsolute ? ALLOW_PIN : rewrite(resolved);
+  }
+  const rel = path.relative(path.resolve(directory), resolved);
+  if (rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel)) {
+    if (isUnderTasksDir(resolved, directory, tasksDir))
+      return ALLOW_PIN;
+    return rewrite(path.resolve(worktree, rel));
+  }
+  return blockPin(`agentic-loop: this loop is isolated to its worktree ${worktree} \u2014 ${filePath} is outside both it and the repo at ${directory}, so there is no worktree equivalent. Use a path under the worktree.`);
 };
 
 // plugins/claude/hooks/src/allowlist.mjs
@@ -425,10 +508,15 @@ var read = () => new Promise((resolve) => {
   process.stdin.on("data", (c) => s += c).on("end", () => resolve(s));
 });
 var allow = () => process.exit(0);
-var block3 = (reason) => {
+var block2 = (reason) => {
   process.stderr.write(reason + "\n");
   process.exit(2);
 };
+var rewriteInput = (updatedInput) => {
+  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", updatedInput } }) + "\n");
+  process.exit(0);
+};
+var WRITE_TOOLS = ["Edit", "Write", "NotebookEdit"];
 var readTasksDir = (cwd) => {
   try {
     const cfg = JSON.parse(fs.readFileSync(path2.join(cwd, ".agentic-loop.json"), "utf8"));
@@ -457,12 +545,12 @@ var main = async () => {
   const tool = input.tool_name;
   const ti = input.tool_input || {};
   if (tool === "Bash" && chainedAdoWriteBackstopViolation(String(ti.command ?? ""))) {
-    return block3(
+    return block2(
       `agentic-loop: the loop must never mutate an existing pull request \u2014 this Azure DevOps REST call is blocked. Only GET reads, thread-comment replies (POST to a /threads resource), and creating a new draft PR (POST to .../pullrequests) are permitted; completing, abandoning, approving, reviewer changes, and pipeline runs stay a human call.`
     );
   }
   if (tool === "Bash" && chainedAdoAzWriteViolation(String(ti.command ?? ""))) {
-    return block3(
+    return block2(
       `agentic-loop: the loop must never mutate an existing pull request \u2014 this az CLI call is blocked. Only reads, thread-comment replies (az devops invoke POST to a pullRequestThreads/pullRequestThreadComments resource), and creating a new DRAFT PR (az repos pr create --draft) are permitted; completing, abandoning, voting, reviewer changes, and pipeline runs stay a human call.`
     );
   }
@@ -476,64 +564,75 @@ var main = async () => {
     },
     { tasksDir, planTaskId }
   );
-  if (!backlogVerdict.allow) return block3(backlogVerdict.reason);
+  if (!backlogVerdict.allow) return block2(backlogVerdict.reason);
   if (!marker) return allow();
   if (marker.platform === "ado" && typeof tool === "string" && isAdoMcpMutationTool(tool)) {
-    return block3(
+    return block2(
       `agentic-loop: the loop must never mutate an existing pull request \u2014 this Azure DevOps MCP tool looks state-mutating and is blocked. Only reads, thread-comment replies, and creating a new DRAFT PR are permitted; completing, abandoning, approving, voting, and reviewer changes stay a human call.`
     );
   }
   if (tool === "Bash" && chainedGithubPrMutation(String(ti.command ?? ""))) {
-    return block3(
+    return block2(
       `agentic-loop: the loop must never mutate a pull request \u2014 this GitHub command is blocked. Only reads and comment replies (gh pr comment, or gh api GET, or a POST to an issues/N/comments resource) are permitted; merging, closing, approving, requesting changes, reviewer changes, and edits stay a human call.`
     );
   }
   if (tool === "Bash" && chainedGitPushViolation(String(ti.command ?? ""))) {
-    return block3(
+    return block2(
       `agentic-loop: the loop must never push a branch other than its own head, force-push, or delete \u2014 this git push is blocked. Push only your own feature/* (or <kind>/*) branch fast-forward with no ':dst' refspec, no --force, no --delete; the watched and default branches stay a human call.`
     );
   }
   if (typeof marker.deadline === "number" && Date.now() > marker.deadline) {
-    if (["Bash", "Edit", "Write", "MultiEdit", "NotebookEdit"].includes(tool)) {
-      return block3(
+    if (tool === "Bash" || WRITE_TOOLS.includes(tool)) {
+      return block2(
         `agentic-loop: the ${String(marker.stage).toUpperCase()} stage exceeded its stageTimeoutMinutes deadline \u2014 stop working, summarize what you have, and return control so the loop can stop cleanly.`
       );
     }
   }
+  const stageWorktree = typeof marker.worktree === "string" && marker.worktree ? marker.worktree : null;
+  const loopWorktree = stageWorktree ?? (typeof marker.loopWorktree === "string" && marker.loopWorktree ? marker.loopWorktree : null);
+  const rawCommand = String(ti.command ?? "");
+  let effectiveCommand = rawCommand;
+  let commandRewritten = false;
+  if (tool === "Bash" && loopWorktree) {
+    const pinVerdict = pinBash(rawCommand, loopWorktree);
+    if (pinVerdict.action === "block") return block2(pinVerdict.reason);
+    if (pinVerdict.action === "rewrite") {
+      if (!stageWorktree) {
+        return block2(
+          `agentic-loop: the ${String(marker.stage).toUpperCase()} stage does not build \u2014 "${rawCommand}" would mutate the main tree. Only read-only commands are available here; code changes belong to the BUILD stage, inside ${loopWorktree}.`
+        );
+      }
+      effectiveCommand = pinVerdict.value;
+      commandRewritten = true;
+    }
+  }
   const markerList = Array.isArray(marker.bashAllowlist) && marker.bashAllowlist.every((g) => typeof g === "string") && marker.bashAllowlist.length ? marker.bashAllowlist : null;
   if (tool === "Bash" && (markerList || marker.stage === "verify" || marker.stage === "review")) {
-    const cmd = String(ti.command ?? "");
     const list = markerList ?? (marker.stage === "verify" ? VERIFY_ALLOW : REVIEW_ALLOW);
-    if (!commandAllowed(cmd, list)) {
-      return block3(
-        `agentic-loop: the ${marker.stage.toUpperCase()} stage is read-only \u2014 the command "${cmd}" is not on its allowlist. Only inspection/test commands are permitted; if a test runner is genuinely needed, record an ERROR verdict naming it. ` + (marker.worktree ? `Test commands must use the \`cd ${marker.worktree} && <runner>\` form.` : "")
+    if (!commandAllowed(effectiveCommand, list)) {
+      return block2(
+        `agentic-loop: the ${marker.stage.toUpperCase()} stage is read-only \u2014 the command "${rawCommand}" is not on its allowlist. Only inspection/test commands are permitted; if a test runner is genuinely needed, record an ERROR verdict naming it.`
       );
     }
   }
-  if (tool === "Bash" && marker.worktree) {
-    const pinVerdict = classifyWorktreeBash(String(ti.command ?? ""), marker.worktree);
-    if (!pinVerdict.allow) return block3(pinVerdict.reason);
-  }
-  if (marker.worktree && ["Edit", "Write", "MultiEdit", "NotebookEdit"].includes(tool)) {
+  if (commandRewritten) return rewriteInput({ ...ti, command: effectiveCommand });
+  if (loopWorktree && WRITE_TOOLS.includes(tool)) {
     const fp = ti.file_path ?? ti.path ?? ti.notebook_path;
     if (typeof fp !== "string") {
-      return block3(
-        `agentic-loop: this loop is isolated to its worktree ${marker.worktree}, but ${tool}'s target path could not be determined \u2014 pass an absolute path under the worktree.`
+      return block2(
+        `agentic-loop: this loop is isolated to its worktree ${loopWorktree}, but ${tool}'s target path could not be determined \u2014 pass an absolute path under the worktree.`
       );
     }
-    if (!path2.isAbsolute(fp)) {
-      return block3(
-        `agentic-loop: this loop is isolated to its worktree ${marker.worktree} \u2014 "${fp}" is a relative path that resolves against the main tree. Use an absolute path under the worktree.`
-      );
-    }
-    const rel = path2.relative(marker.worktree, path2.resolve(fp));
-    if (rel === "" || rel.startsWith("..")) {
-      return block3(`agentic-loop: this loop is isolated to its worktree ${marker.worktree} \u2014 editing ${fp} is outside it. Use a path under the worktree.`);
-    }
-    if (isUnderTasksDir(fp, marker.worktree, tasksDir)) {
-      return block3(
-        `agentic-loop: task files are driver-owned and live on the main tree \u2014 the loop records notes and moves itself; do not edit the worktree's frozen ${tasksDir} copy.`
-      );
+    const verdict = pinEditPath(fp, loopWorktree, cwd, tasksDir);
+    if (verdict.action === "block") return block2(verdict.reason);
+    if (verdict.action === "rewrite") {
+      if (!stageWorktree) {
+        return block2(
+          `agentic-loop: the ${String(marker.stage).toUpperCase()} stage does not build \u2014 it must not write ${fp}. Code changes belong to the BUILD stage, inside the loop's worktree ${loopWorktree}.`
+        );
+      }
+      const key = ti.file_path !== void 0 ? "file_path" : ti.path !== void 0 ? "path" : "notebook_path";
+      return rewriteInput({ ...ti, [key]: verdict.value });
     }
   }
   return allow();

@@ -7,6 +7,7 @@ import {
   checkoutBranch,
   currentBranch,
   ensureExcluded,
+  excludeFromWorktree,
   isDirty,
   isGitRepo,
   pruneWorktrees,
@@ -34,6 +35,25 @@ const runWorktreeSetup = async ($: Shell, log: Log, config: Config, wtPath: stri
   if (out.exitCode !== 0) {
     await log("warn", `loop: worktreeSetup failed in ${wtPath}: ${out.stderr.toString().trim()}`)
   }
+}
+
+/**
+ * Keep the backlog out of the worktree. `<tasksDir>/` is tracked, so without
+ * this every worktree carries a frozen copy of every task file that a stage
+ * agent mistakes for the live backlog. Idempotent, so it also cleans up
+ * worktrees created before this existed. Warn-and-continue: on a git without
+ * `sparse-checkout` the worktree keeps the copy and the edit-time refusal in
+ * `worktree-guard` remains the control.
+ */
+const excludeBacklog = async ($: Shell, log: Log, config: Config, wtPath: string): Promise<void> => {
+  if (await excludeFromWorktree($, wtPath, config.tasksDir)) return
+  await log("info", `loop: could not sparse-checkout ${config.tasksDir} out of ${wtPath} — its frozen backlog copy stays on disk`)
+}
+
+/** Everything a worktree needs after it exists, whether freshly added or adopted. */
+const prepareWorktree = async ($: Shell, log: Log, config: Config, wtPath: string, fresh: boolean): Promise<void> => {
+  await excludeBacklog($, log, config, wtPath)
+  if (fresh) await runWorktreeSetup($, log, config, wtPath)
 }
 
 /**
@@ -76,7 +96,9 @@ export const ensureIsolation = async (
         if (!added.ok) {
           throw new Error(`could not recreate worktree ${state.git.worktree} for ${state.git.branch}${added.error ? ` — ${added.error}` : ""}`)
         }
-        await runWorktreeSetup($, log, config, state.git.worktree)
+        await prepareWorktree($, log, config, state.git.worktree, true)
+      } else {
+        await excludeBacklog($, log, config, state.git.worktree)
       }
       return { ...state, isolated: true }
     }
@@ -99,6 +121,7 @@ export const ensureIsolation = async (
       const existing = await worktreeForBranch($, directory, state.git.branch)
       if (existing && path.resolve(existing) !== path.resolve(directory)) {
         if (existing !== wtPath) await log("info", `loop: reusing existing worktree ${existing} for ${state.git.branch}`)
+        await excludeBacklog($, log, config, existing)
         return { ...state, git: { ...state.git, worktree: existing }, isolated: true }
       }
       if (await isGitRepo($, wtPath)) await pruneWorktrees($, directory)
@@ -109,7 +132,7 @@ export const ensureIsolation = async (
           `could not create worktree ${wtPath} for ${state.git.branch}${added.error ? ` — ${added.error}` : ""} — resolve it, then /agentic-loop:engineering recover`,
         )
       }
-      await runWorktreeSetup($, log, config, wtPath)
+      await prepareWorktree($, log, config, wtPath, true)
       return { ...state, git: { ...state.git, worktree: wtPath }, isolated: true }
     }
     // Shared mode — make sure the tree is on this loop's branch.
@@ -144,6 +167,7 @@ export const ensureIsolation = async (
     const existing = await worktreeForBranch($, directory, branch)
     if (existing && path.resolve(existing) !== path.resolve(directory)) {
       if (existing !== wtPath) await log("info", `loop: reusing existing worktree ${existing} for ${branch}`)
+      await excludeBacklog($, log, config, existing)
       return { ...state, git: { base, branch, worktree: existing }, isolated: true }
     }
     // A leftover directory with no registration — prune, then let add try.
@@ -154,7 +178,7 @@ export const ensureIsolation = async (
         `could not create worktree ${wtPath} for ${branch}${added.error ? ` — ${added.error}` : ""} — resolve it, then /agentic-loop:engineering recover`,
       )
     }
-    await runWorktreeSetup($, log, config, wtPath)
+    await prepareWorktree($, log, config, wtPath, true)
     return { ...state, git: { base, branch, worktree: wtPath }, isolated: true }
   }
 
