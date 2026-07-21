@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import {
+  admitVerdict,
   axisCoverageIssue,
   axisVerdict,
   blockingFindingsIssue,
@@ -307,6 +308,49 @@ test("blockingFindingsIssue: a clean PASS and an ERROR are both accepted", () =>
 
 test("blockingFindingsIssue: unenforced where no axes are required (a bare VERIFY FAIL stays legal)", () => {
   assert.equal(blockingFindingsIssue({ verdict: "FAIL", reason: "tests red" }, undefined), null)
+})
+
+// --- admitVerdict (the single seam both hosts record through) ---
+
+test("admitVerdict rejects an incomplete payload and yields NO record to store", () => {
+  const res = admitVerdict({ verdict: "PASS", axes: [{ axis: "correctness", verdict: "PASS" }] }, AXES, null)
+  assert.equal(res.ok, false)
+  // The point of the return type: a rejected call cannot hand a host anything
+  // to store or stamp. `record` is not reachable on this branch.
+  assert.ok(!("record" in res))
+  assert.match(res.ok === false ? res.message : "", /Missing:/)
+})
+
+test("admitVerdict rejects a FAIL that names nothing to fix", () => {
+  const res = admitVerdict({ verdict: "FAIL", reason: "vibes", axes: fiveAxes() }, AXES, null)
+  assert.equal(res.ok, false)
+})
+
+test("admitVerdict accepts a complete payload and returns it unchanged when nothing is pending", () => {
+  const rec = { verdict: "PASS" as const, axes: fiveAxes() }
+  const res = admitVerdict(rec, AXES, null)
+  assert.equal(res.ok, true)
+  assert.deepEqual(res.ok === true ? res.record : null, rec)
+})
+
+test("admitVerdict combines repeat calls worst-wins — a FAIL cannot be replaced by a later PASS", () => {
+  const failing = {
+    verdict: "FAIL" as const,
+    reason: "sql hole",
+    axes: fiveAxes({ security: { verdict: "FAIL" } }).map((a) =>
+      a.axis === "security" ? { ...a, findings: [{ severity: "critical" as const, detail: "sql hole" }] } : a,
+    ),
+  }
+  const res = admitVerdict({ verdict: "PASS", axes: fiveAxes() }, AXES, failing)
+  assert.equal(res.ok, true)
+  const record = res.ok === true ? res.record : null
+  assert.equal(record?.verdict, "FAIL")
+  assert.equal(record?.axes?.find((a) => a.axis === "security")?.verdict, "FAIL")
+})
+
+test("admitVerdict enforces nothing where no axes are required (VERIFY keeps today's contract)", () => {
+  assert.equal(admitVerdict({ verdict: "FAIL", reason: "tests red" }, undefined, null).ok, true)
+  assert.equal(admitVerdict({ verdict: "PASS" }, undefined, null).ok, true)
 })
 
 // --- mergeAxes (repeat calls in one stage, and multi-lens review) ---

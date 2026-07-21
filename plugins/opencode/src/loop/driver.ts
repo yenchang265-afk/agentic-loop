@@ -71,9 +71,7 @@ import { runTerminal, type TerminalCtx } from "@agentic-loop/core/loop/terminal"
 import { type Outcome, renderRunSummary, type StageSample, type StageTokens } from "@agentic-loop/core/loop/metrics"
 import { metricsPath, upsertRunMetrics } from "@agentic-loop/core/loop/metrics-file"
 import {
-  axisCoverageIssue,
-  axisVerdict,
-  blockingFindingsIssue,
+  admitVerdict,
   effectiveVerdict,
   mergeAxes,
   verdictFeedbackBlock,
@@ -86,7 +84,7 @@ import {
   type VerdictRecord,
   worstOf,
 } from "@agentic-loop/core/loop/verdict"
-import { enabledLoopKinds, modelFor, triggerFor, unknownStageModelKeys } from "@agentic-loop/core/config"
+import { enabledLoopKinds, modelFor, triggerFor, unknownStageModelKeys, unreviewedAxes } from "@agentic-loop/core/config"
 import type { Config } from "../config.ts"
 import { armCron, armIdle, armPoll, claimsOnIdle, cronError, type TriggerMode, type WatchTimerHandle } from "./trigger.js"
 import type { Action, LoopState, Stage, TaskRef } from "@agentic-loop/core/loop/state"
@@ -432,13 +430,15 @@ export const recordVerdict = (
   if (def?.kind !== "check") {
     return reject(`Stage ${stage} is not a check stage — verdict ignored.`)
   }
-  // Reject BEFORE the write: a rejected call must not clobber a good record
-  // recorded earlier in the same pass.
-  const required = axisRequirement.get(sessionID)
-  const issue = axisCoverageIssue(record, required) ?? blockingFindingsIssue(record, required)
-  if (issue) return reject(issue)
-  recordedVerdicts.set(sessionID, { stage, record })
-  return { accepted: true, message: `Recorded ${stage} verdict: ${effectiveVerdict(record)}.` }
+  // The stored record can only come from the `ok: true` branch, so a rejected
+  // call cannot clobber a good record recorded earlier in the same pass.
+  // Repeat calls combine worst-wins rather than overwrite — a FAIL must not be
+  // replaceable by a later PASS from the same agent.
+  const prev = recordedVerdicts.get(sessionID)
+  const admission = admitVerdict(record, axisRequirement.get(sessionID), prev?.stage === stage ? prev.record : null)
+  if (!admission.ok) return reject(admission.message)
+  recordedVerdicts.set(sessionID, { stage, record: admission.record })
+  return { accepted: true, message: `Recorded ${stage} verdict: ${effectiveVerdict(admission.record)}.` }
 }
 
 /** Consume (read-and-clear) the verdict record for a session's check stage, if any. */
@@ -913,6 +913,17 @@ export const drive = async (
       "warn",
       `loops.${loaded.manifest.kind}.stageModels names ${unknownStages.map((k) => `"${k}"`).join(", ")}, which is not a stage of this loop — ` +
         `ignored; the stage runs the host default model. Valid stages: ${loaded.manifest.stages.map((s) => s.name).join(", ")}.`,
+    )
+  }
+  // reviewLenses suppresses per-pass axis-coverage enforcement, so turning it on
+  // silently downgrades what a review guarantees — name the axes no lens covers.
+  for (const def of loaded.manifest.stages) {
+    const unreviewed = unreviewedAxes(config, def)
+    if (!unreviewed.length) continue
+    await deps.log(
+      "warn",
+      `reviewLenses is on, so the ${def.name} stage no longer enforces axis coverage, and no lens covers ` +
+        `${unreviewed.map((a) => `"${a}"`).join(", ")}. Add ${unreviewed.length > 1 ? "those lenses" : "that lens"} or unset reviewLenses.`,
     )
   }
   const actor = await gitActor(deps.$, deps.directory)

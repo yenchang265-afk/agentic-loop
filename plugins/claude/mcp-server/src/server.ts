@@ -22,17 +22,14 @@ import {
 } from "@agentic-loop/core/loop/orchestrate"
 import type { PolledClaim } from "@agentic-loop/core/scheduler/scheduler"
 import type { WorkSource } from "@agentic-loop/core/source/types"
-import { adoAccessFor, bareModel, enabledLoopKinds, modelFor, platformFor, unknownStageModelKeys } from "@agentic-loop/core/config"
+import { adoAccessFor, bareModel, enabledLoopKinds, modelFor, platformFor, unknownStageModelKeys, unreviewedAxes } from "@agentic-loop/core/config"
 import {
-  axisCoverageIssue,
+  admitVerdict,
   axisVerdict,
-  blockingFindingsIssue,
   effectiveVerdict,
-  mergeAxes,
   parseVerdict,
   stageDriftNote,
   verdictFeedbackBlock,
-  worstOf,
   type AxisResult,
   type CriterionResult,
   type Verdict,
@@ -233,12 +230,24 @@ const stageModelWarnings = (): string[] =>
       return []
     }
     const unknown = unknownStageModelKeys(config, kind, stageNames)
-    return unknown.length
+    const warnings = unknown.length
       ? [
           `loops.${kind}.stageModels names ${unknown.map((k) => `"${k}"`).join(", ")}, which ${unknown.length > 1 ? "are" : "is"} not a stage of the ${kind} loop — ` +
             `${unknown.length > 1 ? "those overrides are" : "that override is"} ignored and the stage runs the host default model. Valid stages: ${stageNames.join(", ")}.`,
         ]
       : []
+    // reviewLenses suppresses per-pass axis-coverage enforcement, so turning it
+    // on silently downgrades what a review guarantees — name the axes no lens
+    // covers rather than let the downgrade pass unremarked.
+    for (const def of manifestFor(kind).manifest.stages) {
+      const unreviewed = unreviewedAxes(config, def)
+      if (!unreviewed.length) continue
+      warnings.push(
+        `reviewLenses is on, so the ${kind} loop's ${def.name} stage no longer enforces axis coverage, and no lens covers ` +
+          `${unreviewed.map((a) => `"${a}"`).join(", ")}. Add ${unreviewed.length > 1 ? "those lenses" : "that lens"} or unset reviewLenses.`,
+      )
+    }
+    return warnings
   })
 
 const SPAWN_MODEL_NOTE =
@@ -660,28 +669,16 @@ server.registerTool(
       ...(criteria ? { criteria: criteria as CriterionResult[] } : {}),
       ...(axes ? { axes: axes as AxisResult[] } : {}),
     }
-    // A rejection must return BEFORE any mutation. `stampVerdictRecorded` marks
-    // the stage satisfied for the SubagentStop guard AND burns its one-shot nag
-    // sentinel — a rejected verdict that reached it would let the subagent stop
-    // having recorded nothing valid.
-    const issue = axisCoverageIssue(rec, def.requiredAxes) ?? blockingFindingsIssue(rec, def.requiredAxes)
-    if (issue) {
+    // The record can only be obtained from the `ok: true` branch, so a rejected
+    // verdict CANNOT reach `stampVerdictRecorded` below — which would otherwise
+    // mark the stage satisfied for the SubagentStop guard and burn its one-shot
+    // nag sentinel, letting the subagent stop having recorded nothing valid.
+    const admission = admitVerdict(rec, def.requiredAxes, pending)
+    if (!admission.ok) {
       verdictRejected = true
-      return fail(issue)
+      return fail(admission.message)
     }
-    if (!pending) pending = rec
-    else {
-      const combined = worstOf([pending.verdict, rec.verdict])
-      const reasons = [pending.reason, rec.reason].filter(Boolean)
-      const crit = [...(pending.criteria ?? []), ...(rec.criteria ?? [])]
-      const mergedAxes = mergeAxes(pending.axes, rec.axes)
-      pending = {
-        verdict: combined,
-        ...(reasons.length ? { reason: reasons.join(" · ") } : {}),
-        ...(crit.length ? { criteria: crit } : {}),
-        ...(mergedAxes.length ? { axes: mergedAxes } : {}),
-      }
-    }
+    pending = admission.record
     stampVerdictRecorded()
     // Report the DERIVED verdict: a declared PASS carrying a Critical finding on
     // any axis is a FAIL (verdict.ts `effectiveVerdict`).

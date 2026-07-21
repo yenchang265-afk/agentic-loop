@@ -1363,6 +1363,23 @@ test("review: a rejected call cannot clobber a complete verdict recorded earlier
   assert.equal(result.verdict, "PASS", "the good record survived the rejected one")
 })
 
+test("review: a later PASS cannot replace a FAIL recorded earlier in the same pass", async () => {
+  // recordVerdict used to overwrite, so an agent that recorded FAIL and then
+  // corrected itself to PASS had the PASS win. Repeat calls now combine
+  // worst-wins, matching the Claude host.
+  const sessionID = "sess-axes-downgrade"
+  const result = await runSinglePassReview(sessionID, () => {
+    recordVerdict(sessionID, "review", {
+      verdict: "FAIL",
+      axes: cleanAxes.map((a) =>
+        a.axis === "security" ? { ...a, verdict: "FAIL" as const, findings: [{ severity: "critical" as const, detail: "sql hole" }] } : a,
+      ),
+    })
+    recordVerdict(sessionID, "review", { verdict: "PASS", axes: cleanAxes })
+  })
+  assert.equal(result.verdict, "FAIL")
+})
+
 test("review: a complete five-axis verdict is accepted", async () => {
   const sessionID = "sess-axes-complete"
   const result = await runSinglePassReview(sessionID, () => {
