@@ -1,5 +1,5 @@
-import type { ParsedRunLog, RunLogSummary, RunSummaryRow } from "@agentic-loop/core/loop/runlog"
-import type { RunMetrics } from "@agentic-loop/core/loop/metrics-file"
+import type { ParsedRunLog, RunLogSummary, RunSummaryRow } from "@agentic-workflow/core/workflow/runlog"
+import type { RunMetrics } from "@agentic-workflow/core/workflow/metrics-file"
 import type {
   BurnBucket,
   FirstPassYield,

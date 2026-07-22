@@ -1,5 +1,5 @@
-import { parseRunLog } from "@agentic-loop/core/loop/runlog"
-import type { RunMetrics } from "@agentic-loop/core/loop/metrics-file"
+import { parseRunLog } from "@agentic-workflow/core/workflow/runlog"
+import type { RunMetrics } from "@agentic-workflow/core/workflow/metrics-file"
 import type { RunMetricsInput } from "./aggregate.js"
 
 /**

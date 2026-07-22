@@ -1,7 +1,8 @@
-import { loadConfig } from "@agentic-loop/core/config"
-import type { Log } from "@agentic-loop/core/host"
-import { defaultLoopsDir } from "@agentic-loop/core/manifest/dir"
-import { STATUSES } from "@agentic-loop/core/task/store"
+import { DEFAULT_CONFIG, loadConfig } from "@agentic-workflow/core/config"
+import type { Config } from "@agentic-workflow/core/workflow/state"
+import type { Log } from "@agentic-workflow/core/host"
+import { defaultWorkflowsDir } from "@agentic-workflow/core/manifest/dir"
+import { STATUSES } from "@agentic-workflow/core/task/store"
 import type { HubDeps } from "./deps.js"
 import { fsClient, sh } from "./fsclient.js"
 import { kindBoards, unionGates, unionStatuses } from "./kindboard.js"
@@ -19,20 +20,50 @@ import type { WatcherOptions } from "./watch.js"
  * never run is not a rail.
  */
 
+/** The deps shape from an explicit config — shared by the healthy and degraded paths. */
+const depsFrom = (
+  directory: string,
+  config: Config,
+  log: Log,
+  reloadRepo?: () => Promise<boolean>,
+  configError?: string,
+): HubDeps => ({
+  directory,
+  tasksDir: config.tasksDir,
+  boards: kindBoards(defaultWorkflowsDir(), config, log),
+  config,
+  workflowsDir: defaultWorkflowsDir(),
+  projectsDir: defaultProjectsDir(),
+  opencodeDbPath: defaultOpencodeDbPath(),
+  client: fsClient,
+  sh,
+  log,
+  ...(reloadRepo ? { reloadRepo } : {}),
+  ...(configError ? { configError } : {}),
+})
+
 export const buildDeps = async (directory: string, log: Log, reloadRepo?: () => Promise<boolean>): Promise<HubDeps> => {
   const config = await loadConfig(fsClient, directory)
-  return {
-    directory,
-    tasksDir: config.tasksDir,
-    boards: kindBoards(defaultLoopsDir(), config, log),
-    config,
-    loopsDir: defaultLoopsDir(),
-    projectsDir: defaultProjectsDir(),
-    opencodeDbPath: defaultOpencodeDbPath(),
-    client: fsClient,
-    sh,
-    log,
-    ...(reloadRepo ? { reloadRepo } : {}),
+  return depsFrom(directory, config, log, reloadRepo)
+}
+
+/**
+ * Initial-build fallback: never throws. An invalid config yields degraded deps
+ * on `DEFAULT_CONFIG`, marked with the error, so the hub still starts and the
+ * Config tab can fix it in place (reload heals it). `reload()` keeps using the
+ * throwing `buildDeps` so a bad hand-edit still keeps the last good deps.
+ */
+export const buildDepsResilient = async (
+  directory: string,
+  log: Log,
+  reloadRepo?: () => Promise<boolean>,
+): Promise<HubDeps> => {
+  try {
+    return await buildDeps(directory, log, reloadRepo)
+  } catch (err) {
+    const msg = (err as Error).message
+    log("warn", `config invalid for ${directory} — serving a degraded board; fix it in the Config tab: ${msg}`)
+    return depsFrom(directory, DEFAULT_CONFIG, log, reloadRepo, msg)
   }
 }
 
@@ -60,7 +91,7 @@ export interface Repo {
    */
   deps: HubDeps
   /**
-   * Re-read `.agentic-loop.json` and rebuild this repo's deps. Config is
+   * Re-read `.agentic-workflow.json` and rebuild this repo's deps. Config is
    * otherwise read once at startup, so without this every edit needs a restart.
    * Returns false when the new config is unusable, keeping the last good deps —
    * a broken hand-edit must never blank the board or kill the server.
@@ -98,7 +129,7 @@ export const makeRepo = async (
   const repo: Repo = {
     id,
     directory,
-    deps: await buildDeps(directory, log, reload),
+    deps: await buildDepsResilient(directory, log, reload),
     reload,
   }
   return repo

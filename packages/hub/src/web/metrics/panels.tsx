@@ -1,4 +1,4 @@
-import { formatDuration } from "@agentic-loop/core/loop/metrics"
+import { formatDuration } from "@agentic-workflow/core/workflow/metrics"
 import type { CacheHit, IterationBurn, StageDuration, StageVerdicts, VerdictFlips } from "../../shared/api.js"
 import { barWidth, bucketLabel, pct } from "./format.js"
 

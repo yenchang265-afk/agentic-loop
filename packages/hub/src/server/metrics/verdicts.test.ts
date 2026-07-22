@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { parseRunLog } from "@agentic-loop/core/loop/runlog"
+import { parseRunLog } from "@agentic-workflow/core/workflow/runlog"
 import { row, summary } from "./fixtures.js"
 import { stageVerdicts, verdictFlips } from "./verdicts.js"
 

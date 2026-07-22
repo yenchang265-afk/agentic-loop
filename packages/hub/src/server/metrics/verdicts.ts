@@ -1,4 +1,4 @@
-import type { RunLogSummary, RunSummaryRow } from "@agentic-loop/core/loop/runlog"
+import type { RunLogSummary, RunSummaryRow } from "@agentic-workflow/core/workflow/runlog"
 import type { StageVerdicts, VerdictFlips } from "../../shared/api.js"
 
 /**

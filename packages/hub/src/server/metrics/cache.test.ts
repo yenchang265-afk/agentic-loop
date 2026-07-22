@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import type { StageTokens } from "@agentic-loop/core/loop/metrics"
-import type { RunMetrics } from "@agentic-loop/core/loop/metrics-file"
+import type { StageTokens } from "@agentic-workflow/core/workflow/metrics"
+import type { RunMetrics } from "@agentic-workflow/core/workflow/metrics-file"
 import { cacheHit, countInProgress } from "./cache.js"
 import { runInput, summary } from "./fixtures.js"
 

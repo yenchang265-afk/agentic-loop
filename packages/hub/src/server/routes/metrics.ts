@@ -1,5 +1,5 @@
-import { parseRunMetrics } from "@agentic-loop/core/loop/metrics-file"
-import { parseRunLog } from "@agentic-loop/core/loop/runlog"
+import { parseRunMetrics } from "@agentic-workflow/core/workflow/metrics-file"
+import { parseRunLog } from "@agentic-workflow/core/workflow/runlog"
 import type { HubDeps } from "../deps.js"
 import { ok, type JsonResponse } from "../http.js"
 import { aggregateMetrics, type RunMetricsInput } from "../metrics/aggregate.js"

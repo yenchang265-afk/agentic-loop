@@ -4,7 +4,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { test } from "node:test"
-import { DEFAULT_CONFIG } from "@agentic-loop/core/config"
+import { DEFAULT_CONFIG } from "@agentic-workflow/core/config"
 import type { GateResult, KindBoardInfo } from "../../shared/api.js"
 import type { HubDeps } from "../deps.js"
 import { fsClient, sh } from "../fsclient.js"
@@ -80,8 +80,10 @@ const depsFor = (directory: string): HubDeps => ({
   directory,
   tasksDir: "docs/tasks",
   boards: BOARDS,
-  config: DEFAULT_CONFIG,
-  loopsDir: path.join(directory, "loops-unused"),
+  // ignoreBacklog defaults to true; these tests assert the commit itself, so
+  // opt back into committing (see packages/core/src/workflow/gate.ts).
+  config: { ...DEFAULT_CONFIG, ignoreBacklog: false },
+  workflowsDir: path.join(directory, "workflows-unused"),
   projectsDir: "/nonexistent-projects",
   opencodeDbPath: "/nonexistent.db",
   client: fsClient,
