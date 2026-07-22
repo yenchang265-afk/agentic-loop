@@ -57,7 +57,7 @@ const depsFor = (directory: string): HubDeps => ({
   tasksDir: "docs/tasks",
   boards: [],
   config: DEFAULT_CONFIG,
-  loopsDir: "/loops-unused",
+  workflowsDir: "/workflows-unused",
   projectsDir: "/nonexistent-projects",
   opencodeDbPath: "/nonexistent.db",
   client: fsClient,
