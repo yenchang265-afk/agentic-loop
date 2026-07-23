@@ -173,7 +173,33 @@ test("getBacklog serves a non-engineering backlog kind from its manifest shape, 
   assert.deepEqual(body.gateStatuses, ["waiting-human"])
   assert.equal(body.tasks["inbox"]?.[0]?.id, "triage-me")
   assert.equal(body.summary, null)
+  // The audit runs for every backlog kind now; this fixture is clean, and the
+  // custom kind's own folders must not read as damage.
   assert.equal(body.anomalies, null)
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
+test("getBacklog surfaces anomalies on a non-engineering board too, without flagging its own folders", async () => {
+  const dir = makeFixture()
+  const tasks = path.join(dir, "docs", "tasks")
+  fs.mkdirSync(path.join(tasks, "inbox"), { recursive: true })
+  fs.mkdirSync(path.join(tasks, "typo-dir"), { recursive: true })
+  fs.writeFileSync(path.join(tasks, "typo-dir", "lost.md"), "---\ntitle: Lost\n---\n")
+  const board: KindBoardInfo = {
+    kind: "triage",
+    description: "triage kind",
+    sourceType: "backlog",
+    statuses: ["inbox"],
+    gateStatuses: [],
+    pools: ["inbox"],
+  }
+  const res = await getBacklog(depsFor(dir, [ENGINEERING_BOARD, board]), {
+    params: {},
+    query: new URLSearchParams("kind=triage"),
+  })
+  const body = res.body as BacklogResponse
+  assert.deepEqual(body.anomalies?.unknownDirs, ["typo-dir"])
+  assert.deepEqual(body.anomalies?.strayFiles, ["docs/tasks/typo-dir/lost.md"])
   fs.rmSync(dir, { recursive: true, force: true })
 })
 

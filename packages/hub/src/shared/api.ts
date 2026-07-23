@@ -56,7 +56,7 @@ export interface BacklogResponse {
   /** Engineering-lifecycle roll-up; null for other kinds (their folders aren't its shape). */
   readonly summary: BacklogSummary | null
   readonly claimedIds: readonly string[]
-  /** Structural anomalies from the backlog audit; null when none (engineering only). */
+  /** Structural anomalies from the backlog-root audit (any backlog kind); null when clean. */
   readonly anomalies: BacklogAnomalies | null
 }
 
@@ -120,6 +120,8 @@ export interface SnapshotView {
   readonly taskId?: string
   readonly branch?: string
   readonly worktree?: string
+  /** Stages whose captured output the snapshot carries — what a resume would see. Bodies stay in the run log. */
+  readonly artifactStages?: readonly string[]
 }
 
 export interface RunDetailResponse {

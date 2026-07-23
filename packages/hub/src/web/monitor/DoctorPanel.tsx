@@ -19,16 +19,16 @@ import { useJson } from "../useJson.js"
 const nonEmpty = (r: DoctorReport): boolean =>
   r.findings.length > 0 || r.heldClaims.length > 0
 
-export const DoctorPanel = ({ kind }: { kind: string }) => {
+export const DoctorPanel = () => {
   const { repoId } = useRepo()
   const { versions } = useEvents()
   const { data, error } = useJson<DoctorReport>(repoPath("/api/doctor", repoId), [repoId, versions.backlog, versions.gate])
   const [result, setResult] = useState<DoctorFixResponse | null>(null)
   const [fixError, setFixError] = useState<string | null>(null)
 
-  // Doctor reads the whole backlog root, which the engineering kind owns; a
-  // sitter's board has no stray/claim story to repair.
-  if (kind !== "engineering") return null
+  // Rendered from any backlog kind's board: the doctor reads the shared
+  // backlog root, and the audit judges folders against every enabled kind's
+  // status set — the repairs are the same wherever it was opened from.
   if (error) return <div className="error-banner">Could not run the doctor: {error}</div>
   if (!data) return null
   if (!nonEmpty(data) && !result) return <p className="doctor-clean">Backlog is clean — nothing to repair.</p>

@@ -12,6 +12,7 @@ import {
 } from "@agentic-workflow/core/task/store"
 import type { DoctorReport, DoctorFixResponse, HeldClaim } from "../../shared/api.js"
 import type { HubDeps } from "../deps.js"
+import { auditStatuses } from "../kindboard.js"
 import { makeDrivingOracle } from "../driving.js"
 import { ok, type JsonResponse } from "../http.js"
 
@@ -30,7 +31,7 @@ const claimPools = (deps: HubDeps): string[] => [...new Set(deps.boards.flatMap(
 
 /** GET /api/doctor — read-only: what the sweep finds, plus which claims are held. */
 export const getDoctor = async (deps: HubDeps): Promise<JsonResponse> => {
-  const anomalies = await auditBacklog(deps.client, deps.directory, deps.tasksDir)
+  const anomalies = await auditBacklog(deps.client, deps.directory, deps.tasksDir, auditStatuses(deps.boards))
   const findings = formatAnomalies(anomalies, deps.tasksDir)
 
   const oracle = await makeDrivingOracle(deps)
@@ -62,7 +63,7 @@ export const getDoctor = async (deps: HubDeps): Promise<JsonResponse> => {
  * guess which copy is canonical. One commit at the end when anything was rescued.
  */
 export const postDoctorFix = async (deps: HubDeps): Promise<JsonResponse> => {
-  const anomalies = await auditBacklog(deps.client, deps.directory, deps.tasksDir)
+  const anomalies = await auditBacklog(deps.client, deps.directory, deps.tasksDir, auditStatuses(deps.boards))
   const actor = await gitActor(deps.sh, deps.directory)
 
   const rescued: string[] = []
