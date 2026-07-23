@@ -88,7 +88,7 @@ import { enabledWorkflowKinds, modelFor, triggerFor, unknownStageModelKeys, unre
 import type { Config } from "../config.ts"
 import { armCron, armIdle, armPoll, claimsOnIdle, cronError, type TriggerMode, type WatchTimerHandle } from "./trigger.js"
 import type { Action, WorkflowState, Stage, TaskRef } from "@agentic-workflow/core/workflow/state"
-import { clearWorkflow, findSessionDriving, getWorkflow, setWorkflow } from "@agentic-workflow/core/workflow/state"
+import { anyWorkflowActive, clearWorkflow, findSessionDriving, getWorkflow, setWorkflow } from "@agentic-workflow/core/workflow/state"
 
 /**
  * Impure orchestration for the agentic loop. Thin glue over the pure helpers in
@@ -1189,12 +1189,27 @@ const stopWatching = async (deps: Deps, sessionID: string): Promise<boolean> => 
  * `MessageAbortedError` lands on this session. Stops watching (no re-trigger on the
  * trailing idle) AND halts the current loop after the in-flight stage settles: the
  * `interrupted` flag trips drive's stop guard, and dropping `pending` cancels any
- * deferred one-shot work. Mutations are synchronous before the first `await` so a
- * racing `session.idle` sees the cleared `watching`. Idempotent — a double dispatch
- * (session.error + message.updated for one ESC) is a harmless no-op.
+ * deferred one-shot work. Once the target session is known, mutations are synchronous
+ * before the first `await` so a racing `session.idle` sees the cleared `watching`.
+ * Idempotent — a double dispatch (session.error + message.updated for one ESC) is a
+ * harmless no-op.
  */
 export const onInterrupt = async (deps: Deps, sessionID: string): Promise<void> => {
-  const state = getWorkflow(sessionID) // still set on the interrupt (the flag path keeps it)
+  let state = getWorkflow(sessionID) // still set on the interrupt (the flag path keeps it)
+  // Mid-drive the aborted assistant message belongs to the CHILD subtask
+  // session (stages run as `subtask: true` commands), so the direct lookup
+  // misses — and the interrupt would be a silent no-op on the wrong session:
+  // the loop never flagged, the parent left in `watching`, and the trailing
+  // idle free to re-claim work. Walk the parentID chain to the driving loop,
+  // exactly like the tool guard and workflow_verdict do. Best-effort: on a
+  // session-API failure fall back to the raw id (the old behavior).
+  if (!state && anyWorkflowActive()) {
+    const drive = await findDrivingWorkflow(deps.client, sessionID).catch(() => null)
+    if (drive) {
+      sessionID = drive.sessionID
+      state = drive.state
+    }
+  }
   const hadWorkflow = state !== undefined
   const priorPending = pending.get(sessionID)
   pending.delete(sessionID) // synchronous — beat the racing idle; marker released below

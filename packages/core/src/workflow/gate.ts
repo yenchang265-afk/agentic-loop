@@ -322,11 +322,29 @@ export const shipTask = async (ctx: GateCtx, id: string, kind = "engineering"): 
     const elsewhere = await findAnyStatus(ctx, id)
     const where = elsewhere ? statusFolder(elsewhere) : null
     if (where === "completed") {
-      // A crash between the completed/ move and the cleanup below (shipPr is a
-      // slow network call) leaves the worktree orphaned with this retry as the
-      // only path back — release it here too. Idempotent no-op when already gone.
+      // A crash between the completed/ move and shipPr (a slow network call)
+      // leaves the task completed with the branch unpushed and NO PR — and this
+      // retry is the only path back. shipPr is idempotent (push re-runs, an
+      // existing PR is reused), so re-attempt it unless the task file already
+      // records an opened/linked PR; then release the orphaned worktree.
+      const done = elsewhere!
+      const data: Record<string, unknown> = { completed: done.path, alreadyDone: true }
+      let prUrl: string | undefined
+      const prAlreadyRecorded = /\bPR (opened|already open) — /.test(done.body)
+      if (!prAlreadyRecorded) {
+        const pr = await shipPr($, log, directory, config, kind, id, done.title)
+        if (pr.url) {
+          prUrl = pr.url
+          data.pr = { url: pr.url }
+          await appendNote($, { id, path: done.path }, auditNote(`${pr.created ? "PR opened" : "PR already open"} — ${pr.url}`, new Date()), log)
+          await commitBacklog($, directory, config, `loop(${id}): PR ${pr.created ? "opened" : "linked"}`)
+        } else if (pr.attempted) {
+          await appendNote($, { id, path: done.path }, auditNote(`PR not opened — ${pr.reason}`, new Date()), log)
+          await commitBacklog($, directory, config, `loop(${id}): PR not opened`)
+        }
+      }
       await releaseWorktree($, log, directory, config, id)
-      return { ok: true, message: `"${elsewhere!.title}" is already completed. Nothing to do.`, path: elsewhere!.path, data: { completed: elsewhere!.path, alreadyDone: true } }
+      return { ok: true, message: `"${done.title}" is already completed.${prUrl ? ` PR: ${prUrl}` : " Nothing to do."}`, path: done.path, data }
     }
     return { ok: false, message: elsewhere ? `Can't ship "${id}": it's in ${where}, not in-review/.` : ((await unparseableAt(ctx, id)) ?? `No in-review task "${id}".`) }
   }

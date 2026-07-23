@@ -37,7 +37,18 @@ const loadSqlite = async (): Promise<SqliteModule | null> => {
   }
 }
 
+// Keys embed the db mtime, so every write to opencode.db mints a fresh key per
+// session queried — unbounded, this grows for the life of the hub. FIFO-evict
+// past a cap; stale-mtime entries are dead weight anyway.
+const CACHE_CAP = 256
 const cache = new Map<string, SessionUsage>()
+const remember = (key: string, usage: SessionUsage): void => {
+  if (cache.size >= CACHE_CAP) {
+    const oldest = cache.keys().next().value
+    if (oldest !== undefined) cache.delete(oldest)
+  }
+  cache.set(key, usage)
+}
 
 export const readSessionUsage = async (dbPath: string, sessionID: string): Promise<DbResult> => {
   if (!fs.existsSync(dbPath)) return { available: false, reason: "opencode.db not found" }
@@ -88,7 +99,7 @@ export const readSessionUsage = async (dbPath: string, sessionID: string): Promi
         }
       }
       const usage: SessionUsage = { tokens, cost, messages }
-      if (key !== null) cache.set(key, usage)
+      if (key !== null) remember(key, usage)
       return { available: true, usage }
     } finally {
       db.close()

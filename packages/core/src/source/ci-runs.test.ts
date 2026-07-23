@@ -122,7 +122,11 @@ const source = (runs: unknown[], opts: { ledgers?: Record<string, string>; scrip
         { cmd: "git -C /r symbolic-ref refs/remotes/origin/HEAD", result: { stdout: "refs/remotes/origin/main\n" } },
         { cmd: "gh run list --branch main", result: { stdout: JSON.stringify(runs) } },
         { cmd: "git -C /r rev-parse refs/remotes/origin/main", result: { stdout: `${SHA}\n` } },
+        // opts.script is consulted first (prepended below), so a re-claim test
+        // can make the ancestor check succeed; this default is the fresh-claim
+        // case — no remedy branch yet → check fails → pin via `branch -f`.
         ...(opts.script ?? []),
+        { cmd: "git -C /r merge-base --is-ancestor", result: { exitCode: 1 } },
       ],
       opts.log,
     ),
@@ -148,6 +152,21 @@ test("claims the red newest head: default branch resolved, head pinned to a main
   assert.match(item?.state.goal ?? "", /NEVER push main/)
   assert.ok(log.some((c) => c.includes("runs/main-sitter/.claims/head-abcdef123456")))
   assert.ok(log.some((c) => c.startsWith(`git -C /r branch -f main-sitter/abcdef123456 ${SHA}`)))
+})
+
+test("re-claiming a head whose remedy branch already has commits reuses it, never branch -f", async () => {
+  // After a head-ledger loss the same red head can be re-claimed while a prior
+  // run already committed a fix onto main-sitter/<sha>. `branch -f` would reset
+  // the branch to the bare red head and discard that work; the ancestor check
+  // must reuse the existing branch instead.
+  const log: string[] = []
+  const { item, skip } = await source([run()], {
+    log,
+    script: [{ cmd: "git -C /r merge-base --is-ancestor", result: { exitCode: 0 } }],
+  }).claimNext()
+  assert.equal(skip, null)
+  assert.equal(item?.id, `${SHA.slice(0, 6)}-main`)
+  assert.ok(!log.some((c) => c.startsWith("git -C /r branch -f")), "must not reset a remedy branch that already has commits")
 })
 
 test("a green or pending newest head claims nothing", async () => {

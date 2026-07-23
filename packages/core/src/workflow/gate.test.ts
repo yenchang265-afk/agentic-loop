@@ -306,3 +306,48 @@ test("approveTask on an unparseable draft reports the parse problem, not 'no tas
   assert.match(!r.ok ? r.message : "", /title/)
   assert.ok("/repo/docs/tasks/draft/x9y8-broken-task.md" in fs, "nothing moved")
 })
+
+// --- ship retry after a crash between the completed/ move and shipPr ---
+// A crash in that window leaves the task completed with the branch unpushed and
+// no PR; the retry must re-attempt the (idempotent) shipPr, not report success
+// and delete the worktree with the PR silently absent.
+
+test("shipTask retry on an already-completed task re-attempts the PR when none was recorded", async () => {
+  const { ctx, fs, log } = makeCtx(
+    { "completed/t.md": task("Do it") },
+    {
+      git: (cmd) => {
+        if (cmd.includes("rev-parse --verify")) return { exitCode: 0, stdout: "" } // feature/t exists
+        if (cmd.includes("push")) return { exitCode: 0, stdout: "" } // push succeeds
+        return undefined
+      },
+    },
+  )
+  const r = await shipTask(ctx, "t")
+  assert.ok(r.ok)
+  assert.ok(
+    log.some((c) => c.includes("push -u origin feature/t")),
+    "the retry must push the unshipped branch",
+  )
+  // gh is stubbed to no-op here, so the PR isn't actually opened — the point is
+  // the attempt is recorded (a "PR not opened" note appended), not silently skipped.
+  assert.ok(log.some((c) => c.includes("PR not opened")), "the PR attempt must be audited on the completed task")
+  assert.ok("/repo/docs/tasks/completed/t.md" in fs, "the task stays completed")
+})
+
+test("shipTask retry does nothing when the completed task already recorded a PR", async () => {
+  const withPr = `${task("Do it")}\n\n> PR opened — https://example.com/pr/1 _(2026-01-01)_`
+  const { ctx, log } = makeCtx(
+    { "completed/t.md": withPr },
+    {
+      git: (cmd) => {
+        if (cmd.includes("rev-parse --verify")) return { exitCode: 0, stdout: "" }
+        if (cmd.includes("push")) return { exitCode: 0, stdout: "" }
+        return undefined
+      },
+    },
+  )
+  const r = await shipTask(ctx, "t")
+  assert.ok(r.ok)
+  assert.ok(!log.some((c) => c.includes("push -u origin")), "no re-push once a PR is on record")
+})

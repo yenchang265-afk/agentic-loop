@@ -134,6 +134,7 @@ let pending: VerdictRecord | null = null // verdict(s) recorded for the current 
 let verdictRetried = false // whether the current check stage already got its one no-verdict re-fire
 let verdictRejected = false // whether the current check stage had a verdict REJECTED (incomplete axis coverage) — changes the re-fire wording
 let driftNoted = false // whether this stage attempt already audited an out-of-stage verdict (a drifting agent may call repeatedly)
+let buildNoteFor: string | null = null // `<taskId>:<iteration>` the "BUILD started" note was appended for — a same-stage re-fire must not duplicate it
 let samples: StageSample[] = [] // per-run metrics
 let lastFireAt = Date.now()
 let stageDeadline: number | null = null // wall-clock cap for the stage in flight
@@ -415,6 +416,7 @@ const startTask = async (t: Task): Promise<{ error: string } | { state: Workflow
   pending = null
   verdictRetried = false
   verdictRejected = false
+  buildNoteFor = null
   // Only workflow_claim sets activeClaim; a stale one left by a claim flow that
   // died mid-setup would fire onTerminal against the WRONG work item at this
   // loop's end. A workflow_start loop has no scheduler claim behind it.
@@ -451,6 +453,7 @@ const startPlan = async (t: Task): Promise<{ error: string } | { state: Workflow
   pending = null
   verdictRetried = false
   verdictRejected = false
+  buildNoteFor = null
   activeClaim = null // see startTask — a workflow_start loop has no scheduler claim behind it
   const state = planEntryState(t)
   active = state
@@ -582,6 +585,7 @@ server.registerTool(
     pending = null
     verdictRetried = false
     verdictRejected = false
+    buildNoteFor = null
     const loaded = manifestFor(claim.item.workflowKind)
     if (stageDef(loaded.manifest, state.stage).isolation !== "none") {
       try {
@@ -751,7 +755,10 @@ server.registerTool(
     lastFireAt = Date.now()
     pending = null // no stale verdict may leak into this stage
     verdictRejected = false // ...nor a stale rejection into this stage's re-fire wording
-    if (stage === "build" && active.task) {
+    if (stage === "build" && active.task && buildNoteFor !== `${active.task.id}:${active.iteration}`) {
+      // Same-stage re-fires are legal (stageOrderError allows them), but the
+      // audited note must land once per build iteration, not once per call.
+      buildNoteFor = `${active.task.id}:${active.iteration}`
       const actor = await gitActor(sh, directory)
       await appendNote(sh, active.task, auditNote(`BUILD started (iteration ${active.iteration + 1})`, new Date(), actor), log)
       // A degraded isolation (detached HEAD, checkout failure) must be visible
@@ -1309,6 +1316,7 @@ server.registerTool(
     pending = null
     verdictRetried = false
     verdictRejected = false
+    buildNoteFor = null
     const actor = await gitActor(sh, directory)
     if (snap && snap.task?.id === id) {
       active = { ...snap, task: { ...snap.task, path: t.path } }

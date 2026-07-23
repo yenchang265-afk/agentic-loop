@@ -17,6 +17,9 @@ export const projectSlug = (directory: string): string => directory.replace(/[^a
 
 export const defaultProjectsDir = (): string => path.join(os.homedir(), ".claude", "projects")
 
+// Keyed by transcript path — bounded only by transcript count, which grows for
+// the life of the hub. FIFO-evict past a cap; an evicted hot file just re-parses.
+const CACHE_CAP = 256
 const cache = new Map<string, { size: number; records: UsageRecord[] }>()
 
 const readFileRecords = async (file: string): Promise<UsageRecord[]> => {
@@ -67,6 +70,10 @@ const readFileRecords = async (file: string): Promise<UsageRecord[]> => {
     }
   } catch {
     // truncated/rotating file — keep what we parsed
+  }
+  if (cache.size >= CACHE_CAP) {
+    const oldest = cache.keys().next().value
+    if (oldest !== undefined) cache.delete(oldest)
   }
   cache.set(file, { size, records })
   return records
