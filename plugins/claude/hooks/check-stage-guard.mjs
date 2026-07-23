@@ -473,8 +473,8 @@ var isAdoMcpMutationTool = (toolName) => {
 var isGitPushViolation = (cmd) => {
   const c = cmd.trim();
   if (!/^git\s+(?:-\S+\s+|-C\s+\S+\s+)*push\b/.test(c)) return false;
-  if (/(?:^|\s)(?:-f|--force|--force-with-lease)(?:[=\s]|$)/.test(c)) return true;
-  if (/(?:^|\s)--delete(?:\s|$)/.test(c)) return true;
+  if (/(?:^|\s)(?:--force(?:-with-lease(?:=\S*)?)?|--delete)(?:\s|$)/.test(c)) return true;
+  if (c.split(/\s+/).some((t) => /^-[a-zA-Z]+$/.test(t) && /[fd]/.test(t))) return true;
   const bare = (ref) => ref.replace(/^refs\/heads\//, "");
   const protectedRef = (ref) => ["main", "master", "HEAD"].includes(bare(ref));
   const tokens = c.split(/\s+/);

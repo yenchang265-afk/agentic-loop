@@ -206,11 +206,18 @@ export const makeAdoCiRunsSource = (deps: AdoCiRunsDeps): WorkSource => {
         await $`rmdir ${`${claimsDir}/head-${shortSha(judged.sha)}`}`.quiet().nothrow()
         return { item: null, skip: { message: `${kind}: ${b} moved during claim — retrying next poll`, actionable: false } }
       }
-      const pin = await $`git -C ${directory} branch -f ${remedyBranch} ${judged.sha}`.quiet().nothrow()
-      if (pin.exitCode !== 0) {
-        await log("warn", `${kind}: could not pin ${remedyBranch} at ${shortSha(judged.sha)} — skipping`)
-        await $`rmdir ${`${claimsDir}/head-${shortSha(judged.sha)}`}`.quiet().nothrow()
-        return { item: null, skip: { message: `${kind}: could not pin the red head locally`, actionable: true } }
+      // `branch -f` would silently discard prior remedy commits when the same
+      // head is re-claimed (possible after head-ledger loss): if the branch
+      // already contains the red head, earlier remedy work sits on top of it —
+      // reuse the branch instead of resetting it.
+      const already = await $`git -C ${directory} merge-base --is-ancestor ${judged.sha} ${remedyBranch}`.quiet().nothrow()
+      if (already.exitCode !== 0) {
+        const pin = await $`git -C ${directory} branch -f ${remedyBranch} ${judged.sha}`.quiet().nothrow()
+        if (pin.exitCode !== 0) {
+          await log("warn", `${kind}: could not pin ${remedyBranch} at ${shortSha(judged.sha)} — skipping`)
+          await $`rmdir ${`${claimsDir}/head-${shortSha(judged.sha)}`}`.quiet().nothrow()
+          return { item: null, skip: { message: `${kind}: could not pin the red head locally`, actionable: true } }
+        }
       }
       return { item: redHeadWorkItem(loaded, "ado", b, judged.sha, judged.failing, deps.ado.access), skip: null }
     },

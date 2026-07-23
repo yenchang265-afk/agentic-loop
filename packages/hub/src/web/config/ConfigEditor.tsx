@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react"
-import type {
-  ConfigEdit,
-  ConfigLayer,
-  ConfigLayerResponse,
-  ConfigProvenance,
-  MonitorKindsResponse,
-  SaveConfigResponse,
+import {
+  REDACTED,
+  type ConfigEdit,
+  type ConfigLayer,
+  type ConfigLayerResponse,
+  type ConfigProvenance,
+  type MonitorKindsResponse,
+  type SaveConfigResponse,
 } from "../../shared/api.js"
 import { postJson } from "../api.js"
 import { useEvents } from "../events.js"
@@ -91,6 +92,14 @@ export const ConfigEditor = () => {
   const str = (path: string): string => {
     const v = pending(path)
     return v === undefined || v === null ? "" : String(v)
+  }
+
+  // A stored secret arrives as the REDACTED sentinel; render it blank so the
+  // "unchanged (stored)" placeholder shows and typing can't append to the
+  // sentinel (saving `__REDACTED__<token>` would corrupt the stored value).
+  const secretStr = (path: string): string => {
+    const v = str(path)
+    return v === REDACTED ? "" : v
   }
 
   const setOrClear = (path: string, text: string, cast: (s: string) => unknown = (s) => s): void =>
@@ -208,7 +217,7 @@ export const ConfigEditor = () => {
             >
               <input
                 type="password"
-                value={str("ado.pat")}
+                value={secretStr("ado.pat")}
                 onChange={(e) => setOrClear("ado.pat", e.target.value)}
                 placeholder={data.redactedPaths.includes("ado.pat") ? "unchanged (stored)" : ""}
               />

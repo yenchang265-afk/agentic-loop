@@ -281,7 +281,8 @@ export const isAdoMcpMutationTool = (toolName) => {
  * or default branch, never force. A push allowlist glob (`git push origin main-sitter/*`)
  * compiles with dotAll, so `.*` matches a `:dst` refspec and a space —
  * `git push origin x:main` or `... --force` slip through the glob. On top of it, reject:
- *  - any force (`-f`, `--force`, `--force-with-lease`) or a delete (`--delete`, `:dst` with empty src);
+ *  - any force (`-f`, `--force`, `--force-with-lease`) or a delete (`-d`, `--delete`,
+ *    `:dst` with empty src), including bundled short-flag clusters (`-fd`);
  *  - a `+`-prefixed refspec (a forced ref update);
  *  - a `src:dst` refspec whose destination differs from its source (pushing onto a
  *    DIFFERENT branch — the `x:main` / `x:refs/heads/main` escape);
@@ -296,8 +297,10 @@ export const isAdoMcpMutationTool = (toolName) => {
 export const isGitPushViolation = (cmd) => {
   const c = cmd.trim()
   if (!/^git\s+(?:-\S+\s+|-C\s+\S+\s+)*push\b/.test(c)) return false
-  if (/(?:^|\s)(?:-f|--force|--force-with-lease)(?:[=\s]|$)/.test(c)) return true
-  if (/(?:^|\s)--delete(?:\s|$)/.test(c)) return true
+  if (/(?:^|\s)(?:--force(?:-with-lease(?:=\S*)?)?|--delete)(?:\s|$)/.test(c)) return true
+  // Short flags are walked per token so the short delete form (`-d`) and
+  // bundled clusters (`-fd`, `-df`) are caught, not just a lone `-f`.
+  if (c.split(/\s+/).some((t) => /^-[a-zA-Z]+$/.test(t) && /[fd]/.test(t))) return true
   const bare = (ref) => ref.replace(/^refs\/heads\//, "")
   const protectedRef = (ref) => ["main", "master", "HEAD"].includes(bare(ref))
   const tokens = c.split(/\s+/)
