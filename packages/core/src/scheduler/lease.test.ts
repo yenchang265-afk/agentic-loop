@@ -13,12 +13,23 @@ const OWNER = `${LEASE_DIR}/owner.json`
  * so a string-matching fake can't exercise it. Mirrors the shape of
  * makeShell in ../task/store.test.ts.
  */
-const makeLeaseFs = (opts?: { failCmd?: (cmd: string) => boolean }) => {
+const makeLeaseFs = (opts?: { failCmd?: (cmd: string) => boolean; onCmd?: (cmd: string) => void }) => {
   const dirs = new Set<string>(["/", "/r"])
   const files = new Map<string, string>()
   const log: string[] = []
   /** Invariant probe: the lease dir must never be visible without its owner record. */
   let exposedBare = false
+  // Synthetic inode identity, so `ls -di` can witness a directory being
+  // REPLACED (rename-aside + recreate) rather than edited in place — the signal
+  // heartbeatLease uses to detect a takeover across its read→write window.
+  const inodes = new Map<string, number>()
+  let nextInode = 1
+  const setInode = (p: string): void => {
+    if (!inodes.has(p)) inodes.set(p, nextInode++)
+  }
+  // A one-shot callback fired just before the next owner.json write lands, so a
+  // test can interleave a rival takeover into the heartbeat's read→write window.
+  let onBeforeWrite: (() => void) | null = null
 
   const parent = (p: string): string => p.slice(0, p.lastIndexOf("/")) || "/"
   const base = (p: string): string => p.slice(p.lastIndexOf("/") + 1)
@@ -28,13 +39,16 @@ const makeLeaseFs = (opts?: { failCmd?: (cmd: string) => boolean }) => {
     for (const part of parts) {
       cur += `/${part}`
       dirs.add(cur)
+      setInode(cur)
     }
   }
   const rmTree = (p: string): void => {
     dirs.delete(p)
     files.delete(p)
+    inodes.delete(p)
     for (const d of [...dirs]) if (d.startsWith(`${p}/`)) dirs.delete(d)
     for (const f of [...files.keys()]) if (f.startsWith(`${p}/`)) files.delete(f)
+    for (const i of [...inodes.keys()]) if (i.startsWith(`${p}/`)) inodes.delete(i)
   }
   const moveTree = (src: string, dst: string): void => {
     if (files.has(src)) {
@@ -46,7 +60,11 @@ const makeLeaseFs = (opts?: { failCmd?: (cmd: string) => boolean }) => {
     const subFiles = [...files.keys()].filter((f) => f.startsWith(`${src}/`))
     for (const d of subDirs) {
       dirs.delete(d)
-      dirs.add(dst + d.slice(src.length))
+      const to = dst + d.slice(src.length)
+      dirs.add(to)
+      // A move carries the inode with it — identity follows the directory.
+      if (inodes.has(d)) inodes.set(to, inodes.get(d)!)
+      inodes.delete(d)
     }
     for (const f of subFiles) {
       files.set(dst + f.slice(src.length), files.get(f)!)
@@ -64,6 +82,7 @@ const makeLeaseFs = (opts?: { failCmd?: (cmd: string) => boolean }) => {
     if ((m = /^mkdir (\S+)$/.exec(cmd))) {
       if (dirs.has(m[1]!)) return { exitCode: 1 }
       dirs.add(m[1]!)
+      setInode(m[1]!)
       return { exitCode: 0 }
     }
     if ((m = /^mv (\S+) (\S+)$/.exec(cmd))) {
@@ -82,11 +101,22 @@ const makeLeaseFs = (opts?: { failCmd?: (cmd: string) => boolean }) => {
       files.delete(m[1]!)
       return { exitCode: 0 }
     }
+    if ((m = /^ls -di (\S+)$/.exec(cmd))) {
+      return dirs.has(m[1]!) ? { exitCode: 0, stdout: `${inodes.get(m[1]!) ?? 0} ${m[1]!}` } : { exitCode: 1 }
+    }
     if ((m = /^cat (\S+)$/.exec(cmd))) {
       const content = files.get(m[1]!)
       return content === undefined ? { exitCode: 1 } : { exitCode: 0, stdout: content }
     }
     if ((m = /^printf '%s' ([\s\S]*) > (\S+)$/.exec(cmd))) {
+      // A takeover can be armed to land right before our owner.json write —
+      // reproducing the read→write race heartbeatLease's inode witness guards.
+      // writeFileAtomic writes a `owner.json.tmp-*` first, so match the prefix.
+      if (m[2]!.startsWith(OWNER) && onBeforeWrite) {
+        const run = onBeforeWrite
+        onBeforeWrite = null
+        run()
+      }
       if (!dirs.has(parent(m[2]!))) return { exitCode: 1 }
       files.set(m[2]!, m[1]!)
       return { exitCode: 0 }
@@ -104,6 +134,7 @@ const makeLeaseFs = (opts?: { failCmd?: (cmd: string) => boolean }) => {
       if (i < exprs.length) cmd += String(exprs[i])
     })
     cmd = cmd.trim().replace(/\s+/g, " ")
+    opts?.onCmd?.(cmd)
     log.push(cmd)
     const chain = {
       quiet: () => chain,
@@ -127,7 +158,17 @@ const makeLeaseFs = (opts?: { failCmd?: (cmd: string) => boolean }) => {
     mkdirp(LEASE_DIR)
     if (ownerJson !== undefined) files.set(OWNER, ownerJson)
   }
-  return { $, dirs, files, log, seedLease, wasExposedBare: () => exposedBare }
+  // Replace the lease DIRECTORY (not just its record) with a rival's, as a real
+  // takeover does — giving the dir a fresh inode.
+  const replaceLeaseWith = (ownerJson: string) => {
+    rmTree(LEASE_DIR)
+    mkdirp(LEASE_DIR)
+    files.set(OWNER, ownerJson)
+  }
+  const armTakeoverBeforeWrite = (ownerJson: string) => {
+    onBeforeWrite = () => replaceLeaseWith(ownerJson)
+  }
+  return { $, dirs, files, log, seedLease, armTakeoverBeforeWrite, wasExposedBare: () => exposedBare }
 }
 
 const now = new Date("2026-07-06T12:00:00.000Z")
@@ -244,6 +285,20 @@ test("heartbeatLease refuses to clobber a lease it no longer owns (post-takeover
   assert.equal(await heartbeatLease($, "/r", "docs/tasks", me, now), false)
   const owner = await readLeaseOwner($, "/r", "docs/tasks")
   assert.equal(owner?.pid, 200, "the new owner's record survives")
+})
+
+test("heartbeatLease detects a takeover that lands in its read→write window and stands down (T3)", async () => {
+  // The dangerous ordering: a rival takeover replaces the lease dir AFTER our
+  // ownership read but BEFORE our write, so our write clobbers the rival's
+  // fresh record and reads back as "still ours". The owner read-back alone
+  // can't see the theft — the dir-inode witness must, so this watcher reports
+  // a lost heartbeat and removes the record it wrongly wrote.
+  const { $, files, armTakeoverBeforeWrite } = makeLeaseFs()
+  await acquireLease($, "/r", "docs/tasks", me, now)
+  armTakeoverBeforeWrite(JSON.stringify(liveOwner("2026-07-06T12:00:59.000Z")))
+  const later = new Date("2026-07-06T12:01:00.000Z")
+  assert.equal(await heartbeatLease($, "/r", "docs/tasks", me, later), false, "must report the lease lost, not resurrected")
+  assert.equal(files.has(OWNER), false, "our wrongly-written record was removed, leaving the lease re-acquirable")
 })
 
 test("heartbeatLease reports false when the write never landed (lease dir yanked mid-beat)", async () => {

@@ -160,13 +160,21 @@ export const heartbeatLease = async (
   owner: { readonly pid: number; readonly host: string; readonly intervalMs: number },
   now: Date,
 ): Promise<boolean> => {
+  const dir = leaseDir(directory, tasksDir)
+  // Directory-identity witness for the read→write window. A takeover never
+  // edits owner.json in place — it replaces the lease DIRECTORY (rename aside
+  // + staged re-acquire) — so the dir's inode changing across this heartbeat
+  // proves a takeover interleaved. The owner read-back alone cannot see that:
+  // our own write clobbers the rival's fresh record and then reads back as
+  // "still ours", which would silently steal the lease back.
+  const inodeOf = async (): Promise<string | null> => {
+    const out = await $`ls -di ${dir}`.quiet().nothrow()
+    if (out.exitCode !== 0) return null
+    return out.stdout.toString().trim().split(/\s+/)[0] || null
+  }
+  const dirBefore = await inodeOf()
   const current = await readLeaseOwner($, directory, tasksDir)
   if (!current || current.pid !== owner.pid || current.host !== owner.host) return false
-  // The read-then-write is not atomic: a takeover can land in between. Two
-  // narrowing rails — the write itself must land (a yanked dir fails the
-  // write), and the record read back must still be ours (a rival's fresh
-  // record wins). Neither closes the window fully; both shrink it and make
-  // the loss VISIBLE to this watcher instead of silent.
   const wrote = await writeOwner($, directory, tasksDir, {
     ...owner,
     startedAt: current.startedAt,
@@ -174,7 +182,20 @@ export const heartbeatLease = async (
   })
   if (!wrote) return false
   const after = await readLeaseOwner($, directory, tasksDir)
-  return after !== null && after.pid === owner.pid && after.host === owner.host
+  if (after === null || after.pid !== owner.pid || after.host !== owner.host) return false
+  const dirAfter = await inodeOf()
+  // Unchanged inode ⇒ no takeover interleaved; a null witness (ls failed) is
+  // inconclusive — keep the old behavior rather than self-demote spuriously.
+  if (dirBefore === null || dirAfter === dirBefore) return true
+  // The dir was replaced mid-heartbeat and the record read back as OURS — we
+  // wrote into the rival's fresh lease over its record. The rival's record is
+  // gone (unrecoverable), so remove ours — never a rival's; the read-back
+  // above proved owner.json is ours — and report the loss. Both watchers then
+  // observe a failed heartbeat and stand down, and the vacant lease (missing
+  // record ⇒ stale) is re-acquirable immediately instead of two watchers
+  // driving one clone.
+  await $`rm -f ${ownerFile(directory, tasksDir)}`.quiet().nothrow()
+  return false
 }
 
 /**

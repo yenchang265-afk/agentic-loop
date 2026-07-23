@@ -118,6 +118,23 @@ test("loadState tolerates a legacy paused flag on an otherwise valid snapshot", 
   assert.deepEqual(loaded, sampleState)
 })
 
+test("loadState fails closed on a tampered task id that would traverse out of the backlog", async () => {
+  // task.id reaches statePath()/rm -f and task-file paths; a `../`-bearing id
+  // from a tampered snapshot must be rejected by the schema, not honored.
+  const dir = await mkdtemp(path.join(tmpdir(), "agentic-workflow-persist-"))
+  fs.mkdirSync(path.join(dir, "docs/tasks/runs"), { recursive: true })
+  fs.writeFileSync(
+    path.join(dir, "docs/tasks/runs/evil.state.json"),
+    JSON.stringify({ ...sampleState, task: { ...sampleState.task, id: "../../../../etc/hosts" } }),
+  )
+  assert.equal(await loadState(fakeClient(dir), dir, "docs/tasks", "evil"), null)
+})
+
+test("loadState refuses an unsafe id argument before reading anything", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "agentic-workflow-persist-"))
+  assert.equal(await loadState(fakeClient(dir), dir, "docs/tasks", "../../secrets"), null)
+})
+
 test("clearState removes the snapshot and is idempotent", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "agentic-workflow-persist-"))
   const $ = fakeShell()

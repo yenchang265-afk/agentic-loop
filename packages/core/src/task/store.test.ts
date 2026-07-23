@@ -891,3 +891,44 @@ test("writeTask writes when the destination is free", async () => {
   assert.match(out.path, /\/r\/docs\/tasks\/draft\/.*\.md$/)
   assert.ok(out.id)
 })
+
+// --- unsafe-id rails: ids/queries reach path.join(...) → the filesystem, so a
+// `../`-bearing value from an untrusted caller (MCP client, tampered snapshot)
+// must be rejected BEFORE any fs use, not resolved into a traversal read/move.
+
+test("findByIdIn rejects a traversal id without touching the filesystem", async () => {
+  const cmds: string[] = []
+  const $ = makeShell(() => ({ exitCode: 0, stdout: "" }), cmds)
+  const found = await findByIdIn($, "/repo", "docs/tasks", "queued", "../../../etc/hosts")
+  assert.equal(found, null)
+  assert.deepEqual(cmds, [], "no shell command may run for an unsafe id")
+})
+
+test("resolveTaskIdIn rejects a traversal query instead of blessing it as an id", async () => {
+  const cmds: string[] = []
+  // The exact-match branch would `cat` the traversed path (exit 0 here) and
+  // return `{ id: query }` — feeding the raw traversal string to every
+  // downstream path builder. It must bail before the shell instead.
+  const $ = makeShell(() => ({ exitCode: 0, stdout: "task file" }), cmds)
+  const resolved = await resolveTaskIdIn($, "/repo", "docs/tasks", "queued", "../../secrets")
+  assert.equal(resolved, null)
+  assert.deepEqual(cmds, [], "no shell command may run for an unsafe query")
+})
+
+test("moveTask refuses an unsafe id before any filesystem work", async () => {
+  const cmds: string[] = []
+  const $ = makeShell(() => ({ exitCode: 0 }), cmds)
+  await assert.rejects(
+    () => moveTask($, { id: "../evil", path: "/repo/docs/tasks/in-review/x.md" }, "completed"),
+    /unsafe id/,
+  )
+  assert.deepEqual(cmds, [], "no mv/mkdir may run for an unsafe id")
+})
+
+test("findByIdIn still resolves ordinary modern and legacy ids", async () => {
+  const file = serializeTask({ title: "Add rate limit", priority: 2 })
+  const $ = makeShell((cmd) => (cmd.startsWith("cat ") ? { exitCode: 0, stdout: file } : { exitCode: 1 }))
+  const found = await findByIdIn($, "/repo", "docs/tasks", "queued", "f7k3-add-rate-limit")
+  assert.ok(found, "safe ids must keep resolving")
+  assert.equal(found?.id, "f7k3-add-rate-limit")
+})

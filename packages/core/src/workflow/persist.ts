@@ -2,6 +2,7 @@ import path from "node:path"
 import { writeFileAtomic } from "../fsatomic.js"
 import type { Client, Shell } from "../host.js"
 import { z } from "zod"
+import { isSafeTaskId, SAFE_TASK_ID_RE } from "../task/schema.js"
 import { ADO_ACCESS_METHODS, CODE_PLATFORMS, STAGES, type WorkflowState } from "./state.js"
 
 /**
@@ -30,7 +31,9 @@ const GitRefSchema = z.object({
 })
 
 const TaskRefSchema = z.object({
-  id: z.string(),
+  // The id from a snapshot reaches `statePath`/`rm -f` and task-file paths — a
+  // tampered `../…` id must fail the schema, not traverse out of the backlog.
+  id: z.string().regex(SAFE_TASK_ID_RE),
   path: z.string(),
   acceptance: z.array(z.string()),
 })
@@ -86,6 +89,7 @@ export const loadState = async (
   id: string,
   resumableStages: readonly string[] = SNAPSHOT_STAGES,
 ): Promise<WorkflowState | null> => {
+  if (!isSafeTaskId(id)) return null // fail closed — id feeds a path below
   const rel = `${tasksDir}/runs/${id}.state.json`
   const read = await client.file.read({ query: { path: rel, directory } }).catch(() => null)
   const content = read?.data?.content

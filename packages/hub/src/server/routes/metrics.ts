@@ -31,29 +31,33 @@ export const getMetrics = async (deps: HubDeps): Promise<JsonResponse> => {
     .filter((n) => n.type === "file" && n.name.endsWith(".md"))
     .map((n) => n.name.replace(/\.md$/, ""))
 
-  // Every run's two files fetched concurrently: this is the one route that
-  // touches the whole of runs/, so a serial loop would scale its latency with
-  // the backlog's whole history.
-  const reads = await Promise.all(
-    ids.map(async (id) => {
-      const [log, sidecar] = await Promise.all([
-        read(deps, `${deps.tasksDir}/runs/${id}.md`),
-        read(deps, `${deps.tasksDir}/runs/${id}.metrics.json`),
-      ])
-      return { id, log, sidecar }
-    }),
-  )
-
+  // Every run's two files fetched with bounded concurrency: this is the one
+  // route that touches the whole of runs/, so a serial loop would scale its
+  // latency with the backlog's whole history — but an unbounded fan-out
+  // materializes every log in memory at once. Each batch is parsed as it
+  // lands so the raw content is released before the next batch is read.
+  const CONCURRENCY = 16
   const inputs: RunMetricsInput[] = []
   const skipped: string[] = []
-  for (const { id, log, sidecar } of reads) {
-    if (log === null) {
-      // Listed but unreadable. Reported rather than dropped, so a permission
-      // problem or a dangling link shows up instead of shrinking the denominator.
-      skipped.push(id)
-      continue
+  for (let i = 0; i < ids.length; i += CONCURRENCY) {
+    const batch = await Promise.all(
+      ids.slice(i, i + CONCURRENCY).map(async (id) => {
+        const [log, sidecar] = await Promise.all([
+          read(deps, `${deps.tasksDir}/runs/${id}.md`),
+          read(deps, `${deps.tasksDir}/runs/${id}.metrics.json`),
+        ])
+        return { id, log, sidecar }
+      }),
+    )
+    for (const { id, log, sidecar } of batch) {
+      if (log === null) {
+        // Listed but unreadable. Reported rather than dropped, so a permission
+        // problem or a dangling link shows up instead of shrinking the denominator.
+        skipped.push(id)
+        continue
+      }
+      inputs.push({ id, log: parseRunLog(log), sidecar: sidecar === null ? null : parseRunMetrics(sidecar) })
     }
-    inputs.push({ id, log: parseRunLog(log), sidecar: sidecar === null ? null : parseRunMetrics(sidecar) })
   }
 
   return ok(aggregateMetrics(inputs, skipped))

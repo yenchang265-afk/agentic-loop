@@ -156,6 +156,19 @@ export const SHORT_ID_RE = new RegExp(`^(?=[a-z0-9]{${SHORT_ID_LEN}}-)[a-z0-9]*[
 export const shortIdOf = (id: string): string => (SHORT_ID_RE.test(id) ? id.slice(0, SHORT_ID_LEN) : id)
 
 /**
+ * Charset rail for any id or id-query that reaches a filesystem path
+ * (`<id>.md`, `<id>.state.json`). Generated ids are kebab-case
+ * (`mintShortId` + `slugify`) and legacy ids are slugs, so this allowlist
+ * rejects nothing real — while a `/`-bearing or dot-led string from an
+ * untrusted caller (an MCP client, a tampered state snapshot) would otherwise
+ * traverse out of the backlog when `path.join` collapses it.
+ */
+export const SAFE_TASK_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+
+/** Whether `id` is safe to interpolate into a backlog filesystem path. Pure. */
+export const isSafeTaskId = (id: string): boolean => SAFE_TASK_ID_RE.test(id)
+
+/**
  * Mint a random `SHORT_ID_LEN`-char base36 short hash carrying at least one digit,
  * so `SHORT_ID_RE` can tell a mint apart from an all-letter legacy slug. Impure
  * (host RNG).

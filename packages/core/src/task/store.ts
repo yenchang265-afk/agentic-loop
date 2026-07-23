@@ -2,7 +2,7 @@ import path from "node:path"
 import { writeFileAtomic } from "../fsatomic.js"
 import type { Client, Log, Shell } from "../host.js"
 import { redact } from "./redact.js"
-import { buildTaskFile, isPaired, parseTask, SHORT_ID_RE, shortIdOf, type Task, type TaskInput } from "./schema.js"
+import { buildTaskFile, isPaired, isSafeTaskId, parseTask, SHORT_ID_RE, shortIdOf, type Task, type TaskInput } from "./schema.js"
 
 /**
  * Filesystem IO for the task backlog. **Impure**: reads via the host client
@@ -274,6 +274,12 @@ export const findByIdIn = async (
   id: string,
   log?: Log,
 ): Promise<Task | null> => {
+  // Ids reach `path.join` here, so an unsafe one (`../…`) would escape the
+  // backlog — reject before any fs use rather than trusting the caller.
+  if (!isSafeTaskId(id)) {
+    log?.("warn", `rejecting unsafe task id ${JSON.stringify(id)}`)
+    return null
+  }
   const filename = `${id}.md`
   const file = path.join(directory, tasksDir, status, filename)
   const out = await $`cat ${file}`.quiet().nothrow()
@@ -309,6 +315,12 @@ export const resolveTaskIdIn = async (
   log?: Log,
 ): Promise<ResolvedId> => {
   if (!query) return null
+  // The exact-match branch below would bless a `../…` query as a valid id and
+  // feed it to every downstream path builder — reject unsafe queries outright.
+  if (!isSafeTaskId(query)) {
+    log?.("warn", `rejecting unsafe id query ${JSON.stringify(query)}`)
+    return null
+  }
   const dir = path.join(directory, tasksDir, status)
   // (a) exact filename — a full modern id, or a legacy slug id.
   const exact = await $`cat ${path.join(dir, `${query}.md`)}`.quiet().nothrow()
@@ -612,6 +624,12 @@ export const statusOf = (task: FileRef): TaskStatus => {
  * skipping a stage.
  */
 export const moveTask = async ($: Shell, task: FileRef, toStatus: TaskStatus): Promise<string> => {
+  // The destination is built from `task.id` — an unsafe id (`../…`) would
+  // relocate the file outside the backlog. Callers pass ids from parsed
+  // filenames, but this is the last write boundary, so enforce it here too.
+  if (!isSafeTaskId(task.id)) {
+    throw new Error(`cannot move task: unsafe id ${JSON.stringify(task.id)}`)
+  }
   const fromStatus = statusOf(task)
   if (!canTransition(fromStatus, toStatus)) {
     throw new Error(`cannot move ${task.id} from ${fromStatus} to ${toStatus} — tasks must advance one stage at a time`)

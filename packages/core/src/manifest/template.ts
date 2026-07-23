@@ -42,7 +42,12 @@ export const renderSection = (tpl: string, ctx: TemplateContext): string => {
   // Expand innermost blocks first so nesting works without a real parser.
   const BLOCK = /\{\{#([\w.-]+)\}\}((?:(?!\{\{[#/])[\s\S])*?)\{\{\/\1\}\}/
   let out = tpl
-  for (let guard = 0; guard < 100; guard++) {
+  // Each pass removes exactly one innermost block and a body can't introduce
+  // new markers (the regex excludes them), so this always terminates — the
+  // bound is a pure runaway backstop. It must sit far above any real prompt's
+  // block count: tripping it silently leaves raw `{{#…}}` markers in the
+  // composed prompt (the variable pass below only handles `{{path}}`).
+  for (let guard = 0; guard < 10_000; guard++) {
     const m = BLOCK.exec(out)
     if (!m) break
     const [whole, path, body] = m

@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process"
 import fs from "node:fs"
+import fsp from "node:fs/promises"
 import path from "node:path"
 import type { Client, FileNode, Shell, ShellOutput } from "@agentic-workflow/core/host"
 
@@ -81,14 +82,24 @@ const contained = (directory: string, rel: string): string | null => {
   return abs === root || abs.startsWith(root + path.sep) ? abs : null
 }
 
+/**
+ * Refuse to materialize any single file larger than this (a runaway run log,
+ * a giant transcript). Oversize reads report "unreadable" (null) — dropping
+ * one pathological file from a view beats freezing or OOMing the whole hub.
+ */
+const MAX_READ_BYTES = 8 * 1024 * 1024
+
 export const fsClient: Client = {
   file: {
+    // Truly-async fs so a large runs/ history doesn't block the event loop
+    // (readFileSync here serialized every concurrent request AND the SSE
+    // heartbeats behind whole-directory scans).
     async list({ query }) {
       const abs = contained(query.directory, query.path)
       if (!abs) return { data: [] }
       let entries: fs.Dirent[]
       try {
-        entries = fs.readdirSync(abs, { withFileTypes: true })
+        entries = await fsp.readdir(abs, { withFileTypes: true })
       } catch {
         return { data: [] }
       }
@@ -104,7 +115,9 @@ export const fsClient: Client = {
       const abs = contained(query.directory, query.path)
       if (!abs) return { data: null }
       try {
-        return { data: { content: fs.readFileSync(abs, "utf8") } }
+        const st = await fsp.stat(abs)
+        if (!st.isFile() || st.size > MAX_READ_BYTES) return { data: null }
+        return { data: { content: await fsp.readFile(abs, "utf8") } }
       } catch {
         return { data: null }
       }
