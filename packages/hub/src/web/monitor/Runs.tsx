@@ -30,6 +30,11 @@ const RunDetail = ({ id }: { id: string }) => {
             snapshot: parked at <strong>{detail.snapshot.stage}</strong> (iteration {detail.snapshot.iteration + 1})
             {detail.snapshot.branch ? ` on ${detail.snapshot.branch}` : ""}
           </Chip>
+          {detail.snapshot.artifactStages && detail.snapshot.artifactStages.length > 0 && (
+            <Chip>
+              a resume would carry: <strong>{detail.snapshot.artifactStages.join(", ")}</strong>
+            </Chip>
+          )}
         </div>
       )}
       {detail.log.summaries.map((s, i) => (

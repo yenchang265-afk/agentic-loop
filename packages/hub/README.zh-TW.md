@@ -73,7 +73,8 @@ localStorage 中），SSE 事件和把關點通知也都會標上儲存庫 id。
   由該類型的清單衍生而來——待辦型的類型會拿到一個看板，架在它自己的
   `docs/tasks/<status>/` 資料夾之上，把關點欄位取自清單中的
   park/done 目標（不是寫死的），PR 形態的類型則會拿到一個帳本
-  （ledger）面板——再加上即時活動列（`.stage.json` 標記、watch 租約
+  （ledger）面板——再加上即時活動列（任一 host 的階段標記——Claude 的
+  `.stage.json` 或 OpenCode 的 `.stage-opencode.json`——watch 租約
   存活狀態、可恢復的快照）、從 `runs/<id>.md` 解析出的執行歷史，以及
   各階段的 token 用量。即時更新透過 `fs.watch` + 一個輪詢協調器
   （DrvFs 安全）→ SSE 完成；啟用 🔔 可以在任務暫停於某個把關點時

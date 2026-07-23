@@ -5,6 +5,11 @@ import path from "node:path"
 import { writeFileAtomic } from "@agentic-workflow/core/fsatomic"
 import { type Task } from "@agentic-workflow/core/task/schema"
 import { advance, composePrompt, firstStep } from "@agentic-workflow/core/workflow/engine"
+import {
+  clearOpencodeStageMarker,
+  opencodeStageMarker,
+  writeOpencodeStageMarker,
+} from "@agentic-workflow/core/workflow/stage-marker"
 import { registerEngineeringHooks } from "@agentic-workflow/core/kinds/engineering"
 import { defaultWorkflowsDir } from "@agentic-workflow/core/manifest/dir"
 import { stageDef, type LoadedManifest } from "@agentic-workflow/core/manifest/schema"
@@ -898,6 +903,22 @@ export const drive = async (
   config: Config,
   first: { state: WorkflowState; action: Action },
 ): Promise<TerminalOutcome | null> => {
+  try {
+    return await driveChain(deps, sessionID, config, first)
+  } finally {
+    // The chain advertises each live stage on disk (see the write below); every
+    // exit — terminal, stop, interrupt, or a thrown stage error unwinding to
+    // onIdle's catch — must take the advertisement down with it.
+    await clearOpencodeStageMarker(deps.$, deps.directory, config.tasksDir)
+  }
+}
+
+const driveChain = async (
+  deps: Deps,
+  sessionID: string,
+  config: Config,
+  first: { state: WorkflowState; action: Action },
+): Promise<TerminalOutcome | null> => {
   const { client } = deps
   const loaded = manifestFor(first.state.kind ?? "engineering")
   // A stageModels key naming no stage of this kind resolves to nothing and the
@@ -945,6 +966,17 @@ export const drive = async (
     }
     setWorkflow(sessionID, step.state)
     if (isolated) await snapshot(deps, config, step.state)
+    // Advertise the live stage for out-of-process observers (the hub's driving
+    // oracle, doctor, and board badge) — a SIBLING of the Claude host's
+    // .stage.json, deliberately not the same file (see core's stage-marker.ts:
+    // that path is a control input to the Claude plugin's hooks). Cleared by
+    // drive()'s finally on every exit.
+    await writeOpencodeStageMarker(
+      deps.$,
+      deps.directory,
+      config.tasksDir,
+      opencodeStageMarker(step.state, Date.now() + config.stageTimeoutMinutes * 60_000),
+    )
     const { task, iteration } = step.state
     const trackBuild = stage === "build" && task
     if (trackBuild) await appendNote(deps.$, task, auditNote(`BUILD started (iteration ${iteration + 1})`, new Date(), actor), deps.log)

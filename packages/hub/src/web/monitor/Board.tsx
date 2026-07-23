@@ -105,7 +105,7 @@ export const Board = ({ info }: { info: KindBoardInfo }) => {
           </button>
         )}
       </div>
-      {doctorOpen && <DoctorPanel kind={info.kind} />}
+      {doctorOpen && <DoctorPanel />}
       <div className="board">
         {data.statuses.map((status) => {
           const tasks = data.tasks[status] ?? []

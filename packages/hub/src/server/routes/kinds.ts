@@ -1,11 +1,9 @@
 import fsp from "node:fs/promises"
 import path from "node:path"
-import { promptContext } from "@agentic-workflow/core/workflow/engine"
+import { composeStagePrompt, promptContext } from "@agentic-workflow/core/workflow/engine"
 import type { WorkflowState } from "@agentic-workflow/core/workflow/state"
-import { verdictContractBlock, workScopeBlock } from "@agentic-workflow/core/workflow/verdict"
 import { listWorkflowKinds, loadManifest } from "@agentic-workflow/core/manifest/load"
 import { WorkflowManifestSchema, type WorkflowManifest, type StageDef } from "@agentic-workflow/core/manifest/schema"
-import { renderPrompt } from "@agentic-workflow/core/manifest/template"
 import type {
   ChecklistItem,
   ChecklistResponse,
@@ -121,10 +119,10 @@ const sampleState = (manifest: WorkflowManifest, stage: string, sample: PreviewS
  * the kinds the creator authors: it loads the manifest's prompts from disk (the
  * manifest being previewed isn't saved yet) and resolves `hooks.compose[stage]`
  * through the registry, which for a hub-authored kind names a hook no host has
- * registered. Instead it composes the same two primitives `composePrompt` does —
- * `renderPrompt(tpl, promptContext(state))` plus the check-stage verdict contract
- * — so the output matches without the throw. A composed-hooked stage is reported
- * via `note` rather than guessed at.
+ * registered. Instead it calls core's `composeStagePrompt` — the same lenient
+ * primitive `composePrompt` itself is built on — so the output matches by
+ * construction, and only hook resolution is skipped. A composed-hooked stage is
+ * reported via `note` rather than guessed at.
  */
 export const previewKind = async (_deps: HubDeps, req: ParsedRequest): Promise<JsonResponse> => {
   const body = req.body as Partial<PreviewRequest> | undefined
@@ -141,13 +139,7 @@ export const previewKind = async (_deps: HubDeps, req: ParsedRequest): Promise<J
   if (typeof tpl !== "string") return badRequest(`no prompt source provided for stage "${def.name}"`)
 
   const sample: PreviewSample = { ...DEFAULT_SAMPLE, ...body.sample }
-  const rendered = renderPrompt(tpl, promptContext(sampleState(manifest, def.name, sample)))
-  // Every stage carries its contract in the prompt itself (see verdict.ts):
-  // the verdict contract for check stages, the scope fence for work stages.
-  const full =
-    def.kind === "check"
-      ? `${rendered}\n\n${verdictContractBlock(def.name, def.requiredAxes)}`
-      : `${rendered}\n\n${workScopeBlock(def.name)}`
+  const full = composeStagePrompt(def, tpl, promptContext(sampleState(manifest, def.name, sample)))
 
   const hookRef = manifest.hooks.compose?.[def.name]
   const response: PreviewResponse = {

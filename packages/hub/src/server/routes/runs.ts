@@ -20,6 +20,9 @@ const SnapshotSchema = z.object({
   iteration: z.number().int().default(0),
   task: z.object({ id: z.string() }).partial().optional(),
   git: z.object({ branch: z.string().optional(), worktree: z.string().optional() }).optional(),
+  // Keys only: which stages a resume would see captured output for. The
+  // bodies duplicate the run log's stage sections, so they stay there.
+  artifacts: z.record(z.string(), z.string()).optional(),
 })
 
 const readRunLog = (deps: HubDeps, id: string): Promise<string | null> => readText(deps, `${deps.tasksDir}/runs/${id}.md`)
@@ -31,6 +34,7 @@ const readSnapshot = async (deps: HubDeps, id: string): Promise<SnapshotView | n
     const parsed = SnapshotSchema.safeParse(JSON.parse(content))
     if (!parsed.success) return null
     const s = parsed.data
+    const artifactStages = Object.keys(s.artifacts ?? {})
     return {
       ...(s.kind ? { kind: s.kind } : {}),
       goal: s.goal,
@@ -39,6 +43,7 @@ const readSnapshot = async (deps: HubDeps, id: string): Promise<SnapshotView | n
       ...(s.task?.id ? { taskId: s.task.id } : {}),
       ...(s.git?.branch ? { branch: s.git.branch } : {}),
       ...(s.git?.worktree ? { worktree: s.git.worktree } : {}),
+      ...(artifactStages.length ? { artifactStages } : {}),
     }
   } catch {
     return null
@@ -52,9 +57,9 @@ export const getRuns = async (deps: HubDeps): Promise<JsonResponse> => {
   const ids = (listed?.data ?? [])
     .filter((n) => n.type === "file" && n.name.endsWith(".md"))
     .map((n) => n.name.replace(/\.md$/, ""))
-  // The one parser of the live `.stage.json` marker lives in driving.ts; this
-  // route only wants the task id it names (null covers: no live loop, the
-  // opencode host, an unreadable marker). Display only, same spirit as
+  // The one parser of the live stage markers (either host's) lives in
+  // driving.ts; this route only wants the task id it names (null covers: no
+  // live loop, an unreadable marker). Display only, same spirit as
   // `readSnapshot`.
   const activeTaskId = (await readStageMarker(deps))?.taskId ?? null
   const runs: RunListItem[] = (

@@ -2,7 +2,7 @@ import type { Client } from "../host.js"
 // Import STATUSES from the dependency-free leaf module, not store.js: auditBacklog
 // is bundled into the Claude reconcile hook (esbuild), and pulling store.js would
 // drag its yaml/zod machinery into that bundle.
-import { STATUSES, type TaskStatus } from "./statuses.js"
+import { STATUSES } from "./statuses.js"
 
 /**
  * Backlog reconciliation sweep: detect the damage a confused agent can do
@@ -20,8 +20,9 @@ export interface BacklogAnomalies {
   readonly unknownDirs: readonly string[]
   /** Repo-relative paths of `.md` files at the backlog root or inside unknown dirs. */
   readonly strayFiles: readonly string[]
-  /** Task ids present in more than one status folder, with where they were seen. */
-  readonly duplicates: readonly { readonly id: string; readonly statuses: readonly TaskStatus[] }[]
+  /** Task ids present in more than one status folder, with where they were seen.
+   *  Statuses are strings, not `TaskStatus`: a custom kind's folders count too. */
+  readonly duplicates: readonly { readonly id: string; readonly statuses: readonly string[] }[]
 }
 
 export const hasAnomalies = (a: BacklogAnomalies): boolean =>
@@ -45,14 +46,25 @@ const listDir = async (client: Client, directory: string, rel: string) => {
   }
 }
 
-/** Sweep the backlog for structural anomalies. Read-only. */
-export const auditBacklog = async (client: Client, directory: string, tasksDir: string): Promise<BacklogAnomalies> => {
+/**
+ * Sweep the backlog for structural anomalies. Read-only. `statuses` is the set
+ * of folders that legitimately hold tasks — core's engineering set by default;
+ * a caller that knows the enabled kinds' manifests (the hub) passes the union
+ * of their declared statuses so a custom kind's folders aren't flagged as
+ * damage.
+ */
+export const auditBacklog = async (
+  client: Client,
+  directory: string,
+  tasksDir: string,
+  statuses: readonly string[] = STATUSES,
+): Promise<BacklogAnomalies> => {
   const root = await listDir(client, directory, tasksDir)
 
   const unknownDirs = root
     .filter((n) => n.type === "directory" && !n.name.startsWith("."))
     .map((n) => n.name)
-    .filter((name) => !STATUSES.includes(name as TaskStatus) && !KNOWN_NON_STATUS_DIRS.includes(name))
+    .filter((name) => !statuses.includes(name) && !KNOWN_NON_STATUS_DIRS.includes(name))
     .sort()
 
   const strayFiles: string[] = root
@@ -65,8 +77,8 @@ export const auditBacklog = async (client: Client, directory: string, tasksDir: 
     }
   }
 
-  const seen = new Map<string, TaskStatus[]>()
-  for (const status of STATUSES) {
+  const seen = new Map<string, string[]>()
+  for (const status of statuses) {
     const nodes = await listDir(client, directory, `${tasksDir}/${status}`)
     for (const n of nodes) {
       if (n.type !== "file" || !isMarkdown(n.name)) continue

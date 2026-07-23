@@ -74,6 +74,24 @@ test("auditBacklog tolerates a missing backlog dir entirely", async () => {
   assert.equal(hasAnomalies(a), false)
 })
 
+test("auditBacklog judges against a caller-supplied status set — a custom kind's folders are not damage", async () => {
+  const client = makeClient({
+    "docs/tasks": [d("inbox"), d("waiting-human"), d("draft"), d("runs"), d("typo-dir")],
+    "docs/tasks/inbox": [f("dup.md")],
+    "docs/tasks/waiting-human": [f("dup.md")],
+    "docs/tasks/draft": [],
+    "docs/tasks/typo-dir": [],
+  })
+  // Default set: the custom kind's folders read as unknown dirs.
+  const byDefault = await auditBacklog(client, "/r", "docs/tasks")
+  assert.deepEqual(byDefault.unknownDirs, ["inbox", "typo-dir", "waiting-human"])
+  // With the enabled kinds' union (the hub's call shape): only the typo is
+  // damage, and duplicates are detected across the custom folders too.
+  const a = await auditBacklog(client, "/r", "docs/tasks", ["draft", "inbox", "waiting-human"])
+  assert.deepEqual(a.unknownDirs, ["typo-dir"])
+  assert.deepEqual(a.duplicates, [{ id: "dup", statuses: ["inbox", "waiting-human"] }])
+})
+
 test("formatAnomalies renders one line per finding", () => {
   const lines = formatAnomalies(
     {

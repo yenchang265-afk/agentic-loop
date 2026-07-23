@@ -12,6 +12,7 @@ import {
 } from "@agentic-workflow/core/task/store"
 import type { DoctorReport, DoctorFixResponse, HeldClaim } from "../../shared/api.js"
 import type { HubDeps } from "../deps.js"
+import { auditStatuses } from "../kindboard.js"
 import { makeDrivingOracle } from "../driving.js"
 import { ok, type JsonResponse } from "../http.js"
 
@@ -30,7 +31,7 @@ const claimPools = (deps: HubDeps): string[] => [...new Set(deps.boards.flatMap(
 
 /** GET /api/doctor — read-only: what the sweep finds, plus which claims are held. */
 export const getDoctor = async (deps: HubDeps): Promise<JsonResponse> => {
-  const anomalies = await auditBacklog(deps.client, deps.directory, deps.tasksDir)
+  const anomalies = await auditBacklog(deps.client, deps.directory, deps.tasksDir, auditStatuses(deps.boards))
   const findings = formatAnomalies(anomalies, deps.tasksDir)
 
   const oracle = await makeDrivingOracle(deps)
@@ -47,8 +48,8 @@ export const getDoctor = async (deps: HubDeps): Promise<JsonResponse> => {
     strayFiles: anomalies.strayFiles,
     duplicates: anomalies.duplicates.map((d) => ({ id: d.id, statuses: [...d.statuses] })),
     heldClaims,
-    // A live opencode watcher writes no stage marker, so the hub can't tell which
-    // task it drives — surfaced so /fix can explain why it skipped claim release.
+    // A live watcher with no stage marker is either polling idle or inside the
+    // claim→marker window — surfaced so /fix can explain why it skipped claim release.
     watcherLive: oracle.watcherLive,
     ...(oracle.watcherLive && oracle.leasePid !== null ? { watcherPid: oracle.leasePid } : {}),
   }
@@ -62,7 +63,7 @@ export const getDoctor = async (deps: HubDeps): Promise<JsonResponse> => {
  * guess which copy is canonical. One commit at the end when anything was rescued.
  */
 export const postDoctorFix = async (deps: HubDeps): Promise<JsonResponse> => {
-  const anomalies = await auditBacklog(deps.client, deps.directory, deps.tasksDir)
+  const anomalies = await auditBacklog(deps.client, deps.directory, deps.tasksDir, auditStatuses(deps.boards))
   const actor = await gitActor(deps.sh, deps.directory)
 
   const rescued: string[] = []
@@ -89,9 +90,12 @@ export const postDoctorFix = async (deps: HubDeps): Promise<JsonResponse> => {
    * Claim release, the delicate half. `isDriving` here must be MARKER-based, not
    * the oracle's claim-based one: every claim we might release is claimed by
    * definition, so a claim-based signal would report "driving" for all of them
-   * and release nothing. And when a live watcher holds a lease with no stage
-   * marker, the hub cannot tell which task it is driving — releasing any claim
-   * risks stealing the watcher's, so skip claim release wholesale in that case.
+   * and release nothing. Both hosts now write a stage marker while driving
+   * (Claude's `.stage.json`, OpenCode's `.stage-opencode.json` — both read by
+   * the oracle), but a live watcher with NO marker is still ambiguous: it may
+   * be idle-polling, or inside the window between claiming a task and writing
+   * the marker — releasing any claim there risks stealing the watcher's, so
+   * skip claim release wholesale in that case.
    * Strays and empty dirs are unrelated and were already fixed above.
    */
   const oracle = await makeDrivingOracle(deps)

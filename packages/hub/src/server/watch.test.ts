@@ -7,7 +7,7 @@ import { diffSnapshots, scanSnapshot, type WatchSnapshot } from "./watch.js"
 
 const GATES = ["plan-review", "in-review"] as const
 
-const empty: WatchSnapshot = { tasks: {}, runs: {}, stageMarker: null, lease: null, config: null }
+const empty: WatchSnapshot = { tasks: {}, runs: {}, stageMarker: null, opencodeMarker: null, lease: null, config: null }
 const snap = (partial: Partial<WatchSnapshot>): WatchSnapshot => ({ ...empty, ...partial })
 
 test("diffSnapshots on identical snapshots yields nothing", () => {
@@ -42,6 +42,13 @@ test("diffSnapshots emits run for changed run logs and active for marker/lease/s
   assert.deepEqual(events, [{ type: "run", id: "fix" }, { type: "active" }])
 })
 
+test("diffSnapshots emits active when the OpenCode sibling marker appears or vanishes", () => {
+  const prev = snap({})
+  const started = snap({ opencodeMarker: "7:1" })
+  assert.deepEqual(diffSnapshots(prev, started, GATES), [{ type: "active" }])
+  assert.deepEqual(diffSnapshots(started, prev, GATES), [{ type: "active" }])
+})
+
 test("diffSnapshots emits exactly one tokens event (not run) for a changed metrics sidecar", () => {
   const prev = snap({ runs: { "fix.metrics.json": "10:1" } })
   const next = snap({ runs: { "fix.metrics.json": "22:2" } })
@@ -66,12 +73,14 @@ test("scanSnapshot reads folders, runs and markers from disk", () => {
   fs.writeFileSync(path.join(tasks, "queued", "a.md"), "---\ntitle: a\n---\n")
   fs.writeFileSync(path.join(tasks, "runs", "a.md"), "log")
   fs.writeFileSync(path.join(tasks, "runs", ".stage.json"), "{}")
+  fs.writeFileSync(path.join(tasks, "runs", ".stage-opencode.json"), "{}")
   fs.writeFileSync(path.join(tasks, "runs", ".watch-lease", "owner.json"), "{}")
   const s = scanSnapshot(dir, "docs/tasks", ["queued", "plan-review"])
   assert.ok(s.tasks["queued"]?.["a.md"])
   assert.deepEqual(s.tasks["plan-review"], {})
   assert.ok(s.runs["a.md"])
   assert.notEqual(s.stageMarker, null)
+  assert.notEqual(s.opencodeMarker, null)
   assert.notEqual(s.lease, null)
   fs.rmSync(dir, { recursive: true, force: true })
 })

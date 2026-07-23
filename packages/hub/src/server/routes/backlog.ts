@@ -12,14 +12,18 @@ import { isPaired, shortIdOf, type Task } from "@agentic-workflow/core/task/sche
 import { auditBacklog, hasAnomalies } from "@agentic-workflow/core/task/audit"
 import type { BacklogResponse, KindBoardInfo, TaskCard, TaskDetailResponse } from "../../shared/api.js"
 import type { HubDeps } from "../deps.js"
+import { auditStatuses } from "../kindboard.js"
 import { badRequest, isSafeId, notFound, ok, type JsonResponse, type ParsedRequest } from "../http.js"
 import { extractAuditNotes } from "../notes.js"
 
 /**
  * Read-only backlog views: the per-kind board roll-up and single-task detail.
  * Board shape (columns, gate highlights, claim pools) comes from the kind's
- * manifest via `deps.boards` — only the engineering kind gets the lifecycle
- * summary and audit sweep, which are engineering-shaped by construction.
+ * manifest via `deps.boards`. The audit sweep runs for every backlog kind
+ * (it reads the shared backlog root, judged against every enabled kind's
+ * status set); only the lifecycle summary stays engineering-only — its
+ * semantics ("interrupted", plan-gate counts) are engineering's by
+ * construction.
  */
 
 const toCard = (task: Task): TaskCard => ({
@@ -53,12 +57,13 @@ export const getBacklog = async (deps: HubDeps, req: ParsedRequest): Promise<Jso
   const cards: Record<string, readonly TaskCard[]> = {}
   for (const status of board.statuses) cards[status] = (tasks[status] ?? []).map(toCard)
 
-  // The lifecycle summary + audit sweep read the engineering folder shape.
-  const engineering = kind === "engineering"
-  const summary = engineering
-    ? summarizeBacklog(tasks as Readonly<Record<TaskStatus, readonly Task[]>>, claimedIds)
-    : null
-  const anomalies = engineering ? await auditBacklog(deps.client, deps.directory, deps.tasksDir) : null
+  // The lifecycle summary reads the engineering folder shape; the audit is
+  // backlog-root-wide and runs for every backlog kind.
+  const summary =
+    kind === "engineering"
+      ? summarizeBacklog(tasks as Readonly<Record<TaskStatus, readonly Task[]>>, claimedIds)
+      : null
+  const anomalies = await auditBacklog(deps.client, deps.directory, deps.tasksDir, auditStatuses(deps.boards))
 
   const response: BacklogResponse = {
     kind,
@@ -67,7 +72,7 @@ export const getBacklog = async (deps: HubDeps, req: ParsedRequest): Promise<Jso
     tasks: cards,
     summary,
     claimedIds,
-    anomalies: anomalies && hasAnomalies(anomalies) ? anomalies : null,
+    anomalies: hasAnomalies(anomalies) ? anomalies : null,
   }
   return ok(response)
 }

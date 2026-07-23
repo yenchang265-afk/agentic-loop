@@ -1,4 +1,5 @@
 import { enabledWorkflowKinds } from "@agentic-workflow/core/config"
+import { STATUSES } from "@agentic-workflow/core/task/statuses"
 import type { Config } from "@agentic-workflow/core/workflow/state"
 import { loadManifest } from "@agentic-workflow/core/manifest/load"
 import { gateStatuses } from "@agentic-workflow/core/manifest/schema"
@@ -45,4 +46,14 @@ export const unionStatuses = (boards: readonly KindBoardInfo[]): string[] => [
 /** Every gate status any enabled kind declares — the watcher's gate-event set. */
 export const unionGates = (boards: readonly KindBoardInfo[]): string[] => [
   ...new Set(boards.flatMap((b) => b.gateStatuses)),
+]
+
+/**
+ * The status folders the backlog audit treats as legitimate: every enabled
+ * kind's declared set plus core's engineering set — engineering folders on
+ * disk are never damage, even when a config change disabled the kind that
+ * made them.
+ */
+export const auditStatuses = (boards: readonly KindBoardInfo[]): string[] => [
+  ...new Set([...boards.flatMap((b) => b.statuses), ...STATUSES]),
 ]

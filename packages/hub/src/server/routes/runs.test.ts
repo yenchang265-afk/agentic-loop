@@ -37,7 +37,7 @@ const makeFixture = (): string => {
       goal: "fix bar",
       stage: "verify",
       iteration: 1,
-      artifacts: {},
+      artifacts: { plan: "the plan", build: "built it" },
       task: { id: "fix-bar", path: "x", title: "Fix bar" },
       git: { base: "main", branch: "feature/fix-bar" },
     }),
@@ -104,6 +104,7 @@ test("getRunDetail returns parsed log + display snapshot", async () => {
   assert.equal(body.snapshot?.stage, "verify")
   assert.equal(body.snapshot?.taskId, "fix-bar")
   assert.equal(body.snapshot?.branch, "feature/fix-bar")
+  assert.deepEqual(body.snapshot?.artifactStages, ["plan", "build"])
   fs.rmSync(dir, { recursive: true, force: true })
 })
 

@@ -1,4 +1,4 @@
-import type { LoadedManifest } from "../manifest/schema.js"
+import type { LoadedManifest, StageDef } from "../manifest/schema.js"
 import { stageDef } from "../manifest/schema.js"
 import { renderPrompt, type TemplateContext } from "../manifest/template.js"
 import { resolveComposeHook } from "../manifest/registry.js"
@@ -73,6 +73,27 @@ export const promptContext = (state: WorkflowState): TemplateContext => {
   }
 }
 
+/**
+ * Render one stage's prompt from its template source and context, appending the
+ * stage's contract block. Every stage carries its contract in the prompt
+ * itself, so it survives a mis-bound subagent or a stripped tool allowlist
+ * (see verdict.ts): check stages the mandatory verdict contract, work stages
+ * the scope fence that keeps them from running later stages inside their own
+ * turn.
+ *
+ * This is the LENIENT primitive: it takes the template and context directly,
+ * so callers that cannot satisfy `composePrompt`'s preconditions — an unsaved
+ * manifest whose prompts aren't on disk, a compose hook no host has registered
+ * (the hub's creator preview) — compose the exact same output without the
+ * throw. `composePrompt` layers loading and hook resolution on top.
+ */
+export const composeStagePrompt = (def: StageDef, tpl: string, ctx: TemplateContext): string => {
+  const rendered = renderPrompt(tpl, ctx)
+  return def.kind === "check"
+    ? `${rendered}\n\n${verdictContractBlock(def.name, def.requiredAxes)}`
+    : `${rendered}\n\n${workScopeBlock(def.name)}`
+}
+
 /** Render the prompt threaded into `target`'s stage command. */
 export const composePrompt = (loaded: LoadedManifest, state: WorkflowState, target: string): string => {
   const def = stageDef(loaded.manifest, target)
@@ -80,14 +101,7 @@ export const composePrompt = (loaded: LoadedManifest, state: WorkflowState, targ
   if (tpl === undefined) throw new Error(`workflow kind "${loaded.manifest.kind}" has no prompt loaded for stage "${def.name}"`)
   const hookRef = loaded.manifest.hooks.compose[def.name]
   const ctx = hookRef ? resolveComposeHook(hookRef)(promptContext(state), state) : promptContext(state)
-  const rendered = renderPrompt(tpl, ctx)
-  // Every stage carries its contract in the prompt itself, so it survives a
-  // mis-bound subagent or a stripped tool allowlist (see verdict.ts): check
-  // stages the mandatory verdict contract, work stages the scope fence that
-  // keeps them from running later stages inside their own turn.
-  return def.kind === "check"
-    ? `${rendered}\n\n${verdictContractBlock(def.name, def.requiredAxes)}`
-    : `${rendered}\n\n${workScopeBlock(def.name)}`
+  return composeStagePrompt(def, tpl, ctx)
 }
 
 const fireAt = (loaded: LoadedManifest, state: WorkflowState, target: string): { state: WorkflowState; action: Action } => {

@@ -56,7 +56,7 @@ export interface BacklogResponse {
   /** Engineering-lifecycle roll-up; null for other kinds (their folders aren't its shape). */
   readonly summary: BacklogSummary | null
   readonly claimedIds: readonly string[]
-  /** Structural anomalies from the backlog audit; null when none (engineering only). */
+  /** Structural anomalies from the backlog-root audit (any backlog kind); null when clean. */
   readonly anomalies: BacklogAnomalies | null
 }
 
@@ -120,6 +120,8 @@ export interface SnapshotView {
   readonly taskId?: string
   readonly branch?: string
   readonly worktree?: string
+  /** Stages whose captured output the snapshot carries — what a resume would see. Bodies stay in the run log. */
+  readonly artifactStages?: readonly string[]
 }
 
 export interface RunDetailResponse {
@@ -128,7 +130,7 @@ export interface RunDetailResponse {
   readonly snapshot: SnapshotView | null
 }
 
-/** The Claude host's live-stage marker (`runs/.stage.json`); opencode writes none. */
+/** A host's live-stage marker: Claude's `runs/.stage.json`, or the OpenCode driver's sibling `runs/.stage-opencode.json`. */
 export interface StageMarker {
   readonly kind?: string
   readonly stage: string
@@ -301,7 +303,7 @@ export interface DoctorReport {
   readonly strayFiles: readonly string[]
   readonly duplicates: readonly DuplicateTask[]
   readonly heldClaims: readonly HeldClaim[]
-  /** An OpenCode watcher lease is live — it writes no stage marker, so /fix can't tell which task it drives. */
+  /** An OpenCode watcher lease is live with no stage marker — idle-polling or mid-claim, so /fix can't tell which task it drives. */
   readonly watcherLive: boolean
   readonly watcherPid?: number
 }

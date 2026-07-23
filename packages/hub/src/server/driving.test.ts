@@ -31,8 +31,8 @@ const TASKS_DIR = "docs/tasks"
 
 const makeFixture = (): string => fs.mkdtempSync(path.join(os.tmpdir(), "hub-driving-"))
 
-const writeMarker = (dir: string, marker: unknown): void => {
-  const p = path.join(dir, TASKS_DIR, "runs", ".stage.json")
+const writeMarker = (dir: string, marker: unknown, file = ".stage.json"): void => {
+  const p = path.join(dir, TASKS_DIR, "runs", file)
   fs.mkdirSync(path.dirname(p), { recursive: true })
   fs.writeFileSync(p, typeof marker === "string" ? marker : JSON.stringify(marker))
 }
@@ -99,6 +99,43 @@ test("a PLAN claim in the queued pool counts — claims are scanned across every
   writeClaim(dir, "queued", "b2m9-cache-warmup")
   const o = await makeDrivingOracle(depsFor(dir))
   assert.equal(o.isDriving("b2m9-cache-warmup"), true)
+  cleanup(dir)
+})
+
+test("the OpenCode sibling marker (.stage-opencode.json) drives its task when no Claude marker exists", async () => {
+  const dir = makeFixture()
+  writeMarker(
+    dir,
+    { host: "opencode", kind: "engineering", stage: "build", taskId: "f7k3-add-rate-limit", worktree: null, deadline: null, iteration: 1 },
+    ".stage-opencode.json",
+  )
+  const deps = depsFor(dir)
+  const marker = await readStageMarker(deps)
+  assert.equal(marker?.stage, "build")
+  assert.equal(marker?.iteration, 1)
+  const o = await makeDrivingOracle(deps)
+  assert.equal(o.markerTaskId, "f7k3-add-rate-limit")
+  assert.equal(o.isDriving("f7k3-add-rate-limit"), true)
+  assert.equal(o.isDriving("other-task"), false)
+  cleanup(dir)
+})
+
+test("when both hosts' markers exist, the Claude marker wins", async () => {
+  const dir = makeFixture()
+  writeMarker(dir, { kind: "engineering", stage: "review", taskId: "claude-task" })
+  writeMarker(dir, { host: "opencode", stage: "build", taskId: "opencode-task" }, ".stage-opencode.json")
+  const marker = await readStageMarker(depsFor(dir))
+  assert.equal(marker?.taskId, "claude-task")
+  assert.equal(marker?.stage, "review")
+  cleanup(dir)
+})
+
+test("a garbled Claude marker falls back to a valid OpenCode one", async () => {
+  const dir = makeFixture()
+  writeMarker(dir, "{ not json")
+  writeMarker(dir, { host: "opencode", stage: "verify", taskId: "f7k3-add-rate-limit" }, ".stage-opencode.json")
+  const marker = await readStageMarker(depsFor(dir))
+  assert.equal(marker?.taskId, "f7k3-add-rate-limit")
   cleanup(dir)
 })
 
