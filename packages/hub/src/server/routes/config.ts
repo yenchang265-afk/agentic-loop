@@ -75,7 +75,7 @@ export const getConfig = async (deps: HubDeps, req: ParsedRequest): Promise<Json
   return ok(response)
 }
 
-const applyEdits = (raw: Record<string, unknown>, edits: readonly ConfigEdit[], previous: Record<string, unknown>): unknown => {
+const applyEdits = (raw: Record<string, unknown>, edits: readonly ConfigEdit[]): unknown => {
   let next: unknown = raw
   for (const edit of edits) {
     const path = edit.path.split(".").filter(Boolean)
@@ -85,10 +85,10 @@ const applyEdits = (raw: Record<string, unknown>, edits: readonly ConfigEdit[], 
       continue
     }
     // The sentinel means "unchanged": the browser never received the real
-    // secret, so echoing it back must not overwrite it with the placeholder.
-    const isUntouchedSecret =
-      edit.value === REDACTED && SECRET_PATHS.some((p) => p.join(".") === edit.path) && typeof valueAt(previous, path) === "string"
-    next = isUntouchedSecret ? next : setAt(next, path, edit.value)
+    // secret, so echoing it back must not overwrite it with the placeholder —
+    // and when no secret is stored, the sentinel must not be persisted as one.
+    const isSentinelSecret = edit.value === REDACTED && SECRET_PATHS.some((p) => p.join(".") === edit.path)
+    next = isSentinelSecret ? next : setAt(next, path, edit.value)
   }
   return next
 }
@@ -120,7 +120,7 @@ export const saveConfig = async (deps: HubDeps, req: ParsedRequest): Promise<Jso
   if (self.parseError) return json(400, { error: `refusing to edit ${file}: ${self.parseError} — fix the file by hand first` })
 
   const current = self.raw ?? {}
-  const next = applyEdits(current, body.edits, current)
+  const next = applyEdits(current, body.edits)
   if (!isPlainObject(next)) return badRequest("edits must leave a JSON object at the top level")
 
   // Validate the MERGED view, not this layer alone: a repo layer is routinely

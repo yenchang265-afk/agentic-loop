@@ -182,6 +182,13 @@ test("isGitPushViolation blocks a refspec onto a different branch, force, and de
   assert.equal(isGitPushViolation("git push origin +feature/x"), true)
   assert.equal(isGitPushViolation("git push origin :feature/x"), true) // delete
   assert.equal(isGitPushViolation("git push origin --delete feature/x"), true)
+  // Short and bundled flag forms of force/delete — `-d` and `-fd` are
+  // git-legal spellings of `--delete` / `--force --delete`.
+  assert.equal(isGitPushViolation("git push -d origin feature/x"), true)
+  assert.equal(isGitPushViolation("git push -fd origin feature/x"), true)
+  assert.equal(isGitPushViolation("git push -df origin feature/x"), true)
+  assert.equal(isGitPushViolation("git push --force-with-lease=refs/heads/x origin feature/x"), true)
+  assert.equal(isGitPushViolation("git push -u origin feature/x"), false) // f/d-free short flag stays allowed
   // Fast-forward pushes of the default branch: no force flag, no mismatched
   // refspec — the rules above wave them through, so they need their own rule.
   assert.equal(isGitPushViolation("git push origin main"), true)

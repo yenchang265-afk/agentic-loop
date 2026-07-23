@@ -145,6 +145,17 @@ test("a secret is redacted on the way out and preserved when the sentinel comes 
   cleanup(f)
 })
 
+test("the sentinel is never persisted as a real secret when none is stored", async () => {
+  // With no prior pat, a crafted `{ ado.pat: __REDACTED__ }` edit must be a
+  // no-op — not write the literal sentinel as the stored credential.
+  const f = makeFixture({}, { ado: { organization: "acme", project: "p", selfLogin: "bot" } })
+  const res = await save(f, { layer: "user", edits: [{ path: "ado.pat", value: REDACTED }] })
+  assert.equal(res.status, 200)
+  const user = JSON.parse(fs.readFileSync(f.userFile, "utf8")) as { ado: { pat?: string } }
+  assert.equal(user.ado.pat, undefined, "the sentinel must not become a stored value")
+  cleanup(f)
+})
+
 test("provenance says which layer each value comes from", async () => {
   const f = makeFixture({ maxIterations: 9 }, { maxIterations: 5, tasksDir: "user-tasks" })
   const body = (await get(f)).body as ConfigLayerResponse

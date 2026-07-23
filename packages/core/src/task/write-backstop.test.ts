@@ -68,6 +68,13 @@ test("isAdoWriteBackstopViolation blocks completes, votes, and non-thread POSTs"
 test("isGitPushViolation flags force, delete, cross-branch, and default-branch pushes", () => {
   assert.equal(isGitPushViolation("git push --force origin feature/x"), true)
   assert.equal(isGitPushViolation("git push origin :feature/x"), true)
+  // Short and bundled flag forms of force/delete — `-d` and `-fd` are
+  // git-legal spellings of `--delete` / `--force --delete`.
+  assert.equal(isGitPushViolation("git push -d origin feature/x"), true)
+  assert.equal(isGitPushViolation("git push origin --delete feature/x"), true)
+  assert.equal(isGitPushViolation("git push -fd origin feature/x"), true)
+  assert.equal(isGitPushViolation("git push -df origin feature/x"), true)
+  assert.equal(isGitPushViolation("git push --force-with-lease=refs/heads/x origin feature/x"), true)
   assert.equal(isGitPushViolation("git push origin +feature/x"), true)
   assert.equal(isGitPushViolation("git push origin x:main"), true)
   assert.equal(isGitPushViolation("git push origin x:refs/heads/main"), true)
@@ -82,6 +89,7 @@ test("isGitPushViolation flags force, delete, cross-branch, and default-branch p
 
 test("isGitPushViolation allows a fast-forward push of an arbitrary head branch", () => {
   assert.equal(isGitPushViolation("git push origin feature/x"), false)
+  assert.equal(isGitPushViolation("git push -u origin feature/x"), false) // f/d-free short flag stays allowed
   assert.equal(isGitPushViolation("git push origin pr-head-branch"), false)
   assert.equal(isGitPushViolation("git push origin feature/x:refs/heads/feature/x"), false)
   assert.equal(isGitPushViolation("git -C /repo push origin main-sitter/fix-1"), false)
