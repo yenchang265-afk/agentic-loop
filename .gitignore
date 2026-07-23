@@ -10,6 +10,7 @@ node_modules/
 # Ephemeral loop-state snapshots + stage marker (durable run logs are the *.md files beside them)
 docs/tasks/runs/*.state.json
 docs/tasks/runs/.stage.json
+docs/tasks/runs/.stage-opencode.json
 docs/tasks/runs/.watch-lease/
 
 # Build output (built by npm workspace `build` scripts / plugins/claude/install.sh)

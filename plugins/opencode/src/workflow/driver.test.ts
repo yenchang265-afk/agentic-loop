@@ -979,6 +979,41 @@ test("drive interprets a pr-sitter loop with the pr-sitter manifest, not enginee
 })
 
 /**
+ * The live-stage advertisement: drive writes `.stage-opencode.json` (the
+ * OpenCode sibling of the Claude host's `.stage.json` — see core's
+ * stage-marker.ts) before each stage fires, and its finally takes it down on
+ * every exit, so the hub's driving oracle never sees a stale marker after a
+ * clean drive.
+ */
+test("drive advertises the live stage in .stage-opencode.json and clears it on exit", async () => {
+  const sessionID = "sess-oc-marker"
+  const log: string[] = []
+  const client = {
+    tui: { showToast: async () => ({ data: undefined }) },
+    session: {
+      command: async () => {
+        recordVerdict(sessionID, "triage", { verdict: "FAIL", reason: "nothing actionable" })
+        return { data: { parts: [{ type: "text", text: "triaged: no actionable signal" }] } }
+      },
+    },
+  } as unknown as Deps["client"]
+  const deps: Deps = { client, $: makeShellFS({}, log), directory: "/repo", log: () => {} }
+  const state: WorkflowState = { kind: "pr-sitter", goal: "Sit on PR #1", stage: "triage", iteration: 0, artifacts: {} }
+
+  await drive(deps, sessionID, testConfig, firstStep(manifestFor("pr-sitter"), state))
+
+  const markerFile = "/repo/docs/tasks/runs/.stage-opencode.json"
+  const writeIdx = log.findIndex((cmd) => cmd.startsWith("printf '%s' ") && cmd.includes(markerFile))
+  assert.ok(writeIdx >= 0, "no marker write in the command stream")
+  const written = log[writeIdx]!
+  assert.match(written, /"host":"opencode"/)
+  assert.match(written, /"kind":"pr-sitter"/)
+  assert.match(written, /"stage":"triage"/)
+  const clearIdx = log.findIndex((cmd) => cmd === `rm -f ${markerFile}`)
+  assert.ok(clearIdx > writeIdx, "marker not cleared after the drive")
+})
+
+/**
  * Per-stage model selection: a `workflows.<kind>.stageModels.<stage>` config entry
  * must ride the session.command body (the SDK's optional `model`), and an
  * unconfigured stage must send no `model` key at all — the host default is

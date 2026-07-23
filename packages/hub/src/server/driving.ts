@@ -18,8 +18,12 @@ import { readText } from "./io.js"
  *    `mkdir` under `<status>/.claims/`) *before* it starts driving it and holds
  *    the claim throughout, so **driving implies claimed**. That makes claims a
  *    per-task signal, unlike the lease.
- * 2. **The stage marker** (`runs/.stage.json`) — written by the Claude host while
- *    a stage runs, and it names the task. The OpenCode host writes none.
+ * 2. **The stage marker** — written while a stage runs, and it names the task.
+ *    The Claude host writes `runs/.stage.json`; the OpenCode driver writes the
+ *    sibling `runs/.stage-opencode.json` (a separate file because `.stage.json`
+ *    is a control input to the Claude plugin's hooks — see core's
+ *    stage-marker.ts). Both are read here; at most one loop runs per repo, so
+ *    the Claude marker wins if both somehow exist.
  *
  * The watch lease is deliberately **not** a driving signal: a live watcher that
  * holds no claim is polling, not driving, and blocking on it would refuse every
@@ -40,13 +44,7 @@ const StageMarkerSchema = z.object({
   iteration: z.number().nullable().optional(),
 })
 
-/**
- * The stage marker on disk, or null when absent/garbled. The single reader —
- * `routes/active.ts` renders the same marker and imports this rather than
- * keeping a second parser that could drift.
- */
-export const readStageMarker = async (deps: HubDeps): Promise<StageMarker | null> => {
-  const content = await readText(deps, `${deps.tasksDir}/runs/.stage.json`)
+const parseMarker = (content: string | null): StageMarker | null => {
   if (!content) return null
   try {
     const parsed = StageMarkerSchema.safeParse(JSON.parse(content))
@@ -54,6 +52,18 @@ export const readStageMarker = async (deps: HubDeps): Promise<StageMarker | null
   } catch {
     return null
   }
+}
+
+/**
+ * The stage marker on disk, or null when absent/garbled. Reads both hosts'
+ * markers (Claude's `.stage.json` first, then OpenCode's sibling). The single
+ * reader — `routes/active.ts` and `routes/runs.ts` render the same marker and
+ * import this rather than keeping second parsers that could drift.
+ */
+export const readStageMarker = async (deps: HubDeps): Promise<StageMarker | null> => {
+  const claude = parseMarker(await readText(deps, `${deps.tasksDir}/runs/.stage.json`))
+  if (claude) return claude
+  return parseMarker(await readText(deps, `${deps.tasksDir}/runs/.stage-opencode.json`))
 }
 
 export interface DrivingOracle {

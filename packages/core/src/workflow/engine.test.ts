@@ -4,7 +4,7 @@ import { test } from "node:test"
 import path from "node:path"
 import { loadManifest } from "../manifest/load.js"
 import { effectiveAllowlist, stageDef } from "../manifest/schema.js"
-import { advance, composePrompt, firstStep } from "./engine.js"
+import { advance, composePrompt, composeStagePrompt, firstStep, promptContext } from "./engine.js"
 import type { Action, Config, WorkflowState, TaskRef } from "./state.js"
 import { resumeAtBuild, startAtPlan } from "./state.js"
 import { verdictContractBlock, workScopeBlock, type Verdict } from "./verdict.js"
@@ -210,6 +210,18 @@ test("composePrompt reproduces the frozen composeArgs byte-identically for every
   for (const [label, state] of Object.entries(PROMPT_STATES)) {
     for (const stage of ["plan", "build", "verify", "review"]) {
       assert.equal(composePrompt(eng, state, stage), oracleCompose(state, stage), `${label} → ${stage}`)
+    }
+  }
+})
+
+test("composeStagePrompt matches composePrompt byte-for-byte on hook-less stages — the hub preview's guarantee", () => {
+  // The hub's creator preview composes unsaved manifests through the lenient
+  // primitive; any divergence from composePrompt here means the preview lies.
+  for (const [label, state] of Object.entries(PROMPT_STATES)) {
+    for (const stage of ["plan", "build", "verify", "review"]) {
+      const def = stageDef(eng.manifest, stage)
+      const lenient = composeStagePrompt(def, eng.prompts[stage] ?? "", promptContext({ ...state, stage }))
+      assert.equal(lenient, composePrompt(eng, { ...state, stage }, stage), `${label} → ${stage}`)
     }
   }
 })

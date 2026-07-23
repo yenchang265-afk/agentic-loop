@@ -17,6 +17,8 @@ export interface WatchSnapshot {
   readonly runs: Readonly<Record<string, string>>
   /** .stage.json key, or null when absent */
   readonly stageMarker: string | null
+  /** .stage-opencode.json key (the OpenCode driver's sibling marker), or null */
+  readonly opencodeMarker: string | null
   /** watch-lease owner.json key, or null */
   readonly lease: string | null
   /**
@@ -75,6 +77,7 @@ export const scanSnapshot = (directory: string, tasksDir: string, statuses: read
     tasks,
     runs,
     stageMarker: statKey(path.join(runsDir, ".stage.json")),
+    opencodeMarker: statKey(path.join(runsDir, ".stage-opencode.json")),
     lease: statKey(path.join(runsDir, ".watch-lease", "owner.json")),
     config: statKey(path.join(directory, ".agentic-workflow.json")),
   }
@@ -109,7 +112,8 @@ export const diffSnapshots = (
   if (backlogChanged) events.push({ type: "backlog" })
 
   const runNames = new Set([...Object.keys(prev.runs), ...Object.keys(next.runs)])
-  let activeChanged = prev.stageMarker !== next.stageMarker || prev.lease !== next.lease
+  let activeChanged =
+    prev.stageMarker !== next.stageMarker || prev.opencodeMarker !== next.opencodeMarker || prev.lease !== next.lease
   for (const name of runNames) {
     if (prev.runs[name] === next.runs[name]) continue
     if (name.endsWith(".state.json")) activeChanged = true

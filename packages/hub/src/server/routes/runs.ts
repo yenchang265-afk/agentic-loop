@@ -52,9 +52,9 @@ export const getRuns = async (deps: HubDeps): Promise<JsonResponse> => {
   const ids = (listed?.data ?? [])
     .filter((n) => n.type === "file" && n.name.endsWith(".md"))
     .map((n) => n.name.replace(/\.md$/, ""))
-  // The one parser of the live `.stage.json` marker lives in driving.ts; this
-  // route only wants the task id it names (null covers: no live loop, the
-  // opencode host, an unreadable marker). Display only, same spirit as
+  // The one parser of the live stage markers (either host's) lives in
+  // driving.ts; this route only wants the task id it names (null covers: no
+  // live loop, an unreadable marker). Display only, same spirit as
   // `readSnapshot`.
   const activeTaskId = (await readStageMarker(deps))?.taskId ?? null
   const runs: RunListItem[] = (

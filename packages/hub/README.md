@@ -75,7 +75,8 @@ creator tab is unaffected.
   the kind's manifest — backlog kinds get a board over their own
   `docs/tasks/<status>/` folders with gate columns taken from the manifest's
   park/done targets (not hardcoded), PR-shaped kinds get a ledger panel — plus
-  the live-activity strip (`.stage.json` marker, watch-lease liveness,
+  the live-activity strip (either host's stage marker — Claude's `.stage.json`
+  or OpenCode's `.stage-opencode.json` — watch-lease liveness,
   resumable snapshots), run history parsed from `runs/<id>.md`, and per-stage
   token usage. Live updates via `fs.watch` + a polling reconciler
   (DrvFs-safe — DrvFs is WSL's `/mnt/c` Windows-drive filesystem, whose native
