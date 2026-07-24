@@ -1,4 +1,5 @@
 import type { Hooks, PluginInput } from "@opencode-ai/plugin"
+import { overrideCommandPrompt, refusalPrompt } from "./command-prompt.ts"
 
 /**
  * The fail-loud fallback for a plugin whose impl.ts could not be imported
@@ -30,10 +31,14 @@ export const loadFailureMessage = (err: unknown): string => {
 export const loadFailureHooks = (err: unknown, client: PluginInput["client"]): Hooks => {
   const message = loadFailureMessage(err)
   return {
-    "command.execute.before": async (input) => {
+    "command.execute.before": async (input, output) => {
       if (!/^agentic-workflow:/.test(input.command)) return
       await client.app.log({ body: { service: "agentic-workflow", level: "error", message } }).catch(() => {})
       await client.tui.showToast({ body: { message, variant: "error" } }).catch(() => {})
+      // The toast is for the human; the model never sees it and would other-
+      // wise run the still-rendered template as a plain prompt — exactly the
+      // "reports a task move that never happened" failure index.ts warns about.
+      overrideCommandPrompt(output, refusalPrompt("it failed to load.", message))
     },
   }
 }

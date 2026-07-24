@@ -5,6 +5,7 @@ import { DEFAULT_CONFIG, applyAdoPatEnv, loadConfig } from "./config.ts"
 import { enabledWorkflowKinds } from "@agentic-workflow/core/config"
 import type { Config } from "./config.ts"
 import * as driver from "./workflow/driver.ts"
+import { overrideCommandPrompt, refusalPrompt } from "./command-prompt.ts"
 import { listWorktrees, pruneWorktrees } from "@agentic-workflow/core/workflow/git"
 import { listSnapshotIds } from "@agentic-workflow/core/workflow/persist"
 import { anyWorkflowActive, anyWorktreeWorkflowActive, findSessionDriving, getWorkflow, hasWorkflow, planStageTaskId } from "@agentic-workflow/core/workflow/state"
@@ -57,21 +58,39 @@ export const makeAgenticWorkflow: Plugin = async ({ client, directory, $ }) => {
   // call made from it (file.read, app.log, …) is a request back into the same
   // still-bootstrapping instance — a circular wait that hangs opencode startup
   // forever. Hooks only fire after bootstrap completes, so client calls are
-  // safe there. Fall back to defaults (and warn) on misconfig so a bad config
-  // file degrades rather than breaking the plugin entirely.
+  // safe there. Fall back to the last good config (and warn) on misconfig so a
+  // bad config file degrades rather than breaking the plugin entirely.
   let configPromise: Promise<Config> | undefined
-  const getConfig = (): Promise<Config> =>
-    (configPromise ??= loadConfig(client, directory)
-      .catch(async (err) => {
-        await log("warn", `using default config: ${(err as Error).message}`)
-        return DEFAULT_CONFIG
-      })
-      // Export ado.pat → AZURE_DEVOPS_EXT_PAT (when unset) so the sitter's
-      // stage-agent curl calls inherit it; the env var always wins.
-      .then((config) => {
-        applyAdoPatEnv(config)
-        return config
-      }))
+  let lastGood: Config | undefined
+  const readConfig = async (): Promise<Config> => {
+    let config: Config
+    try {
+      config = await loadConfig(client, directory)
+      lastGood = config
+    } catch (err) {
+      // A rejected config silently downgrading to defaults surfaces later as
+      // "the kind I enabled is unknown", with the only clue buried in
+      // opencode's log file. Toast it: the cause is one bad key, and the human
+      // has no other way to connect the two.
+      const message = `agentic-workflow: ignoring .agentic-workflow.json — ${(err as Error).message}`
+      await log("warn", message)
+      await client.tui.showToast({ body: { message, variant: "error" } }).catch(() => {})
+      config = lastGood ?? DEFAULT_CONFIG
+    }
+    // Export ado.pat → AZURE_DEVOPS_EXT_PAT (when unset) so the sitter's
+    // stage-agent curl calls inherit it; the env var always wins.
+    applyAdoPatEnv(config)
+    return config
+  }
+  const getConfig = (): Promise<Config> => (configPromise ??= readConfig())
+
+  // Re-read the config for a user-typed command. The cache above lives for the
+  // whole opencode instance and nothing invalidates it, so enabling a workflow
+  // kind mid-session left its command rejected as "unknown kind" until a
+  // restart — with the toast naming the kind, not the staleness. Commands are
+  // human-paced, so one file read per command is cheap; the session.idle path
+  // keeps the cache, since it fires far too often to pay this.
+  const refreshConfig = (): Promise<Config> => (configPromise = readConfig())
 
   // Startup reconciliation runs on the FIRST hook, not during plugin init — any
   // `client` call from the initializer is a circular wait into the still-
@@ -195,18 +214,24 @@ export const makeAgenticWorkflow: Plugin = async ({ client, directory, $ }) => {
       await driver.onIdle(deps, sessionID, await getConfig())
     },
 
-    "command.execute.before": async (input) => {
+    "command.execute.before": async (input, output) => {
       // One command per workflow kind: /agentic-workflow:engineering, /agentic-workflow:pr-sitter, …
       const match = /^agentic-workflow:(.+)$/.exec(input.command)
       if (!match) return
       const kind = match[1]!
-      const config = await getConfig()
+      // Re-read rather than trust the instance-lifetime cache: a kind enabled
+      // in .agentic-workflow.json must work on the next command, not after the
+      // next opencode restart.
+      const config = await refreshConfig()
       if (!enabledWorkflowKinds(config).includes(kind)) {
-        await client.tui
-          .showToast({
-            body: { message: `Unknown workflow kind "${kind}" — enabled: ${enabledWorkflowKinds(config).join(", ")}.`, variant: "warning" },
-          })
-          .catch(() => {})
+        const enabled = enabledWorkflowKinds(config)
+        const remedy = `Workflow kind "${kind}" is not enabled — enabled kinds: ${enabled.join(", ")}. Add {"workflows":{"${kind}":{"enabled":true}}} to .agentic-workflow.json in the project root, then re-run this command.`
+        await client.tui.showToast({ body: { message: remedy, variant: "warning" } }).catch(() => {})
+        // The command markdown renders whether or not the plugin handles it.
+        // Left alone, the model reads a full description of the sitter's work
+        // and improvises it — `gh` calls, manifest reads, guesses at what
+        // `watch` means. Replace the template with the refusal.
+        overrideCommandPrompt(output, refusalPrompt(`the workflow kind "${kind}" is not enabled.`, remedy))
         return
       }
       // The engineering gate verbs (approve / replan) are pure task-file moves
