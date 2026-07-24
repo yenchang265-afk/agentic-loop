@@ -394,14 +394,16 @@ const terminalCtx = (state: WorkflowState, actor: string | null): TerminalCtx =>
 const findAnyStatus = (id: string): Promise<Task | null> => coreFindAnyStatus(gateCtx(), id)
 
 /** The work sources workflow_claim polls, in claim-priority order (config order).
- *  An `only` kind restricts the poll to that one kind. */
-const sourcesFor = (only?: string): WorkSource[] =>
+ *  An `only` kind restricts the poll to that one kind; a `target` PR number
+ *  forces that exact PR on a PR-shaped `only` kind. */
+const sourcesFor = (only?: string, target?: number): WorkSource[] =>
   buildWorkSources(
     // Single active loop per server; a claim only happens when no loop is live.
     { $: sh, client: fsClient, directory, log, isDriving: (id) => active?.task?.id === id },
     config,
     manifestFor,
     only,
+    target,
   )
 
 /** Claim an approved in-progress task and construct its build-entry state.
@@ -562,16 +564,30 @@ server.registerTool(
   "workflow_claim",
   {
     description:
-      "Claim the next item and start it — the pull equivalent of the OpenCode plugin's /agentic-workflow:engineering watch. Polls all enabled workflow kinds in claim-priority order (engineering, then the always-on pr-sitter and review-sitter, then any opted-in kind); pass `kind` to restrict the pull to one kind (e.g. /agentic-workflow:engineering claim pr-sitter). For engineering it claims build-ready in-progress/ work only (lowest priority number first) — planless queued/ tasks are never auto-planned; plan them with workflow_start({id}). Returns null when nothing is claimable.",
-    inputSchema: { kind: z.string().optional().describe("Restrict the pull to one enabled workflow kind (e.g. pr-sitter).") },
+      "Claim the next item and start it — the pull equivalent of the OpenCode plugin's /agentic-workflow:engineering watch. Polls all enabled workflow kinds in claim-priority order (engineering, then the always-on pr-sitter and review-sitter, then any opted-in kind); pass `kind` to restrict the pull to one kind (e.g. /agentic-workflow:engineering claim pr-sitter). For engineering it claims build-ready in-progress/ work only (lowest priority number first) — planless queued/ tasks are never auto-planned; plan them with workflow_start({id}). Pass `target` (a PR number) with a PR-sitter `kind` to force that exact PR — it is claimed and driven even with no outstanding attention signal, overriding the poller's heuristic (the fork-PR refusal still holds). Returns null when nothing is claimable.",
+    inputSchema: {
+      kind: z.string().optional().describe("Restrict the pull to one enabled workflow kind (e.g. pr-sitter)."),
+      target: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("A specific PR number to force-claim; requires a PR-shaped `kind` (pr-sitter / review-sitter)."),
+    },
   },
-  async ({ kind }) => {
+  async ({ kind, target }) => {
     await loadCfg()
     if (active) return fail(`A loop is already driving "${workflowId(active)}" — finish or workflow_stop it first.`)
     if (kind && !enabledWorkflowKinds(config).includes(kind)) {
       return fail(`Unknown workflow kind "${kind}" — enabled: ${enabledWorkflowKinds(config).join(", ")}.`)
     }
-    const { claim, skips } = await pollOnce(sourcesFor(kind))
+    if (target != null) {
+      if (!kind) return fail("target requires a `kind` — name the PR sitter (pr-sitter or review-sitter) that should claim PR #" + target + ".")
+      if (manifestFor(kind).manifest.workSource.type !== "pull-request") {
+        return fail(`Workflow kind "${kind}" is not a PR sitter — a specific PR target only applies to pr-sitter / review-sitter.`)
+      }
+    }
+    const { claim, skips } = await pollOnce(sourcesFor(kind, target))
     if (!claim) {
       return ok(skips.length ? { claimed: null, skips } : null)
     }

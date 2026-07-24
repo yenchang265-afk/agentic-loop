@@ -1,7 +1,7 @@
 ---
 name: agentic-workflow:review-sitter
 description: The review sitter loop — watch or claim PRs whose review is requested from you and drive them through fetch → assess → publish
-argument-hint: claim | watch [poll [interval] | cron <schedule> | idle | <interval>] | unwatch | stop | status
+argument-hint: claim [<pr>] | watch [poll [interval] | cron <schedule> | idle | <interval>] | unwatch | stop | status
 ---
 
 The review sitter agentic loop — sits on pull requests where **your review is
@@ -14,10 +14,13 @@ work: **invoke nothing, write nothing** — report the toast's outcome and stop.
 
 Dispatch:
 
-- **`claim`** — one-shot pull: poll for the next PR whose review is wanted
-  and drive it once this turn settles (FETCH → ASSESS → PUBLISH per the
+- **`claim [<pr>]`** — one-shot pull: poll for the next PR whose review is
+  wanted and drive it once this turn settles (FETCH → ASSESS → PUBLISH per the
   review-sitter manifest, `packages/core/workflows/review-sitter/`). A PR whose
-  head was already reviewed is skipped until a human pushes a new head.
+  head was already reviewed is skipped until a human pushes a new head. Pass a
+  specific PR — a number (`42`), `#42`, or a PR URL — to **force** a fresh
+  review pass on that one even if its head was already reviewed, overriding the
+  query and dedup ledger. Fork PRs are still refused.
 - **`watch [trigger]`** — put **this** session into review-sitter worker
   mode. Bare `watch` uses the kind's configured trigger
   (`workflows.review-sitter.trigger`, default poll); an argument overrides it for

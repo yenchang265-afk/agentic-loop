@@ -13,22 +13,27 @@ import type { TerminalOutcome, WorkItem } from "./types.js"
  */
 
 export const triggerSummary = (triggers: readonly PrTrigger[], snapshot: PrSnapshot): string =>
-  triggers
-    .map((t) => {
-      switch (t) {
-        case "failing-checks":
-          return `failing checks: ${snapshot.failingChecks.join(", ")}`
-        case "changes-requested":
-          return "review requested changes"
-        case "new-comments":
-          return `${snapshot.newComments.length} unanswered comment(s)`
-        case "merge-conflict":
-          return "merge conflict with the base branch"
-        case "review-requested":
-          return "your review is requested on this head"
-      }
-    })
-    .join("; ")
+  // A forced `claim <pr>` can name a PR with no outstanding signal (empty
+  // triggers); the poller never does (it skips a PR with no triggers). Give the
+  // goal a sensible reason rather than an empty "()".
+  triggers.length === 0
+    ? "manually claimed — re-verify and address anything outstanding"
+    : triggers
+        .map((t) => {
+          switch (t) {
+            case "failing-checks":
+              return `failing checks: ${snapshot.failingChecks.join(", ")}`
+            case "changes-requested":
+              return "review requested changes"
+            case "new-comments":
+              return `${snapshot.newComments.length} unanswered comment(s)`
+            case "merge-conflict":
+              return "merge conflict with the base branch"
+            case "review-requested":
+              return "your review is requested on this head"
+          }
+        })
+        .join("; ")
 
 /** Local mkdir claim markers under `<tasksDir>/runs/<kind>/.claims/pr-<n>` — atomic across watchers on this filesystem. Keyed by kind so a second PR-shaped kind can't clash. */
 export const makeClaimMarkers = ($: Shell, directory: string, tasksDir: string, kind: string) => {

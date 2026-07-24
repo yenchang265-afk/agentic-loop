@@ -1,7 +1,7 @@
 ---
 name: agentic-workflow:pr-sitter
 description: The PR sitter loop — watch or claim open pull requests and drive them through triage → fix → verify → publish
-argument-hint: claim | watch [poll [interval] | cron <schedule> | idle | <interval>] | unwatch | stop | status
+argument-hint: claim [<pr>] | watch [poll [interval] | cron <schedule> | idle | <interval>] | unwatch | stop | status
 ---
 
 The PR sitter agentic loop — sits on your open pull requests (GitHub via
@@ -15,10 +15,14 @@ and stop.
 
 Dispatch:
 
-- **`claim`** — one-shot pull: poll the configured PR source for the next
-  actionable pull request and drive it once this turn settles
+- **`claim [<pr>]`** — one-shot pull: poll the configured PR source for the
+  next actionable pull request and drive it once this turn settles
   (TRIAGE → FIX → VERIFY → PUBLISH per the pr-sitter manifest,
   `packages/core/workflows/pr-sitter/`). A PR with nothing actionable is skipped.
+  Pass a specific PR — a number (`42`), `#42`, or a PR URL — to **force** that
+  one: it is fetched directly and driven even with no outstanding signal,
+  overriding the query and dedup ledger. Fork PRs are still refused (they carry
+  an untrusted head).
 - **`watch [trigger]`** — put **this** session into PR-sitter worker mode.
   Bare `watch` uses the kind's configured trigger (`workflows.pr-sitter.trigger`,
   default poll); an argument overrides it for this session only:

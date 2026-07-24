@@ -1,7 +1,7 @@
 import { z } from "zod"
 import type { Client, Log, Shell } from "../host.js"
 import type { LoadedManifest } from "../manifest/schema.js"
-import { attentionTriggers, loadLedger, saveLedger, type PrSnapshot, type PrTrigger } from "./ledger.js"
+import { attentionTriggers, emptyLedger, loadLedger, saveLedger, type PrSnapshot, type PrTrigger } from "./ledger.js"
 import { fetchHead, makeClaimMarkers, prWorkItem, terminalLedgerUpdate } from "./pr-shared.js"
 import type { ClaimSkipReason, TerminalOutcome, WorkSource } from "./types.js"
 
@@ -38,6 +38,9 @@ const PrListSchema = z.array(
       .nullish(),
   }),
 )
+
+/** One PR object as `gh pr view --json` returns it — the element of the list schema, reused for a targeted single-PR fetch. */
+const PrSchema = PrListSchema.element
 
 /** The post-terminal `gh pr view` re-read — validated, not cast, like every other gh parse here. */
 const FreshHeadSchema = z.object({
@@ -77,6 +80,14 @@ interface GithubPrDeps {
   readonly loaded: LoadedManifest
   /** Override of the manifest's search query (config `workflows.pr-sitter.query`). */
   readonly query?: string
+  /**
+   * A specific PR number to claim, from `claim <pr>`. When set, `claimNext`
+   * fetches that one PR directly (bypassing the search query and the dedup
+   * ledger) and drives it even with no outstanding attention signal — a human
+   * naming a PR overrides the "what needs attention" heuristic. The fork skip
+   * (threat model T10) still holds.
+   */
+  readonly target?: number
   /** Clock injection for ledger stamps; defaults to the real time. */
   readonly now?: () => string
 }
@@ -101,12 +112,90 @@ export const makeGithubPrSource = (deps: GithubPrDeps): WorkSource => {
 
   const markers = makeClaimMarkers($, directory, tasksDir, kind)
 
+  const fields =
+    "number,title,headRefName,baseRefName,headRefOid,isDraft,mergeable,reviewDecision,isCrossRepository,statusCheckRollup,comments"
+
+  /** Normalize one parsed PR into the ledger's `PrSnapshot`. `watermark` gates the
+   *  "new comments" signal; own-login comments are always filtered out. */
+  const buildSnapshot = (pr: z.infer<typeof PrSchema>, login: string, watermark: string): PrSnapshot => ({
+    number: pr.number,
+    title: pr.title,
+    headRefName: pr.headRefName,
+    baseRefName: pr.baseRefName,
+    headRefOid: pr.headRefOid,
+    mergeable: pr.mergeable,
+    reviewDecision: pr.reviewDecision ?? "",
+    failingChecks: (pr.statusCheckRollup ?? [])
+      .filter((c) => FAILING.has((c.conclusion ?? c.state ?? "").toUpperCase()))
+      .map((c) => c.name)
+      .filter(Boolean),
+    newComments: (pr.comments ?? [])
+      .filter((c) => (c.author?.login ?? "") !== login && isAfter(c.createdAt, watermark))
+      .map((c) => ({ author: c.author?.login ?? "", at: c.createdAt })),
+  })
+
+  /**
+   * Claim one explicitly-named PR (`claim <pr>`), overriding the poller's
+   * heuristics: fetch it directly, skip the dedup ledger and the search query,
+   * and drive it even with no outstanding attention signal. The fork skip is a
+   * security invariant (T10), so it still refuses. The claim marker and head
+   * fetch are unchanged, so multi-watcher safety and isolation reuse hold.
+   */
+  const claimSpecific = async (target: number): ReturnType<WorkSource["claimNext"]> => {
+    const out = await $`gh pr view ${String(target)} --json ${fields}`.cwd(directory).quiet().nothrow()
+    if (out.exitCode !== 0) {
+      return {
+        item: null,
+        skip: {
+          message: `${kind}: PR #${target} not found or not accessible — ${out.stderr.toString().trim() || "is gh authenticated?"}`,
+          actionable: true,
+        } satisfies ClaimSkipReason,
+      }
+    }
+    let pr: z.infer<typeof PrSchema>
+    try {
+      pr = PrSchema.parse(JSON.parse(out.stdout.toString() || "{}"))
+    } catch (err) {
+      return {
+        item: null,
+        skip: { message: `${kind}: could not parse gh output for PR #${target} — ${(err as Error).message}`, actionable: true },
+      }
+    }
+    // Fork PRs are refused for every role even when named explicitly: an
+    // author-role kind can't push the head, and a reviewer-role kind would run
+    // untrusted fork code in its assess worktree (threat model T10).
+    if (pr.isCrossRepository) {
+      return {
+        item: null,
+        skip: { message: `${kind}: PR #${target} is from a fork — refusing to claim it (untrusted head, threat model T10).`, actionable: true },
+      }
+    }
+    const login = await viewer()
+    // Watermark "" surfaces every non-self comment, and an empty ledger surfaces
+    // every raw signal — a forced claim ignores what prior polls handled.
+    const snapshot = buildSnapshot(pr, login, "")
+    const triggers = attentionTriggers(snapshot, emptyLedger(target, now()), binding.triggers)
+    if (!(await markers.claim(target))) {
+      return {
+        item: null,
+        skip: { message: `${kind}: claim marker held for pr-${target}`, actionable: true },
+      }
+    }
+    if (!(await fetchHead($, directory, pr.headRefName))) {
+      await markers.release(target)
+      return {
+        item: null,
+        skip: { message: `${kind}: could not fetch ${pr.headRefName} for PR #${target} — skipping`, actionable: true },
+      }
+    }
+    return { item: prWorkItem(loaded, "github", snapshot, triggers), skip: null }
+  }
+
   return {
     workflowKind: kind,
 
     async claimNext() {
-      const fields =
-        "number,title,headRefName,baseRefName,headRefOid,isDraft,mergeable,reviewDecision,isCrossRepository,statusCheckRollup,comments"
+      if (deps.target != null) return claimSpecific(deps.target)
       // `gh pr list` defaults to 30. This source iterates the FULL set looking
       // for one that needs attention, so anything past the window would never be
       // claimed — silently, with no error. Ask for a high explicit ceiling and
@@ -151,23 +240,7 @@ export const makeGithubPrSource = (deps: GithubPrDeps): WorkSource => {
         // in its assess worktree (threat model T10).
         if (pr.isCrossRepository) continue
         const ledger = await loadLedger(client, directory, tasksDir, kind, pr.number, now())
-        const watermark = ledger.lastCommentAtHandled ?? ""
-        const snapshot: PrSnapshot = {
-          number: pr.number,
-          title: pr.title,
-          headRefName: pr.headRefName,
-          baseRefName: pr.baseRefName,
-          headRefOid: pr.headRefOid,
-          mergeable: pr.mergeable,
-          reviewDecision: pr.reviewDecision ?? "",
-          failingChecks: (pr.statusCheckRollup ?? [])
-            .filter((c) => FAILING.has((c.conclusion ?? c.state ?? "").toUpperCase()))
-            .map((c) => c.name)
-            .filter(Boolean),
-          newComments: (pr.comments ?? [])
-            .filter((c) => (c.author?.login ?? "") !== login && isAfter(c.createdAt, watermark))
-            .map((c) => ({ author: c.author?.login ?? "", at: c.createdAt })),
-        }
+        const snapshot = buildSnapshot(pr, login, ledger.lastCommentAtHandled ?? "")
         const triggers = attentionTriggers(snapshot, ledger, binding.triggers)
         if (triggers.length === 0) continue
         if (!(await markers.claim(pr.number))) {

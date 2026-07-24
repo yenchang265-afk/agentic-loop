@@ -162,9 +162,10 @@ const eng = manifestFor("engineering")
 registerEngineeringHooks()
 
 /** The work sources the scheduler polls, in claim-priority order (config order).
- *  An `only` kind restricts the poll to that one kind (claim/watch kind filter). */
-const sourcesFor = (deps: Deps, config: Config, only?: string): WorkSource[] =>
-  buildWorkSources({ ...deps, isDriving: (id) => findSessionDriving(id) !== undefined }, config, manifestFor, only)
+ *  An `only` kind restricts the poll to that one kind (claim/watch kind filter);
+ *  a `target` PR number forces that exact PR on a PR-shaped `only` kind. */
+const sourcesFor = (deps: Deps, config: Config, only?: string, target?: number): WorkSource[] =>
+  buildWorkSources({ ...deps, isDriving: (id) => findSessionDriving(id) !== undefined }, config, manifestFor, only, target)
 
 type Client = PluginInput["client"]
 type Shell = PluginInput["$"]
@@ -238,10 +239,11 @@ const watchKindFilter = new Map<string, string>()
 /**
  * One-shot claim requests (`claim`), consumed by the next
  * `onIdle` — the command's own turn must settle before a drive may start, the
- * same deferral `task <id>` gets via `pending`. The value is the kind filter
- * (undefined = all enabled kinds).
+ * same deferral `task <id>` gets via `pending`. `kind` is the kind filter
+ * (undefined = all enabled kinds); `target` is a specific PR number
+ * (`claim <pr>` on a PR-shaped kind), which forces that PR's claim.
  */
-const claimRequested = new Map<string, string | undefined>()
+const claimRequested = new Map<string, { kind?: string; target?: number }>()
 /**
  * The clone's watch lease, refcounted per working directory: watch sessions in
  * THIS process share one on-disk lease (in-process races are covered by the
@@ -1214,9 +1216,9 @@ export type { ClaimSkipReason } from "@agentic-workflow/core/source/types"
  * reason is always logged, and toasted when actionable (deduped until the
  * reason changes).
  */
-const tryClaim = async (deps: Deps, sessionID: string, config: Config, only?: string): Promise<void> => {
+const tryClaim = async (deps: Deps, sessionID: string, config: Config, only?: string, target?: number): Promise<void> => {
   const kindFilter = only ?? watchKindFilter.get(sessionID)
-  const { claim, skips } = await pollOnce(sourcesFor(deps, config, kindFilter))
+  const { claim, skips } = await pollOnce(sourcesFor(deps, config, kindFilter, target))
   if (!claim) {
     const reason = combineSkips(skips)
     if (!reason) return
@@ -1409,9 +1411,9 @@ export const onIdle = async (deps: Deps, sessionID: string, config: Config): Pro
       // No pending work — a watch session (or one-shot `claim`)
       // with nothing to resume; look for one claimable item across the
       // enabled workflow kinds.
-      const only = claimRequested.get(sessionID)
+      const requested = claimRequested.get(sessionID)
       claimRequested.delete(sessionID)
-      await tryClaim(deps, sessionID, config, only)
+      await tryClaim(deps, sessionID, config, requested?.kind, requested?.target)
     }
   } catch (err) {
     const message = (err as Error).message
@@ -1717,6 +1719,22 @@ const splitVerb = (arg: string): { verb: string; rest: string } => {
   return m ? { verb: m[1]!.toLowerCase(), rest: m[2]!.trim() } : { verb: "", rest: "" }
 }
 
+/**
+ * Parse a `claim <pr>` target into a positive PR number. Accepts a bare number
+ * (`42`), a `#`-prefixed number (`#42`), or a PR URL whose last path segment is
+ * the number (`https://github.com/o/r/pull/42`). Returns null for anything else.
+ * Pure.
+ */
+export const parsePrTarget = (rest: string): number | null => {
+  const s = rest.trim()
+  if (!s) return null
+  const fromUrl = /\/pull(?:request)?s?\/(\d+)/i.exec(s)
+  const digits = fromUrl ? fromUrl[1]! : /^#?(\d+)$/.exec(s)?.[1]
+  if (!digits) return null
+  const n = Number(digits)
+  return Number.isInteger(n) && n > 0 ? n : null
+}
+
 /** Parse and handle a `/agentic-workflow:<kind> ...` command. Engineering gets the
  *  full backlog lifecycle; every other kind gets the minimal watcher verb set
  *  (claim · watch · unwatch · stop · status), scoped to that kind. */
@@ -1814,7 +1832,21 @@ export const handleCommand = async (
     if (driving.has(sessionID) || getWorkflow(sessionID)) {
       return report(client, `A loop is already driving in this session — /agentic-workflow:${kind} stop it first.`, "warning")
     }
-    claimRequested.set(sessionID, kind)
+    // `claim <pr>` forces a specific PR on a PR-shaped kind (pr-sitter /
+    // review-sitter), overriding the poller's "what needs attention" heuristic.
+    if (rest) {
+      const isPrKind = manifestFor(kind).manifest.workSource.type === "pull-request"
+      if (!isPrKind) {
+        return report(client, `/agentic-workflow:${kind} claim takes no argument — a specific PR number only applies to the PR sitters.`, "warning")
+      }
+      const target = parsePrTarget(rest)
+      if (target === null) {
+        return report(client, `Could not read "${rest}" as a PR — pass a number (42), #42, or a PR URL.`, "warning")
+      }
+      claimRequested.set(sessionID, { kind, target })
+      return report(client, `Claiming PR #${target} for ${kind} — it starts when this turn settles.`, "info")
+    }
+    claimRequested.set(sessionID, { kind })
     return report(client, `Claiming the next ${kind} item — it starts when this turn settles.`, "info")
   }
 
@@ -1865,7 +1897,7 @@ export const handleCommand = async (
       // the next fire retries. The finally-cleanup keeps a skipped fire's
       // request from leaking into a later plain idle event.
       handle = armCron(trigger.schedule, () => {
-        claimRequested.set(sessionID, kind)
+        claimRequested.set(sessionID, { kind })
         void watchTick(deps, sessionID, config).finally(() => claimRequested.delete(sessionID))
       })
     } else if (trigger.type === "idle") {

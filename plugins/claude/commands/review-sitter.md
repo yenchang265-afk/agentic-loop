@@ -1,6 +1,6 @@
 ---
 description: The review sitter loop — claim PRs whose review is requested from you and drive them through fetch → assess → publish
-argument-hint: claim | status | stop
+argument-hint: claim [<pr>] | status | stop
 ---
 
 You are about to work the **review sitter agentic loop** (typed as
@@ -13,14 +13,17 @@ one structured review comment per requested head. Read the
 
 Dispatch:
 
-- **`claim`** — call `mcp__agentic-workflow__workflow_claim({kind: "review-sitter"})`
+- **`claim [<pr>]`** — call `mcp__agentic-workflow__workflow_claim({kind: "review-sitter"})`
   to poll for the next PR whose review is wanted and drive it per the
   review-sitter manifest: `workflow_stage` before spawning each stage subagent
   (`workflow-review-fetch` / `workflow-review-assess` / `workflow-review-publish` —
   fetch → assess → publish — via the Task tool, passing the response's
   `model` as the Task tool's `model` when present) and `workflow_advance` after
   each returns, until a terminal action. A head already reviewed is skipped until
-  a human pushes a new one. There is no standing watch mode on this substrate
+  a human pushes a new one. To **force** a fresh review pass on a specific PR,
+  pass its number as `target` — `workflow_claim({kind: "review-sitter", target: 42})` —
+  and it is driven even if its head was already reviewed (fork PRs are still
+  refused). There is no standing watch mode on this substrate
   — `claim` is the pull; the OpenCode plugin's
   `/agentic-workflow:review-sitter watch` is the push equivalent.
 - **`status`** (or bare) — call `mcp__agentic-workflow__workflow_status` and report

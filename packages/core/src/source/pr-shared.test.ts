@@ -78,3 +78,16 @@ test("triggerSummary names every trigger in a human line", () => {
   assert.match(s, /merge conflict/)
   assert.match(s, /your review is requested/)
 })
+
+test("triggerSummary falls back to a manual-claim line for an empty trigger set (a forced `claim <pr>`)", () => {
+  const s = triggerSummary([], snapshot())
+  assert.match(s, /manually claimed/)
+})
+
+test("prWorkItem builds a well-formed goal when a forced claim carries no triggers", () => {
+  const loaded = loadManifest(WORKFLOWS_DIR, "pr-sitter")
+  const item = prWorkItem(loaded, "github", snapshot(), [])
+  // No empty "()" — the summary reads as a manual claim.
+  assert.doesNotMatch(item.state.goal, /\(\)/)
+  assert.match(item.state.goal, /manually claimed/)
+})

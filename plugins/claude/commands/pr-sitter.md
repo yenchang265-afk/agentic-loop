@@ -1,6 +1,6 @@
 ---
 description: The PR sitter loop — claim open pull requests and drive them through triage → fix → verify → publish
-argument-hint: claim | status | stop
+argument-hint: claim [<pr>] | status | stop
 ---
 
 You are about to work the **PR sitter agentic loop** (typed as
@@ -14,14 +14,17 @@ pr-sitter manifest); then act on the argument below.
 
 Dispatch:
 
-- **`claim`** — call `mcp__agentic-workflow__workflow_claim({kind: "pr-sitter"})` to
-  poll the configured PR source for the next actionable pull request and
+- **`claim [<pr>]`** — call `mcp__agentic-workflow__workflow_claim({kind: "pr-sitter"})`
+  to poll the configured PR source for the next actionable pull request and
   drive it per the pr-sitter manifest: `workflow_stage` before spawning each
   stage subagent (`workflow-pr-triage` / `workflow-pr-fix` / `workflow-verify` /
   `workflow-pr-publish` — triage → fix → verify → publish — via the Task tool,
   passing the response's `model` as the Task tool's `model` when present)
   and `workflow_advance` after each returns, until a terminal action. A PR with nothing actionable is skipped
-  (triage FAIL → done). There is no standing watch mode on this substrate —
+  (triage FAIL → done). To **force** a specific PR, pass its number as
+  `target` — `workflow_claim({kind: "pr-sitter", target: 42})` — and it is
+  fetched directly and driven even with no outstanding signal (fork PRs are
+  still refused). There is no standing watch mode on this substrate —
   `claim` is the pull; the OpenCode plugin's `/agentic-workflow:pr-sitter watch`
   is the push equivalent.
 - **`status`** (or bare) — call `mcp__agentic-workflow__workflow_status` and report

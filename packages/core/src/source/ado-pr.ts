@@ -2,7 +2,7 @@ import { z } from "zod"
 import type { Client, Log, Shell } from "../host.js"
 import type { LoadedManifest } from "../manifest/schema.js"
 import type { AdoConfig } from "../workflow/state.js"
-import { attentionTriggers, loadLedger, saveLedger, type PrSnapshot, type PrTrigger } from "./ledger.js"
+import { attentionTriggers, emptyLedger, loadLedger, saveLedger, type PrSnapshot, type PrTrigger } from "./ledger.js"
 import { fetchHead, makeClaimMarkers, prWorkItem, terminalLedgerUpdate } from "./pr-shared.js"
 import {
   ADO_HEADERS_ENV,
@@ -88,6 +88,13 @@ interface AdoPrDeps {
   readonly http?: AdoHttp
   /** The Personal Access Token; defaults to `process.env.AZURE_DEVOPS_EXT_PAT`. */
   readonly pat?: string
+  /**
+   * A specific PR id to claim, from `claim <pr>`. When set, `claimNext` fetches
+   * that one PR directly (bypassing the role/identity filter and the dedup
+   * ledger) and drives it even with no outstanding attention signal. The fork
+   * skip (threat model T10) still holds.
+   */
+  readonly target?: number
   /** Clock injection for ledger stamps; defaults to the real time. */
   readonly now?: () => string
 }
@@ -166,10 +173,97 @@ export const makeAdoPrSource = (deps: AdoPrDeps): WorkSource => {
     }
   }
 
+  /** Normalize one ADO PR into the ledger's `PrSnapshot` (checks + comments are per-PR REST calls). */
+  const buildSnapshot = async (pr: z.infer<typeof AdoPrListSchema>[number], watermark: string): Promise<PrSnapshot> => {
+    const number = pr.pullRequestId
+    const enabled = binding.triggers
+    const repositoryId = pr.repository?.id || pr.repository?.name || ""
+    const comments = enabled.includes("new-comments") ? await threadComments(repositoryId, number) : []
+    return {
+      number,
+      title: pr.title,
+      headRefName: stripRef(pr.sourceRefName),
+      baseRefName: stripRef(pr.targetRefName),
+      headRefOid: pr.lastMergeSourceCommit?.commitId ?? "",
+      mergeable: (pr.mergeStatus ?? "").toLowerCase() === "conflicts" ? "CONFLICTING" : "MERGEABLE",
+      reviewDecision: (pr.reviewers ?? []).some((r) => r.vote < 0) ? "CHANGES_REQUESTED" : "",
+      failingChecks: enabled.includes("failing-checks") ? await failingPolicies(pr.repository?.project?.id ?? "", number) : [],
+      newComments: comments.filter((c) => !sameLogin(c.author, login) && newerThan(c.at, watermark)),
+    }
+  }
+
+  /**
+   * Claim one explicitly-named PR (`claim <pr>`), overriding the poller's
+   * heuristics: fetch it directly, skip the role/identity filter and the dedup
+   * ledger, and drive it even with no outstanding attention signal. The fork
+   * skip is a security invariant (T10), so it still refuses.
+   */
+  const claimSpecific = async (target: number): ReturnType<WorkSource["claimNext"]> => {
+    if (!pat) {
+      return {
+        item: null,
+        skip: {
+          message:
+            `${kind}: Azure DevOps PAT not set — export ${PAT_ENV} with a token that has Code (read) scope so the ` +
+            `sitter can call the ADO REST API.`,
+          actionable: true,
+        } satisfies ClaimSkipReason,
+      }
+    }
+    const out = await get(`${org}/${project}/_apis/git/pullrequests/${target}?${API_VERSION}`)
+    if (!out.ok) {
+      return {
+        item: null,
+        skip: {
+          message: `${kind}: PR #${target} not found or not accessible — HTTP ${out.status} ${out.statusText}.`,
+          actionable: true,
+        } satisfies ClaimSkipReason,
+      }
+    }
+    let pr: z.infer<typeof AdoPrListSchema>[number]
+    try {
+      pr = AdoPrListSchema.element.parse(JSON.parse(out.body || "{}"))
+    } catch (err) {
+      return {
+        item: null,
+        skip: { message: `${kind}: could not parse the ADO response for PR #${target} — ${(err as Error).message}`, actionable: true },
+      }
+    }
+    // Fork PRs are refused for every role even when named (threat model T10).
+    if (pr.forkSource != null) {
+      return {
+        item: null,
+        skip: { message: `${kind}: PR #${target} is from a fork — refusing to claim it (untrusted head, threat model T10).`, actionable: true },
+      }
+    }
+    if (!pr.lastMergeSourceCommit?.commitId) {
+      return {
+        item: null,
+        skip: { message: `${kind}: PR #${target} has no evaluated head commit yet — try again once its merge is evaluated.`, actionable: true },
+      }
+    }
+    // Watermark "" surfaces every non-self comment, and an empty ledger surfaces
+    // every raw signal — a forced claim ignores what prior polls handled.
+    const snapshot = await buildSnapshot(pr, "")
+    const triggers = attentionTriggers(snapshot, emptyLedger(target, now()), binding.triggers)
+    if (!(await markers.claim(target))) {
+      return { item: null, skip: { message: `${kind}: claim marker held for pr-${target}`, actionable: true } }
+    }
+    if (!(await fetchHead($, directory, snapshot.headRefName))) {
+      await markers.release(target)
+      return {
+        item: null,
+        skip: { message: `${kind}: could not fetch ${snapshot.headRefName} for PR #${target} — skipping`, actionable: true },
+      }
+    }
+    return { item: prWorkItem(loaded, "ado", snapshot, triggers), skip: null }
+  }
+
   return {
     workflowKind: kind,
 
     async claimNext() {
+      if (deps.target != null) return claimSpecific(deps.target)
       if (!pat) {
         return {
           item: null,
@@ -257,28 +351,11 @@ export const makeAdoPrSource = (deps: AdoPrDeps): WorkSource => {
           continue
         }
         const number = pr.pullRequestId
-        const headRefOid = pr.lastMergeSourceCommit?.commitId ?? ""
         // No head SHA yet (merge evaluation queued / never run): the snapshot
         // isn't ready — a "" head would poison the ledger's dedup. Next poll.
-        if (!headRefOid) continue
+        if (!pr.lastMergeSourceCommit?.commitId) continue
         const ledger = await loadLedger(client, directory, tasksDir, kind, number, now())
-        const watermark = ledger.lastCommentAtHandled ?? ""
-        const enabled = binding.triggers
-        const repositoryId = pr.repository?.id || pr.repository?.name || ""
-        const comments = enabled.includes("new-comments") ? await threadComments(repositoryId, number) : []
-        const snapshot: PrSnapshot = {
-          number,
-          title: pr.title,
-          headRefName: stripRef(pr.sourceRefName),
-          baseRefName: stripRef(pr.targetRefName),
-          headRefOid,
-          mergeable: (pr.mergeStatus ?? "").toLowerCase() === "conflicts" ? "CONFLICTING" : "MERGEABLE",
-          reviewDecision: (pr.reviewers ?? []).some((r) => r.vote < 0) ? "CHANGES_REQUESTED" : "",
-          failingChecks: enabled.includes("failing-checks")
-            ? await failingPolicies(pr.repository?.project?.id ?? "", number)
-            : [],
-          newComments: comments.filter((c) => !sameLogin(c.author, login) && newerThan(c.at, watermark)),
-        }
+        const snapshot = await buildSnapshot(pr, ledger.lastCommentAtHandled ?? "")
         const triggers = attentionTriggers(snapshot, ledger, binding.triggers)
         if (triggers.length === 0) continue
         if (!(await markers.claim(number))) {
