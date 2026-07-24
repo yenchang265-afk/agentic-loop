@@ -155,16 +155,6 @@ Direct, thoughtful, slightly provocative. You're a sharp thinking partner, not a
 
 Read `examples.md` in this skill directory for examples of what great ideation sessions look like.
 
-## Red Flags
-
-- Generating 20+ shallow variations instead of 5-8 considered ones
-- Skipping the "who is this for" question
-- No assumptions surfaced before committing to a direction
-- Yes-machining weak ideas instead of pushing back with specificity
-- Producing a plan without a "Not Doing" list
-- Ignoring existing codebase constraints when ideating inside a project
-- Jumping straight to Phase 3 output without running Phases 1 and 2
-
 ## Verification
 
 After completing an ideation session:
