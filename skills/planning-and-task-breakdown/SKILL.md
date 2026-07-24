@@ -1,6 +1,6 @@
 ---
 name: planning-and-task-breakdown
-description: Breaks work into ordered tasks. Use when you have a spec or clear requirements and need to break work into implementable tasks. Use when a task feels too large to start, when you need to estimate scope, or when parallel work is possible.
+description: Breaks work into small, verifiable, dependency-ordered tasks. Use when a spec needs decomposing, a task feels too large to start, or work could run in parallel.
 ---
 
 # Planning and Task Breakdown
@@ -204,18 +204,12 @@ When multiple agents or sessions are available:
 | Rationalization | Reality |
 |---|---|
 | "I'll figure it out as I go" | That's how you end up with a tangled mess and rework. 10 minutes of planning saves hours. |
-| "The tasks are obvious" | Write them down anyway. Explicit tasks surface hidden dependencies and forgotten edge cases. |
-| "Planning is overhead" | Planning is the task. Implementation without a plan is just typing. |
 | "I can hold it all in my head" | Context windows are finite. Written plans survive session boundaries and compaction. |
 
 ## Red Flags
 
-- Starting implementation without a written task list
 - Tasks that say "implement the feature" without acceptance criteria
-- No verification steps in the plan
 - All tasks are XL-sized
-- No checkpoints between tasks
-- Dependency order isn't considered
 
 ## Verification
 

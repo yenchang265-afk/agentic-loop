@@ -1,6 +1,6 @@
 ---
 name: frontend-ui-engineering
-description: Builds production-quality UIs. Use when building or modifying user-facing interfaces. Use when creating components, implementing layouts, managing state, or when the output needs to look and feel production-quality rather than AI-generated.
+description: Builds production-quality, accessible UIs free of the generic AI aesthetic. Use when creating or modifying user-facing components, layouts, or interactions.
 ---
 
 # Frontend UI Engineering
@@ -166,58 +166,13 @@ Don't skip heading levels. Don't use heading styles for non-heading content.
 
 Every component must meet these standards:
 
-### Keyboard Navigation
+### The Non-Negotiables
 
-```tsx
-// Every interactive element must be keyboard accessible
-<button onClick={handleClick}>Click me</button>        // ✓ Focusable by default
-<div onClick={handleClick}>Click me</div>               // ✗ Not focusable
-<div role="button" tabIndex={0} onClick={handleClick}    // ✓ But prefer <button>
-     onKeyDown={e => {
-       if (e.key === 'Enter') handleClick();
-       if (e.key === ' ') e.preventDefault();
-     }}
-     onKeyUp={e => {
-       if (e.key === ' ') handleClick();
-     }}>
-  Click me
-</div>
-```
+Copy-ready HTML/ARIA patterns live in `references/accessibility-checklist.md`:
 
-### ARIA Labels
-
-```tsx
-// Label interactive elements that lack visible text
-<button aria-label="Close dialog"><XIcon /></button>
-
-// Label form inputs
-<label htmlFor="email">Email</label>
-<input id="email" type="email" />
-
-// Or use aria-label when no visible label exists
-<input aria-label="Search tasks" type="search" />
-```
-
-### Focus Management
-
-```tsx
-// Move focus when content changes
-function Dialog({ isOpen, onClose }: DialogProps) {
-  const closeRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    if (isOpen) closeRef.current?.focus();
-  }, [isOpen]);
-
-  // Trap focus inside dialog when open
-  return (
-    <dialog open={isOpen}>
-      <button ref={closeRef} onClick={onClose}>Close</button>
-      {/* dialog content */}
-    </dialog>
-  );
-}
-```
+- **Keyboard**: every interactive element is a real `<button>`/`<a>`/input — focusable and key-operable for free. A `div` with `onClick` needs `role`, `tabIndex`, and both Enter and Space handling; use the element instead.
+- **Labels**: a visible `<label htmlFor>` for every form input; `aria-label` on icon-only controls.
+- **Focus**: when content changes, focus moves with it — a dialog focuses its first actionable element on open and traps focus while open.
 
 ### Meaningful Empty and Error States
 
@@ -268,29 +223,9 @@ function TaskListSkeleton() {
     </div>
   );
 }
-
-// Optimistic updates for perceived speed
-function useToggleTask() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: toggleTask,
-    onMutate: async (taskId) => {
-      await queryClient.cancelQueries({ queryKey: ['tasks'] });
-      const previous = queryClient.getQueryData(['tasks']);
-
-      queryClient.setQueryData(['tasks'], (old: Task[]) =>
-        old.map(t => t.id === taskId ? { ...t, done: !t.done } : t)
-      );
-
-      return { previous };
-    },
-    onError: (_err, _taskId, context) => {
-      queryClient.setQueryData(['tasks'], context?.previous);
-    },
-  });
-}
 ```
+
+For perceived speed, apply optimistic updates: mutate the cache in `onMutate`, roll back from the snapshot in `onError` (React Query's `setQueryData` / `context.previous` pattern).
 
 ## See Also
 
@@ -301,19 +236,14 @@ For detailed accessibility requirements and testing tools, see `references/acces
 | Rationalization | Reality |
 |---|---|
 | "Accessibility is a nice-to-have" | It's a legal requirement in many jurisdictions and an engineering quality standard. |
-| "We'll make it responsive later" | Retrofitting responsive design is 3x harder than building it from the start. |
 | "The design isn't final, so I'll skip styling" | Use the design system defaults. Unstyled UI creates a broken first impression for reviewers. |
-| "This is just a prototype" | Prototypes become production code. Build the foundation right. |
-| "The AI aesthetic is fine for now" | It signals low quality. Use the project's actual design system from the start. |
 
 ## Red Flags
 
 - Components with more than 200 lines (split them)
 - Inline styles or arbitrary pixel values
 - Missing error states, loading states, or empty states
-- No keyboard navigation testing
 - Color as the sole indicator of state (red/green without text or icons)
-- Generic "AI look" (purple gradients, oversized cards, stock layouts)
 
 ## Verification
 
@@ -321,7 +251,7 @@ After building UI:
 
 - [ ] Component renders without console errors
 - [ ] All interactive elements are keyboard accessible (Tab through the page)
-- [ ] Screen reader can convey the page's content and structure
+- [ ] Every interactive element exposes an accessible name in the a11y tree; headings run h1→h2→h3 with no skips
 - [ ] Responsive: works at 320px, 768px, 1024px, 1440px
 - [ ] Loading, error, and empty states all handled
 - [ ] Follows the project's design system (spacing, colors, typography)

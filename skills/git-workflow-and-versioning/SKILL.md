@@ -1,6 +1,6 @@
 ---
 name: git-workflow-and-versioning
-description: Structures git workflow practices. Use when making any code change. Use when committing, branching, resolving conflicts, or when you need to organize work across multiple parallel streams.
+description: Structures commits as save points: atomic, descriptive, reviewable. Use when committing, branching, resolving conflicts, or organizing parallel work streams.
 ---
 
 # Git Workflow and Versioning
@@ -110,13 +110,7 @@ git commit -m "refactor validation and add phone number field"
 
 ### 5. Size Your Changes
 
-Target ~100 lines per commit/PR. Changes over ~1000 lines should be split. See the splitting strategies in `code-review-and-quality` for how to break down large changes.
-
-```
-~100 lines  → Easy to review, easy to revert
-~300 lines  → Acceptable for a single logical change
-~1000 lines → Split into smaller changes
-```
+Target ~100 lines per commit/PR; split changes over ~1000. The size thresholds and splitting strategies live in `code-review-and-quality` → Change Sizing.
 
 ## Branching Strategy
 
@@ -250,11 +244,8 @@ Automate this with git hooks:
 ## Using Git for Debugging
 
 ```bash
-# Find which commit introduced a bug
-git bisect start
-git bisect bad HEAD
-git bisect good <known-good-commit>
-# Git checkouts midpoints; run your test at each to narrow down
+# Find which commit introduced a bug: git bisect — full recipe in
+# debugging-and-error-recovery → Localize
 
 # View what changed recently
 git log --oneline -20
@@ -272,18 +263,11 @@ git log --grep="validation" --oneline
 | Rationalization | Reality |
 |---|---|
 | "I'll commit when the feature is done" | One giant commit is impossible to review, debug, or revert. Commit each slice. |
-| "The message doesn't matter" | Messages are documentation. Future you (and future agents) will need to understand what changed and why. |
 | "I'll squash it all later" | Squashing destroys the development narrative. Prefer clean incremental commits from the start. |
-| "Branches add overhead" | Short-lived branches are free and prevent conflicting work from colliding. Long-lived branches are the problem — merge within 1-3 days. |
-| "I'll split this change later" | Large changes are harder to review, riskier to deploy, and harder to revert. Split before submitting, not after. |
-| "I don't need a .gitignore" | Until `.env` with production secrets gets committed. Set it up immediately. |
 
 ## Red Flags
 
-- Large uncommitted changes accumulating
 - Commit messages like "fix", "update", "misc"
-- Formatting changes mixed with behavior changes
-- No `.gitignore` in the project
 - Committing `node_modules/`, `.env`, or build artifacts
 - Long-lived branches that diverge significantly from main
 - Force-pushing to shared branches
