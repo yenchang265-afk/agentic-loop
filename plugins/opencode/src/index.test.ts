@@ -131,6 +131,24 @@ test("fallback hooks surface the load error on agentic-workflow commands only", 
   assert.equal(logs.length, 1, "the load failure must also be logged")
 })
 
+test("fallback hooks replace the rendered template so the model can't run it as a prompt", async () => {
+  // The toast is TUI-only. Without this the command markdown still reaches the
+  // model and a gate verb becomes a plain prompt — the exact failure index.ts
+  // documents ("reports a task-file move that never happened").
+  const { client } = makeFallbackClient()
+  const hooks = loadFailureHooks(new Error("Cannot find module x"), client)
+  const parts = [{ id: "p", sessionID: "s", messageID: "m", type: "text", text: "approve the task and move its file" }]
+
+  await hooks["command.execute.before"]?.(
+    { command: "agentic-workflow:engineering", sessionID: "ses_x", arguments: "approve f7k3" } as never,
+    { parts } as never,
+  )
+
+  assert.ok(!parts[0]!.text.includes("move its file"), "the original template must not survive")
+  assert.match(parts[0]!.text, /did NOT run this command/)
+  assert.match(parts[0]!.text, /Cannot find module x/, "the model must be able to relay the real cause")
+})
+
 test("fallback hooks never throw when the client itself is broken", async () => {
   const broken = {
     tui: { showToast: () => Promise.reject(new Error("tui down")) },
