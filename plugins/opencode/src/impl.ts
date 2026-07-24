@@ -2,7 +2,7 @@ import type { Plugin } from "@opencode-ai/plugin"
 import path from "node:path"
 import { tool } from "@opencode-ai/plugin"
 import { DEFAULT_CONFIG, applyAdoPatEnv, loadConfig } from "./config.ts"
-import { enabledWorkflowKinds } from "@agentic-workflow/core/config"
+import { enabledWorkflowKinds, ignoredUserConfigPaths, resolveUserConfigPath } from "@agentic-workflow/core/config"
 import type { Config } from "./config.ts"
 import * as driver from "./workflow/driver.ts"
 import { overrideCommandPrompt, refusalPrompt } from "./command-prompt.ts"
@@ -80,7 +80,30 @@ export const makeAgenticWorkflow: Plugin = async ({ client, directory, $ }) => {
     // Export ado.pat → AZURE_DEVOPS_EXT_PAT (when unset) so the sitter's
     // stage-agent curl calls inherit it; the env var always wins.
     applyAdoPatEnv(config)
+    await warnIgnoredUserConfigOnce()
     return config
+  }
+
+  // Only ONE user-scope file is ever read, so a second one is dead weight that
+  // looks live — its settings just never apply, which reads as "the feature is
+  // broken", not "the file is ignored". Core logs it; the log file is not where
+  // someone chasing this looks, so toast it too. Once per session: the cause is
+  // a stale file on disk, and repeating it on every command is noise.
+  let warnedIgnoredUserConfig = false
+  const warnIgnoredUserConfigOnce = async (): Promise<void> => {
+    if (warnedIgnoredUserConfig) return
+    const inEffect = resolveUserConfigPath()
+    const ignored = ignoredUserConfigPaths(inEffect)
+    if (ignored.length === 0) return
+    warnedIgnoredUserConfig = true
+    await client.tui
+      .showToast({
+        body: {
+          message: `agentic-workflow: ${ignored.join(" and ")} ${ignored.length > 1 ? "are" : "is"} NOT being read — the user-scope config in effect is ${inEffect}. Only one user-scope file loads; move your settings there.`,
+          variant: "warning",
+        },
+      })
+      .catch(() => {})
   }
   const getConfig = (): Promise<Config> => (configPromise ??= readConfig())
 

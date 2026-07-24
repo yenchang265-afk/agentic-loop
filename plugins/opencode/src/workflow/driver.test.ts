@@ -8,6 +8,7 @@ import type { Config } from "../config.ts"
 import {
   abortedSessionID,
   claimSkipReason,
+  configSources,
   deriveActivity,
   drive,
   handleApprove,
@@ -1623,4 +1624,32 @@ test("lenses: a stop mid-pass returns quietly — no ERROR, no retry, no warn", 
   assert.equal(result.record, null)
   assert.equal(calls(), 1, "no retry and no further lens passes after a stop")
   assert.ok(!warns.some((w) => /stopping with ERROR/.test(w)), `unexpected warn: ${warns.join(" | ")}`)
+})
+
+// --- configSources: the `kinds` toast names which config files are in effect ---
+
+const withUserConfig = <T>(value: string | undefined, fn: () => T): T => {
+  const orig = process.env.AGENTIC_WORKFLOW_USER_CONFIG
+  if (value === undefined) delete process.env.AGENTIC_WORKFLOW_USER_CONFIG
+  else process.env.AGENTIC_WORKFLOW_USER_CONFIG = value
+  try {
+    return fn()
+  } finally {
+    if (orig === undefined) delete process.env.AGENTIC_WORKFLOW_USER_CONFIG
+    else process.env.AGENTIC_WORKFLOW_USER_CONFIG = orig
+  }
+}
+
+test("configSources names both layers so a kind that reads as disabled is traceable to a file", () => {
+  const line = withUserConfig("/nowhere/user-wf.json", () => configSources())
+  assert.match(line, /\.agentic-workflow\.json \(repo, wins\)/)
+  assert.match(line, /\/nowhere\/user-wf\.json/)
+  assert.match(line, /\(absent\)/, "a user path that does not exist must say so, not look loaded")
+})
+
+test("configSources reports a disabled user layer rather than naming a phantom path", () => {
+  assert.match(
+    withUserConfig("", () => configSources()),
+    /user-scope layer is disabled/,
+  )
 })

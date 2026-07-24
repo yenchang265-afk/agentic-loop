@@ -332,6 +332,37 @@ export const resolveUserConfigPath = (): string | null => {
   return primary
 }
 
+/**
+ * User-scope config files that EXIST but are not the one being read.
+ *
+ * Exactly one user-scope file is ever loaded — the layering is user-under-repo,
+ * not user-under-user — so a second one is dead weight that looks live. Two
+ * ways to land here, both silent and both indistinguishable from "my setting
+ * doesn't work":
+ *
+ * - **Shadowed:** once the XDG file exists (the hub's Config tab writes it),
+ *   `~/.agentic-workflow.json` is ignored WHOLESALE, not merged under it.
+ * - **Misnamed:** the two locations use different file names — dotted
+ *   `~/.agentic-workflow.json` but undotted `…/agentic-workflow/agentic-workflow.json`.
+ *   Writing the repo-style dotted name into the XDG dir resolves to nothing.
+ *
+ * Callers report these; a config that is quietly not read is the hardest
+ * possible misconfig to diagnose from the symptom. Pure apart from `fs.existsSync`.
+ */
+export const ignoredUserConfigPaths = (chosen: string | null): string[] => {
+  if (chosen === null) return [] // layer explicitly disabled — nothing is "ignored"
+  const home = os.homedir()
+  if (!home) return []
+  const candidates = [
+    path.join(home, LEGACY_USER_CONFIG_FILE),
+    path.join(xdgConfigHome(home), ...USER_CONFIG_SUBPATH),
+    // The repo-style dotted name inside the XDG dir: the intuitive guess, and
+    // it is never read at any layer.
+    path.join(xdgConfigHome(home), USER_CONFIG_SUBPATH[0], CONFIG_FILE),
+  ]
+  return candidates.filter((p) => p !== chosen && fs.existsSync(p))
+}
+
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v)
 
@@ -451,6 +482,23 @@ export const loadConfigWith = async <T>(
 ): Promise<T> => {
   const userPath = opts?.userConfigPath === undefined ? resolveUserConfigPath() : opts.userConfigPath
   const userRaw = userPath ? readUserLayer(userPath) : undefined
+
+  // A user-scope file sitting at a path nobody reads is invisible: the setting
+  // it holds simply never applies, with nothing to distinguish that from the
+  // feature being broken. Say so.
+  for (const ignored of ignoredUserConfigPaths(userPath)) {
+    await client.app
+      .log({
+        body: {
+          service: "agentic-workflow",
+          level: "warn",
+          message: `${ignored} is NOT being read — the user-scope config in effect is ${userPath}. Only one user-scope file is loaded (they are not merged with each other); move the settings you want into ${userPath}.`,
+        },
+      })
+      .catch(() => {
+        /* the load matters, the warning is best-effort */
+      })
+  }
 
   const res = await client.file.read({ query: { path: CONFIG_FILE, directory } })
   const content = res.data?.content

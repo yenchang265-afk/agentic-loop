@@ -10,6 +10,7 @@ import {
   DEFAULT_CONFIG,
   defaultTrackerSystem,
   enabledWorkflowKinds,
+  ignoredUserConfigPaths,
   loadConfig,
   mergeConfigLayers,
   modelFor,
@@ -481,6 +482,31 @@ test("loadConfig: superRefine validates the combined view (org/selfLogin from us
   )
 })
 
+test("a kind enabled ONLY in the user layer is enabled, whatever the repo layer says about workflows", async () => {
+  // The repo layer must not have to repeat `enabled: true` for a kind the user
+  // turned on globally. Every shape of repo `workflows` key is covered because
+  // a shallow merge would break exactly the ones that mention the section.
+  const user = JSON.stringify({ workflows: { "pr-sitter": { enabled: true, query: "is:open author:@me" } } })
+  for (const repo of [
+    undefined,
+    JSON.stringify({ tasksDir: "docs/tasks" }),
+    JSON.stringify({ workflows: {} }),
+    JSON.stringify({ workflows: { engineering: { enabled: true } } }),
+    JSON.stringify({ workflows: { "pr-sitter": { query: "is:open" } } }), // repo names the kind but not `enabled`
+  ]) {
+    const c = await loadConfig(stubClient(repo), "/repo", { userConfigPath: tempUserFile(user) })
+    assert.ok(enabledWorkflowKinds(c).includes("pr-sitter"), `user-scope enable lost with repo layer: ${repo ?? "(none)"}`)
+  }
+})
+
+test("the repo layer can still disable a kind the user layer enabled (repo wins field by field)", async () => {
+  const userPath = tempUserFile(JSON.stringify({ workflows: { "pr-sitter": { enabled: true } } }))
+  const c = await loadConfig(stubClient(JSON.stringify({ workflows: { "pr-sitter": { enabled: false } } })), "/repo", {
+    userConfigPath: userPath,
+  })
+  assert.ok(!enabledWorkflowKinds(c).includes("pr-sitter"))
+})
+
 test("loadConfig: user-only, repo-only, and neither", async () => {
   const userPath = tempUserFile(JSON.stringify({ maxIterations: 9 }))
   const userOnly = await loadConfig(stubClient(undefined), "/repo", { userConfigPath: userPath })
@@ -629,6 +655,49 @@ test("resolveUserConfigPath prefers the XDG path over legacy when both exist", (
   fs.writeFileSync(xdgPath, "{}")
   withUserConfigEnv(home, {}, () => {
     assert.equal(resolveUserConfigPath(), xdgPath)
+  })
+})
+
+// --- ignoredUserConfigPaths: user-scope files that exist but are never read --
+
+test("a shadowed legacy file is reported as ignored (it is NOT merged under the XDG one)", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "wf-home-"))
+  const legacy = path.join(home, ".agentic-workflow.json")
+  fs.writeFileSync(legacy, JSON.stringify({ workflows: { "pr-sitter": { enabled: true } } }))
+  const xdgPath = path.join(home, ".config", "agentic-workflow", "agentic-workflow.json")
+  fs.mkdirSync(path.dirname(xdgPath), { recursive: true })
+  fs.writeFileSync(xdgPath, "{}")
+  withUserConfigEnv(home, {}, () => {
+    assert.deepEqual(ignoredUserConfigPaths(resolveUserConfigPath()), [legacy])
+  })
+})
+
+test("the repo-style dotted name inside the XDG dir is reported — it is read at no layer", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "wf-home-"))
+  const dir = path.join(home, ".config", "agentic-workflow")
+  fs.mkdirSync(dir, { recursive: true })
+  const misnamed = path.join(dir, ".agentic-workflow.json") // dotted: the intuitive guess
+  fs.writeFileSync(misnamed, JSON.stringify({ workflows: { "pr-sitter": { enabled: true } } }))
+  withUserConfigEnv(home, {}, () => {
+    assert.deepEqual(ignoredUserConfigPaths(resolveUserConfigPath()), [misnamed])
+  })
+})
+
+test("nothing is reported when the only user-scope file present is the one being read", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "wf-home-"))
+  const legacy = path.join(home, ".agentic-workflow.json")
+  fs.writeFileSync(legacy, "{}")
+  withUserConfigEnv(home, {}, () => {
+    assert.equal(resolveUserConfigPath(), legacy)
+    assert.deepEqual(ignoredUserConfigPaths(legacy), [], "the file in effect must never report itself")
+  })
+})
+
+test("a disabled user layer reports nothing (there is no layer to be shadowed)", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "wf-home-"))
+  fs.writeFileSync(path.join(home, ".agentic-workflow.json"), "{}")
+  withUserConfigEnv(home, { AGENTIC_WORKFLOW_USER_CONFIG: "" }, () => {
+    assert.deepEqual(ignoredUserConfigPaths(resolveUserConfigPath()), [])
   })
 })
 

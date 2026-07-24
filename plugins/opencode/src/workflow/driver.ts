@@ -89,7 +89,15 @@ import {
   type VerdictRecord,
   worstOf,
 } from "@agentic-workflow/core/workflow/verdict"
-import { enabledWorkflowKinds, modelFor, triggerFor, unknownStageModelKeys, unreviewedAxes } from "@agentic-workflow/core/config"
+import {
+  enabledWorkflowKinds,
+  ignoredUserConfigPaths,
+  modelFor,
+  resolveUserConfigPath,
+  triggerFor,
+  unknownStageModelKeys,
+  unreviewedAxes,
+} from "@agentic-workflow/core/config"
 import type { Config } from "../config.ts"
 import { armCron, armIdle, armPoll, claimsOnIdle, cronError, type TriggerMode, type WatchTimerHandle } from "./trigger.js"
 import type { Action, WorkflowState, Stage, TaskRef } from "@agentic-workflow/core/workflow/state"
@@ -1687,6 +1695,25 @@ const splitVerb = (arg: string): { verb: string; rest: string } => {
 /** Parse and handle a `/agentic-workflow:<kind> ...` command. Engineering gets the
  *  full backlog lifecycle; every other kind gets the minimal watcher verb set
  *  (claim · watch · unwatch · stop · status), scoped to that kind. */
+/**
+ * The config files actually in effect, for the `kinds` toast.
+ *
+ * Worth spelling out because the user-scope layer has three silent ways to miss:
+ * only ONE user-scope file is ever read (the two locations are not merged with
+ * each other), the two locations use DIFFERENT file names (dotted
+ * `~/.agentic-workflow.json` vs undotted `…/agentic-workflow/agentic-workflow.json`),
+ * and a path that resolves to a non-existent file just leaves the layer absent.
+ * Each looks identical to "the setting I wrote has no effect".
+ */
+export const configSources = (): string => {
+  const user = resolveUserConfigPath()
+  if (user === null) return `Config: .agentic-workflow.json (repo) only — the user-scope layer is disabled.`
+  const state = fs.existsSync(user) ? "" : " (absent)"
+  const ignored = ignoredUserConfigPaths(user)
+  const base = `Config: .agentic-workflow.json (repo, wins) over ${user}${state} (user).`
+  return ignored.length ? `${base} NOT read: ${ignored.join(", ")} — move those settings into ${user}.` : base
+}
+
 export const handleCommand = async (
   deps: Deps,
   sessionID: string,
@@ -1740,11 +1767,10 @@ export const handleCommand = async (
         known = enabled
       }
       const parts = known.map((k) => (enabled.includes(k) ? `${k} (enabled)` : `${k} (disabled)`))
-      await toast(
-        client,
-        `Workflow kinds: ${parts.join(" · ")}. Toggle via workflows.<kind>.enabled in .agentic-workflow.json; each enabled kind has its own /agentic-workflow:<kind> command.`,
-        "info",
-      )
+      // `kinds` is where someone lands when a kind they enabled reads as
+      // disabled, and the usual cause is that the file they edited is not one
+      // of the two being read. Naming the actual sources answers that directly.
+      await toast(client, `Workflow kinds: ${parts.join(" · ")}. Toggle via workflows.<kind>.enabled. ${configSources()}`, "info")
       return
     }
   }
