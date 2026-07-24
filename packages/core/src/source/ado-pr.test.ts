@@ -105,6 +105,8 @@ type Opts = {
   pat?: string
   /** The kind under test; defaults to pr-sitter (author role). */
   loaded?: ReturnType<typeof loadManifest>
+  /** A specific PR id to force-claim (`claim <pr>`). */
+  target?: number
 }
 
 const source = (prs: unknown[], opts: Opts = {}) =>
@@ -122,6 +124,7 @@ const source = (prs: unknown[], opts: Opts = {}) =>
     ado: { organization: "https://dev.azure.com/acme", project: "widgets", selfLogin: "sitter@acme.com" },
     pat: opts.pat ?? "test-pat",
     now: () => "2026-07-05T00:00:00Z",
+    ...(opts.target != null ? { target: opts.target } : {}),
   })
 
 const failingPolicy: Route = {
@@ -482,4 +485,78 @@ test("hitting the page ceiling warns instead of silently truncating", async () =
   const warnings: string[] = []
   await pagedSource(5000, warnings).claimNext()
   assert.match(warnings.join("\n"), /truncat/i)
+})
+
+// --- targeted claim (`claim <pr>`): fetch one PR directly and force it ---
+
+const reviewer = loadManifest(WORKFLOWS_DIR, "review-sitter")
+
+test("targeted claim fetches the named PR via the single-PR endpoint, never the list", async () => {
+  const httpLog: string[] = []
+  const shellLog: string[] = []
+  const { item, skip } = await source([], {
+    target: 7,
+    httpLog,
+    shellLog,
+    routes: [{ match: "/pullrequests/7", body: JSON.stringify(pr()) }, failingPolicy],
+  }).claimNext()
+  assert.equal(skip, null)
+  assert.equal(item?.id, "pr-7")
+  assert.equal(item?.state.platform, "ado")
+  assert.ok(httpLog.some((u) => u.includes("/pullrequests/7")), "did not fetch the single PR")
+  assert.ok(!httpLog.some((u) => u.includes("/pullrequests?searchCriteria")), "targeted claim must not list")
+  assert.ok(shellLog.some((c) => c.includes(".claims/pr-7")), "claim marker not placed")
+})
+
+test("targeted claim forces an already-handled PR (bypasses the dedup ledger)", async () => {
+  const ledgers = {
+    "docs/tasks/runs/pr-sitter/pr-7.json": JSON.stringify({
+      pr: 7,
+      headShaHandled: "sha-1",
+      failedAttempts: [],
+      updatedAt: "2026-07-04T00:00:00Z",
+    }),
+  }
+  const { item, skip } = await source([], {
+    target: 7,
+    ledgers,
+    routes: [{ match: "/pullrequests/7", body: JSON.stringify(pr()) }],
+  }).claimNext()
+  assert.equal(skip, null)
+  assert.equal(item?.id, "pr-7")
+  assert.match(item?.state.goal ?? "", /manually claimed/)
+})
+
+test("targeted claim forces a reviewer-role claim regardless of the identity filter", async () => {
+  // A PR authored by the sitter itself would be skipped by the reviewer-role
+  // filter in a normal poll; a targeted claim drives it anyway.
+  const { item, skip } = await source([], {
+    target: 7,
+    loaded: reviewer,
+    routes: [{ match: "/pullrequests/7", body: JSON.stringify(pr()) }],
+  }).claimNext()
+  assert.equal(skip, null)
+  assert.equal(item?.id, "pr-7")
+  assert.equal(item?.workflowKind, "review-sitter")
+  assert.match(item?.state.goal ?? "", /one structured review comment/)
+})
+
+test("targeted claim still refuses a fork PR (threat model T10)", async () => {
+  const { item, skip } = await source([], {
+    target: 7,
+    routes: [{ match: "/pullrequests/7", body: JSON.stringify(pr({ forkSource: { repository: { id: "x" } } })) }],
+  }).claimNext()
+  assert.equal(item, null)
+  assert.match(skip?.message ?? "", /fork/)
+  assert.equal(skip?.actionable, true)
+})
+
+test("targeted claim reports an actionable skip when the PR is not found", async () => {
+  const { item, skip } = await source([], {
+    target: 999,
+    routes: [{ match: "/pullrequests/999", status: 404 }],
+  }).claimNext()
+  assert.equal(item, null)
+  assert.match(skip?.message ?? "", /PR #999 not found or not accessible/)
+  assert.equal(skip?.actionable, true)
 })

@@ -17,6 +17,7 @@ import {
   handleReplan,
   manifestFor,
   onInterrupt,
+  parsePrTarget,
   parseWatchArgs,
   recordVerdict,
   findDrivingWorkflow,
@@ -83,6 +84,20 @@ test("watch rejects bad override arguments with usable errors", () => {
   assert.ok("error" in badPoll && /poll interval/i.test(badPoll.error))
   const bare = parseWatchArgs("weekly")
   assert.ok("error" in bare && /poll \[interval\], cron <schedule>, or idle/.test(bare.error))
+})
+
+test("parsePrTarget reads a bare number, a #-prefixed number, and a PR URL", () => {
+  assert.equal(parsePrTarget("42"), 42)
+  assert.equal(parsePrTarget("#42"), 42)
+  assert.equal(parsePrTarget("  7  "), 7)
+  assert.equal(parsePrTarget("https://github.com/o/r/pull/128"), 128)
+  assert.equal(parsePrTarget("https://dev.azure.com/acme/widgets/_git/repo/pullrequest/55"), 55)
+})
+
+test("parsePrTarget rejects junk, zero, and negatives", () => {
+  for (const bad of ["", "   ", "abc", "0", "-3", "4.5", "pr-7", "12x"]) {
+    assert.equal(parsePrTarget(bad), null, `expected null for ${JSON.stringify(bad)}`)
+  }
 })
 
 

@@ -76,7 +76,10 @@ const pr = (over: Record<string, unknown> = {}) => ({
   ...over,
 })
 
-const source = (prs: unknown[], opts: { ledgers?: Record<string, string>; script?: Cmd[]; log?: string[]; warns?: string[] } = {}) =>
+const source = (
+  prs: unknown[],
+  opts: { ledgers?: Record<string, string>; script?: Cmd[]; log?: string[]; warns?: string[]; target?: number } = {},
+) =>
   makeGithubPrSource({
     $: scriptedShell(
       [
@@ -92,6 +95,7 @@ const source = (prs: unknown[], opts: { ledgers?: Record<string, string>; script
     log: async (level, message) => void (level === "warn" && opts.warns?.push(message)),
     loaded: sitter,
     now: () => "2026-07-05T00:00:00Z",
+    ...(opts.target != null ? { target: opts.target } : {}),
   })
 
 test("claims a PR with failing checks: goal names the failure, state enters triage on the PR branch", async () => {
@@ -358,6 +362,128 @@ test("gh pr list is invoked with an explicit --limit", async () => {
   const list = log.find((c) => c.startsWith("gh pr list"))
   assert.ok(list, "no gh pr list invocation")
   assert.match(list, /--limit \d+/)
+})
+
+// --- targeted claim (`claim <pr>`): fetch one PR directly and force it ---
+
+test("targeted claim fetches the named PR via gh pr view, never gh pr list", async () => {
+  const log: string[] = []
+  const { item, skip } = await source([], {
+    target: 7,
+    log,
+    script: [{ cmd: "gh pr view 7", result: { stdout: JSON.stringify(pr()) } }],
+  }).claimNext()
+  assert.equal(skip, null)
+  assert.equal(item?.id, "pr-7")
+  assert.equal(item?.entryStage, "triage")
+  assert.ok(log.some((c) => c.startsWith("gh pr view 7")), "did not gh pr view the target")
+  assert.ok(!log.some((c) => c.startsWith("gh pr list")), "targeted claim must not gh pr list")
+  assert.ok(log.some((c) => c.includes(".claims/pr-7")), "claim marker not placed")
+  assert.ok(log.some((c) => c.startsWith("git -C /r fetch origin +refs/heads/feat/rate-limit")), "head not fetched")
+})
+
+test("targeted claim forces a PR with no attention signal, even one the ledger already handled", async () => {
+  // A green PR whose head is recorded as handled: the poller would skip it
+  // ("no PRs need attention"). Naming it explicitly claims and drives it anyway.
+  const ledgers = {
+    "docs/tasks/runs/pr-sitter/pr-7.json": JSON.stringify({
+      pr: 7,
+      headShaHandled: "sha-1",
+      failedAttempts: [],
+      updatedAt: "2026-07-04T00:00:00Z",
+    }),
+  }
+  const { item, skip } = await source([], {
+    target: 7,
+    ledgers,
+    script: [{ cmd: "gh pr view 7", result: { stdout: JSON.stringify(pr()) } }],
+  }).claimNext()
+  assert.equal(skip, null)
+  assert.equal(item?.id, "pr-7")
+  // No outstanding signal → the goal falls back to the manual-claim summary.
+  assert.match(item?.state.goal ?? "", /manually claimed/)
+})
+
+test("targeted claim still refuses a fork PR (untrusted head, threat model T10)", async () => {
+  const log: string[] = []
+  const { item, skip } = await source([], {
+    target: 7,
+    log,
+    script: [{ cmd: "gh pr view 7", result: { stdout: JSON.stringify(pr({ isCrossRepository: true })) } }],
+  }).claimNext()
+  assert.equal(item, null)
+  assert.match(skip?.message ?? "", /fork/)
+  assert.equal(skip?.actionable, true)
+  // Refused before any claim marker or fetch.
+  assert.ok(!log.some((c) => c.includes(".claims/pr-7")), "must not claim a fork PR")
+})
+
+test("targeted claim reports an actionable skip when the PR is not found", async () => {
+  const { item, skip } = await source([], {
+    target: 999,
+    script: [{ cmd: "gh pr view 999", result: { exitCode: 1, stderr: "no pull requests found" } }],
+  }).claimNext()
+  assert.equal(item, null)
+  assert.match(skip?.message ?? "", /PR #999 not found or not accessible/)
+  assert.equal(skip?.actionable, true)
+})
+
+test("targeted claim skips when the claim marker is already held", async () => {
+  const { item, skip } = await source([], {
+    target: 7,
+    script: [
+      { cmd: "gh pr view 7", result: { stdout: JSON.stringify(pr()) } },
+      // mkdir of the marker fails → already held by another watcher.
+      { cmd: "mkdir /r/docs/tasks/runs/pr-sitter/.claims/pr-7", result: { exitCode: 1 } },
+    ],
+  }).claimNext()
+  assert.equal(item, null)
+  assert.match(skip?.message ?? "", /claim marker held for pr-7/)
+})
+
+test("targeted claim releases the marker when the head fetch fails", async () => {
+  const log: string[] = []
+  const { item, skip } = await source([], {
+    target: 7,
+    log,
+    script: [
+      { cmd: "gh pr view 7", result: { stdout: JSON.stringify(pr()) } },
+      { cmd: "git -C /r fetch origin +refs/heads/feat/rate-limit", result: { exitCode: 1 } },
+      { cmd: "git -C /r fetch origin feat/rate-limit", result: { exitCode: 1 } },
+    ],
+  }).claimNext()
+  assert.equal(item, null)
+  assert.match(skip?.message ?? "", /could not fetch feat\/rate-limit/)
+  assert.ok(log.some((c) => c.startsWith("rmdir") && c.includes(".claims/pr-7")), "marker not released")
+})
+
+test("targeted review-sitter claim forces a fresh review pass on an already-reviewed head", async () => {
+  const ledgers = {
+    "docs/tasks/runs/review-sitter/pr-7.json": JSON.stringify({
+      pr: 7,
+      headShaHandled: "sha-1",
+      failedAttempts: [],
+      updatedAt: "2026-07-04T00:00:00Z",
+    }),
+  }
+  const src = makeGithubPrSource({
+    $: scriptedShell([
+      { cmd: "gh api user", result: { stdout: "sitter-bot\n" } },
+      { cmd: "gh pr view 7", result: { stdout: JSON.stringify(pr()) } },
+    ]),
+    client: ledgerClient(ledgers),
+    directory: "/r",
+    tasksDir: "docs/tasks",
+    log: () => {},
+    loaded: reviewer,
+    now: () => "2026-07-05T00:00:00Z",
+    target: 7,
+  })
+  const { item, skip } = await src.claimNext()
+  assert.equal(skip, null)
+  assert.equal(item?.id, "pr-7")
+  assert.equal(item?.entryStage, "fetch")
+  assert.match(item?.state.goal ?? "", /one structured review comment/)
 })
 
 test("a truncated PR page is reported, not silently dropped", async () => {

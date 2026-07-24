@@ -73,16 +73,20 @@ export interface WorkSourceDeps {
  * The work sources the scheduler polls, in claim-priority order (config
  * order). An `only` kind restricts the poll to that one kind (the claim/watch
  * kind filter); without it every enabled kind is polled, the always-on sitters
- * included. A typo'd or unavailable `workflows.<kind>` (the config schema is
- * an open record) must not throw here — that would abort the whole build and
- * take every OTHER enabled source (engineering included) down with it, so no
- * work ever gets claimed. Skip-and-warn the bad kind instead.
+ * included. A `target` (a PR number, from `claim <pr>`) is paired with a PR
+ * `only` kind — it makes the resulting pull-request source claim that exact PR,
+ * overriding the poller's heuristics; non-PR kinds ignore it. A typo'd or
+ * unavailable `workflows.<kind>` (the config schema is an open record) must not
+ * throw here — that would abort the whole build and take every OTHER enabled
+ * source (engineering included) down with it, so no work ever gets claimed.
+ * Skip-and-warn the bad kind instead.
  */
 export const buildWorkSources = (
   deps: WorkSourceDeps,
   config: Config,
   manifestFor: (kind: string) => LoadedManifest,
   only?: string,
+  target?: number,
 ): WorkSource[] =>
   enabledWorkflowKinds(config)
     .filter((kind) => !only || kind === only)
@@ -106,12 +110,13 @@ export const buildWorkSources = (
         loaded,
       }
       if (loaded.manifest.workSource.type === "pull-request") {
+        const targeting = target != null ? { target } : {}
         if (platformFor(config, kind) === "ado") {
           // Config parse fails fast when platform "ado" lacks the ado section.
-          return [makeAdoPrSource({ ...base, ado: config.ado! })]
+          return [makeAdoPrSource({ ...base, ado: config.ado!, ...targeting })]
         }
         const query = config.workflows[kind]?.["query"]
-        return [makeGithubPrSource({ ...base, ...(typeof query === "string" ? { query } : {}) })]
+        return [makeGithubPrSource({ ...base, ...(typeof query === "string" ? { query } : {}), ...targeting })]
       }
       if (loaded.manifest.workSource.type === "dependency-scan") {
         // Platform-agnostic (npm reports don't care which forge the repo lives
